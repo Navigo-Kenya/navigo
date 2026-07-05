@@ -24,6 +24,7 @@ module.exports = {
     ios: {
       usesAppleSignIn: true,
       bundleIdentifier: "com.navigo.ke",
+      appleTeamId: "R7YXJ7XRCN",
       associatedDomains: [
         "applinks:navigo.co.ke"
       ],
@@ -107,7 +108,6 @@ module.exports = {
       "@bacons/apple-targets",
       require("./plugins/withLiveActivity"),
       require("./plugins/withAndroidWidget"),
-      "@notifee/react-native",
       "expo-asset",
       "expo-router",
       "expo-secure-store",
