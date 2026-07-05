@@ -8,7 +8,8 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "APP_ENV": "development"
+        "APP_ENV": "development",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       },
       "android": {
         "buildType": "apk"
@@ -17,7 +18,8 @@
     "preview": {
       "distribution": "internal",
       "env": {
-        "APP_ENV": "preview"
+        "APP_ENV": "preview",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       },
       "android": {
         "buildType": "apk"
@@ -26,7 +28,8 @@
     "production": {
       "distribution": "store",
       "env": {
-        "APP_ENV": "production"
+        "APP_ENV": "production",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       },
       "autoIncrement": true
     }
