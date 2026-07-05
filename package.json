@@ -36,6 +36,7 @@
     "expo-asset": "~12.0.13",
     "expo-audio": "~1.1.1",
     "expo-auth-session": "~7.0.11",
+    "expo-build-properties": "~1.0.10",
     "expo-calendar": "~15.0.8",
     "expo-camera": "~17.0.10",
     "expo-clipboard": "~8.0.8",
@@ -63,6 +64,8 @@
     "expo-web-browser": "~15.0.7",
     "fuse.js": "^7.1.0",
     "lucide-react": "^0.544.0",
+    "navigo-live-activity": "file:./modules/navigo-live-activity",
+    "navigo-widget-data": "file:./modules/navigo-widget-data",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
@@ -75,8 +78,6 @@
     "react-native-svg": "15.12.1",
     "react-native-web": "~0.21.0",
     "react-native-worklets": "0.5.1",
-    "navigo-live-activity": "file:./modules/navigo-live-activity",
-    "navigo-widget-data": "file:./modules/navigo-widget-data",
     "zustand": "^5.0.8"
   },
   "devDependencies": {

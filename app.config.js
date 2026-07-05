@@ -104,6 +104,15 @@ module.exports = {
     },
 
     plugins: [
+      // Raise iOS deployment target — required by @notifee (iOS 15+) and ActivityKit (iOS 16.1+)
+      [
+        "expo-build-properties",
+        {
+          ios: {
+            deploymentTarget: "16.1",
+          },
+        },
+      ],
       // Phase 3 extension targets — iOS ActivityKit + WidgetKit, Android Glance widget
       "@bacons/apple-targets",
       require("./plugins/withLiveActivity"),
