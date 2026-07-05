@@ -11,6 +11,7 @@
 [![Mapbox](https://img.shields.io/badge/Maps-Mapbox%20GL-000000?style=flat-square&logo=mapbox&logoColor=white)](https://mapbox.com)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://typescriptlang.org)
 [![Platform](https://img.shields.io/badge/Platform-iOS%20%7C%20Android-success?style=flat-square)](https://expo.dev)
+[![GitHub](https://img.shields.io/badge/GitHub-navigo-181717?style=flat-square&logo=github)](https://github.com/Navigo-Kenya/navigo)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
 
 </div>
@@ -35,7 +36,7 @@
 
 ## Overview
 
-Navigo is the passenger-facing mobile app for the **Hopln** transit platform — a full journey-planning and live navigation experience built specifically for Nairobi's informal matatu/bus network.
+Navigo is the passenger-facing mobile app for Nairobi's informal matatu/bus network — a full journey-planning and live navigation experience built specifically for the city's fill-and-go transit reality.
 
 It covers the complete commute loop: search → plan → navigate → contribute — with an AI assistant (Kwame), gamified crowdsourcing, and a projection-based navigation engine that handles the fill-and-go reality of Nairobi transit better than schedule-only approaches.
 
@@ -262,10 +263,10 @@ Some features require a native build (not OTA-updatable):
 | AR walking guidance (`expo-camera`) | Code shipped | `expo run:android` / EAS |
 | App shortcuts (`expo-quick-actions`) | Code shipped | `expo run:android` / EAS |
 | Sentry native crash reporting | Code shipped | `expo run:android` / EAS |
-| iOS ActivityKit Live Activities | Code shipped | `eas build --profile phase3` + Apple Developer |
-| iOS WidgetKit home-screen widget | Code shipped | `eas build --profile phase3` + Apple Developer |
-| Android Glance widget | Code shipped | `eas build --profile phase3` |
-| Android notifee progress notification | Code shipped | `eas build --profile phase3` |
+| iOS ActivityKit Live Activities | Code shipped | `eas build --profile production` + Apple Developer |
+| iOS WidgetKit home-screen widget | Code shipped | `eas build --profile production` + Apple Developer |
+| Android Glance widget | Code shipped | `eas build --profile production` |
+| Android notifee progress notification | Code shipped | `eas build --profile production` |
 
 One rebuild activates AR, quick-actions, and Sentry together:
 
@@ -284,7 +285,7 @@ See [Navigo.md](../Navigo.md) for the full 20-feature roadmap with per-item stat
 |-------|--------|-------------|
 | 1 — Pure JS/PHP | ☑ Shipped | OTA + API deploy |
 | 2 — First native rebuild | ☑ Code shipped | Needs one `expo prebuild` + build |
-| 3 — Extension targets (ActivityKit, WidgetKit, Glance) | ☑ Code shipped | `eas build --profile phase3` + Apple Developer |
+| 3 — Extension targets (ActivityKit, WidgetKit, Glance) | ☑ Code shipped | `eas build --profile production` + Apple Developer |
 | 4 — Product polish | ☑ Shipped | OTA + API deploy |
 
 ---
