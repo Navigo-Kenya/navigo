@@ -30,67 +30,67 @@
 
 </div>
 
-> Add screenshots to `assets/screenshots/` — recommended: iPhone 15 Pro, 393 × 852 pt, light + dark variants.
+> Add screenshots to `assets/screenshots/`, recommended: iPhone 15 Pro, 393 × 852 pt, light + dark variants.
 
 ---
 
 ## Overview
 
-Navigo is the passenger-facing mobile app for Nairobi's informal matatu/bus network — a full journey-planning and live navigation experience built specifically for the city's fill-and-go transit reality.
+Navigo is the passenger-facing mobile app for Nairobi's informal matatu/bus network, a full journey-planning and live navigation experience built specifically for the city's fill-and-go transit reality.
 
-It covers the complete commute loop: search → plan → navigate → contribute — with an AI assistant (Kwame), gamified crowdsourcing, and a projection-based navigation engine that handles the fill-and-go reality of Nairobi transit better than schedule-only approaches.
+It covers the complete commute loop: search → plan → navigate → contribute, with an AI assistant (Kwame), gamified crowdsourcing, and a projection-based navigation engine that handles the fill-and-go reality of Nairobi transit better than schedule-only approaches.
 
 ---
 
 ## Features
 
 ### Journey Planning
-- **Multi-itinerary planner** — up to 5 route alternatives ranked by fastest / cheapest / least walking / fewest transfers
-- **Kwame AI assistant** — Gemini-powered conversational trip planner with voice input (VAD auto-stop), Google Cloud TTS response, and persistent session memory
-- **In-trip copilot** — Kwame answers live trip questions ("how many stops left?") using real-time navigation context
-- **Safety scoring** — night-time itineraries scored by walk distance after dark + nearby hazard reports; safer route flagged
-- **Route preview fly-through** — animated camera sweep along the full polyline before starting
+- **Multi-itinerary planner**, up to 5 route alternatives ranked by fastest / cheapest / least walking / fewest transfers
+- **Kwame AI assistant**, Gemini-powered conversational trip planner with voice input (VAD auto-stop), Google Cloud TTS response, and persistent session memory
+- **In-trip copilot**, Kwame answers live trip questions ("how many stops left?") using real-time navigation context
+- **Safety scoring**, night-time itineraries scored by walk distance after dark + nearby hazard reports; safer route flagged
+- **Route preview fly-through**, animated camera sweep along the full polyline before starting
 
 ### Navigation Engine
-- **Projection-based** (not proximity-based) — projects GPS onto route polyline for accurate progress, ETA, and step detection; handles loops and U-turns correctly
-- **EMA smoothing** — location (α=0.3), heading (α=0.7), speed (α=0.5) with circular-arithmetic heading interpolation
-- **Off-route detection** — 3 consecutive strikes > 45 m from line; recovers automatically
-- **Dead reckoning** — advances position estimate during GPS gaps (< 30 m/s clamp)
-- **High-water-mark anti-backward-snap** — GPS bounce never rewinds progress
-- **Adaptive GPS accuracy** — cell-tower quality for browsing, balanced GPS during navigation
+- **Projection-based** (not proximity-based), projects GPS onto route polyline for accurate progress, ETA, and step detection; handles loops and U-turns correctly
+- **EMA smoothing**, location (α=0.3), heading (α=0.7), speed (α=0.5) with circular-arithmetic heading interpolation
+- **Off-route detection**, 3 consecutive strikes > 45 m from line; recovers automatically
+- **Dead reckoning**, advances position estimate during GPS gaps (< 30 m/s clamp)
+- **High-water-mark anti-backward-snap**, GPS bounce never rewinds progress
+- **Adaptive GPS accuracy**, cell-tower quality for browsing, balanced GPS during navigation
 
 ### Live Navigation UI
-- **Voice guidance** — expo-speech with ducking/pause/mix prefs and earpiece routing (Android)
-- **Haptic feedback** — step advance (medium impact) and arrival (success notification)
-- **`In X m` distance countdown** — tiered pre-announcement (far / near / imminent)
-- **Live Activity** — 3-tier router: iOS ActivityKit (`navigo-live-activity` Expo Module, Dynamic Island) → Android notifee real progress bar notification → expo-notifications fallback
-- **Pause / resume** — freezes engine and mutes voice; banner shows paused state
-- **Native puck + camera** — `CustomLocationProvider` + `LocationPuck` (puckBearing: course) with JS glide fallback via `prefs.nativeFollow`
-- **Geofenced alight alarm** — `expo-task-manager` background task fires at alight stop (180 m) and destination (120 m) even when app is killed
+- **Voice guidance**, expo-speech with ducking/pause/mix prefs and earpiece routing (Android)
+- **Haptic feedback**, step advance (medium impact) and arrival (success notification)
+- **`In X m` distance countdown**, tiered pre-announcement (far / near / imminent)
+- **Live Activity**, 3-tier router: iOS ActivityKit (`navigo-live-activity` Expo Module, Dynamic Island) → Android notifee real progress bar notification → expo-notifications fallback
+- **Pause / resume**, freezes engine and mutes voice; banner shows paused state
+- **Native puck + camera**, `CustomLocationProvider` + `LocationPuck` (puckBearing: course) with JS glide fallback via `prefs.nativeFollow`
+- **Geofenced alight alarm**, `expo-task-manager` background task fires at alight stop (180 m) and destination (120 m) even when app is killed
 
 ### Map
-- **Mapbox GL** — custom style, stable camera with movement/heading thresholds
-- **Progressive stop rendering** — hidden below zoom 13; radius scales 2–12 km; selected stop always visible
-- **AR walking guidance** — expo-camera full-screen overlay with bearing arrow, aligned ±15° haptic snap (Phase 2)
-- **Offline vector packs** — Mapbox TileStore packs (z10–16), replaces legacy raster downloader
-- **Real-time reports** — crowdsourced hazard/delay pins within viewport
+- **Mapbox GL**, custom style, stable camera with movement/heading thresholds
+- **Progressive stop rendering**, hidden below zoom 13; radius scales 2–12 km; selected stop always visible
+- **AR walking guidance**, expo-camera full-screen overlay with bearing arrow, aligned ±15° haptic snap (Phase 2)
+- **Offline vector packs**, Mapbox TileStore packs (z10–16), replaces legacy raster downloader
+- **Real-time reports**, crowdsourced hazard/delay pins within viewport
 
 ### Community & Gamification
-- **Contributions** — stop edits, photos, delay reports, reviews with moderation queue
-- **Points + badges** — awarded on approval with animated `BadgeUnlockModal` (spring entrance, auto-dismiss 3.2 s)
-- **Streak tracking** — daily streak flame 🔥 on level card; 19:00 local reminder when streak is active but not yet contributed today
-- **Leaderboard** — weekly / all-time tabs
-- **Landmark boarding** — "in front of Hilton" sub-line on boarding steps when approved landmark data exists
+- **Contributions**, stop edits, photos, delay reports, reviews with moderation queue
+- **Points + badges**, awarded on approval with animated `BadgeUnlockModal` (spring entrance, auto-dismiss 3.2 s)
+- **Streak tracking**, daily streak flame 🔥 on level card; 19:00 local reminder when streak is active but not yet contributed today
+- **Leaderboard**, weekly / all-time tabs
+- **Landmark boarding**, "in front of Hilton" sub-line on boarding steps when approved landmark data exists
 
 ### Platform
-- **Auth** — email/password, Google OAuth, Apple Sign-In, phone OTP
-- **Saved places + journeys** — home/work pins synced to widget bridge
-- **Quick Actions** — "Go home", "Go to work", "Ask Kwame" app shortcuts (Phase 2)
-- **Morning briefing push** — 06:30 EAT daily (weather + route + active reports)
-- **Home-screen widget bridge** — `widgetBridge.ts` syncs home/work/streak to AsyncStorage + native shared container (App Group / SharedPreferences) for WidgetKit / Glance widgets
-- **Session replay harness** — dev-only trace recorder + replay screen for NavigationEngine golden-trace fixtures
-- **Nav metrics telemetry** — batched `POST /telemetry/nav-metrics` (reroute, snap_rate, arrival_precision, etc.)
-- **Sentry** — `@sentry/react-native` wired in `_layout.tsx`; inert until `EXPO_PUBLIC_SENTRY_DSN` is set (Phase 2 build)
+- **Auth**, email/password, Google OAuth, Apple Sign-In, phone OTP
+- **Saved places + journeys**, home/work pins synced to widget bridge
+- **Quick Actions**, "Go home", "Go to work", "Ask Kwame" app shortcuts (Phase 2)
+- **Morning briefing push**, 06:30 EAT daily (weather + route + active reports)
+- **Home-screen widget bridge**, `widgetBridge.ts` syncs home/work/streak to AsyncStorage + native shared container (App Group / SharedPreferences) for WidgetKit / Glance widgets
+- **Session replay harness**, dev-only trace recorder + replay screen for NavigationEngine golden-trace fixtures
+- **Nav metrics telemetry**, batched `POST /telemetry/nav-metrics` (reroute, snap_rate, arrival_precision, etc.)
+- **Sentry**, `@sentry/react-native` wired in `_layout.tsx`; inert until `EXPO_PUBLIC_SENTRY_DSN` is set (Phase 2 build)
 
 ---
 
@@ -124,7 +124,7 @@ app/
 
 ### Navigation Engine (`services/navigationEngine.ts`)
 
-Projection-based engine — the core of live navigation.
+Projection-based engine, the core of live navigation.
 
 ```
 GPS fix → EMA smooth → projectUser() → EngineResult
@@ -138,16 +138,16 @@ GPS fix → EMA smooth → projectUser() → EngineResult
 ```
 
 Key design decisions:
-- Local search window (±150 m / 500 m of last position) — avoids full-scan on every tick
-- Bus-mode off-route override — transit legs never trigger off-route (driver controls path)
-- High-water mark — `confirmedOffset` only advances, never rewinds
+- Local search window (±150 m / 500 m of last position), avoids full-scan on every tick
+- Bus-mode off-route override, transit legs never trigger off-route (driver controls path)
+- High-water mark, `confirmedOffset` only advances, never rewinds
 
 ### Global State (Zustand)
 
 | Store | Purpose |
 |-------|---------|
 | `journeyStore.ts` | Active journey (`fromLoc`, `toLoc`, `route`), `TripStatus` state machine |
-| `navStateStore.ts` | Live trip mirror (instruction, ETA, stops remaining, line) — fed from `useNavigation`, read by Kwame copilot |
+| `navStateStore.ts` | Live trip mirror (instruction, ETA, stops remaining, line), fed from `useNavigation`, read by Kwame copilot |
 | `contributionStore.ts` | Contributions list, community stats, badges; syncs streak to widget bridge |
 | `savedStore.ts` | Saved places + journeys; syncs home/work to widget bridge |
 | `prefsStore.ts` | Route ranking, voice prefs, nav follow mode, dev flags |
@@ -157,7 +157,7 @@ Key design decisions:
 
 | Service | Purpose |
 |---------|---------|
-| `navigationEngine.ts` | Projection engine — pure TS, fully unit-tested |
+| `navigationEngine.ts` | Projection engine, pure TS, fully unit-tested |
 | `liveActivity.ts` | 3-tier Live Activity router (ActivityKit stub / Android notification / fallback) |
 | `voiceGuide.ts` | expo-speech wrapper with ducking, earpiece routing, tiered announcements |
 | `alightGeofence.ts` | Background geofence task for alight/arrival notifications |
@@ -168,7 +168,7 @@ Key design decisions:
 | `quickActions.ts` | expo-quick-actions app shortcuts (Phase 2) |
 | `contribution.ts` | Community API client (contributions, stats, badges, leaderboard) |
 | `user.ts` | Auth + profile + saved places/journeys API client |
-| `ai.ts` | Kwame / AiService — `planRoute`, session context, nav context injection |
+| `ai.ts` | Kwame / AiService, `planRoute`, session context, nav context injection |
 | `apiClient.ts` | Axios instance; base URL from `EXPO_PUBLIC_API_URL` |
 
 ### Hooks
@@ -220,7 +220,7 @@ RNMAPBOX_MAPS_DOWNLOAD_TOKEN=sk.your_downloads_token   # SDK download during nat
 # API
 EXPO_PUBLIC_API_URL=http://localhost:8000/api/v1        # use ngrok for physical device
 
-# Sentry (optional — inert without DSN)
+# Sentry (optional, inert without DSN)
 EXPO_PUBLIC_SENTRY_DSN=
 ```
 
@@ -249,8 +249,8 @@ npm test -- --watch       # watch mode
 ```
 
 Test coverage:
-- `services/__tests__/navigationEngine.test.ts` — projection, off-route, dead reckoning, arrival (3 synthetic golden-trace fixtures)
-- `utils/__tests__/rankRoutes.test.ts` — route ranking criteria
+- `services/__tests__/navigationEngine.test.ts`, projection, off-route, dead reckoning, arrival (3 synthetic golden-trace fixtures)
+- `utils/__tests__/rankRoutes.test.ts`, route ranking criteria
 
 ---
 
@@ -283,10 +283,10 @@ See [Navigo.md](../Navigo.md) for the full 20-feature roadmap with per-item stat
 
 | Phase | Status | Ship vehicle |
 |-------|--------|-------------|
-| 1 — Pure JS/PHP | ☑ Shipped | OTA + API deploy |
-| 2 — First native rebuild | ☑ Code shipped | Needs one `expo prebuild` + build |
-| 3 — Extension targets (ActivityKit, WidgetKit, Glance) | ☑ Code shipped | `eas build --profile production` + Apple Developer |
-| 4 — Product polish | ☑ Shipped | OTA + API deploy |
+| 1, Pure JS/PHP | ☑ Shipped | OTA + API deploy |
+| 2, First native rebuild | ☑ Code shipped | Needs one `expo prebuild` + build |
+| 3, Extension targets (ActivityKit, WidgetKit, Glance) | ☑ Code shipped | `eas build --profile production` + Apple Developer |
+| 4, Product polish | ☑ Shipped | OTA + API deploy |
 
 ---
 
