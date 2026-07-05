@@ -8,6 +8,7 @@ import {
   ContributionService,
   CreateContributionPayload,
 } from "@/services/contribution";
+import { syncWidgetData } from "@/services/widgetBridge";
 
 const STALE_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -20,7 +21,7 @@ interface ContributionStore {
   fetch:          () => Promise<void>;
   refresh:        () => Promise<void>;
   reset:          () => void;
-  submit:         (payload: CreateContributionPayload) => Promise<{ points_awarded: number; new_badges: string[] }>;
+  submit:         (payload: CreateContributionPayload) => Promise<{ points_awarded: number; new_badges: string[]; streak_days: number }>;
   removeContribution: (id: number) => Promise<void>;
 }
 
@@ -80,7 +81,9 @@ export const useContributionStore = create<ContributionStore>()(
           ]);
           set({ badges, stats });
         }
-        return { points_awarded: result.points_awarded, new_badges: result.new_badges };
+        // Sync streak to widget bridge so home-screen widget reflects current streak.
+        syncWidgetData({ streakDays: result.streak_days }).catch(() => {});
+        return { points_awarded: result.points_awarded, new_badges: result.new_badges, streak_days: result.streak_days };
       },
 
       async removeContribution(id) {

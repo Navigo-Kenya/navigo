@@ -1,0 +1,17 @@
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+apply plugin: 'expo-module-gradle-plugin'
+
+android {
+    namespace 'com.navigo.widget'
+    compileSdkVersion 35
+    defaultConfig {
+        minSdkVersion 26
+    }
+}
+
+dependencies {
+    implementation project(':expo-modules-core')
+    implementation "androidx.glance:glance-appwidget:1.1.0"
+    implementation "androidx.glance:glance-material3:1.1.0"
+}

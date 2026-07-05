@@ -4,6 +4,8 @@ import { MapService, type PlacePrediction } from "@/services/map";
 import { RouteService, type Route } from "@/services/route";
 import { useSavedStore } from "@/store/savedStore";
 import { usePrefsStore } from "@/store/prefsStore";
+import { rankRoutes, routeDeltas, type RouteRanking } from "@/utils/rankRoutes";
+import RouteRankChips from "@/components/app/RouteRankChips";
 import { UnifiedLocation, useJourneyStore } from "@/store/journeyStore";
 import { getRouteColor, extractFares } from "@/utils/mapHelpers";
 import { Ionicons } from "@expo/vector-icons";
@@ -114,6 +116,15 @@ export default function SearchScreen() {
   const [availableRoutes, setAvailableRoutes]   = useState<Route[]>([]);
   const [isFetchingRoutes, setIsFetchingRoutes] = useState(false);
 
+  // Tradeoff chips: null = follow the user's preferred default until they tap.
+  const [rankingOverride, setRankingOverride] = useState<RouteRanking | null>(null);
+  const activeRanking = rankingOverride ?? prefs.routeRanking;
+  const rankedRoutes  = useMemo(
+    () => rankRoutes(availableRoutes, activeRanking),
+    [availableRoutes, activeRanking],
+  );
+  const deltas = useMemo(() => routeDeltas(rankedRoutes), [rankedRoutes]);
+
   // Pre-populate from/to when arriving via a shared route link
   useEffect(() => {
     if (!hasDeepLink) return;
@@ -133,6 +144,24 @@ export default function SearchScreen() {
     };
     setFromLoc(from);  setFromQ(from.name);
     setToLoc(to);      setToQ(to.name);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Destination-only deep link (home-screen quick actions: "Go home"/"Go to
+  // work"): prefill the destination and let origin default to the user.
+  useEffect(() => {
+    if (hasDeepLink) return;
+    if (!dlParams.tLat || !dlParams.tLng) return;
+    const to: UnifiedLocation = {
+      _type: 'location',
+      id:    dlParams.tName || 'Destination',
+      name:  dlParams.tName || 'Destination',
+      lat:   parseFloat(dlParams.tLat),
+      lng:   parseFloat(dlParams.tLng),
+    };
+    setToLoc(to);
+    setToQ(to.name);
+    setFocusedField("from");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -632,10 +661,18 @@ export default function SearchScreen() {
           </View>
         ) : (
           <FlatList
-            data={availableRoutes}
+            data={rankedRoutes}
             keyExtractor={(_, i) => `route-${i}`}
             contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20, paddingTop: 8, gap: 10 }}
-            renderItem={({ item: route }) => {
+            ListHeaderComponent={
+              <RouteRankChips
+                routes={rankedRoutes}
+                active={activeRanking}
+                onSelect={setRankingOverride}
+                dark={dark}
+              />
+            }
+            renderItem={({ item: route, index }) => {
               const transitSegs = (route.segments || []).filter(
                 (seg) => seg.mode === "BUS" || seg.mode === "TRAM"
               );
@@ -693,6 +730,17 @@ export default function SearchScreen() {
                           <View style={[s.metaBadge, { backgroundColor: C.iconBg }]}>
                             <Ionicons name="walk-outline" size={11} color={C.sub} />
                             <Text style={[s.metaBadgeText, { color: C.sub }]}>{walkKm} km walk</Text>
+                          </View>
+                        )}
+                        {/* Tradeoff vs the best alternative for the active criterion */}
+                        {deltas[index]?.minutesVsBest > 0 && (
+                          <View style={[s.metaBadge, { backgroundColor: C.iconBg }]}>
+                            <Text style={[s.metaBadgeText, { color: C.sub }]}>+{deltas[index].minutesVsBest} min</Text>
+                          </View>
+                        )}
+                        {deltas[index]?.fareVsBest != null && deltas[index].fareVsBest! > 0 && (
+                          <View style={[s.metaBadge, { backgroundColor: C.iconBg }]}>
+                            <Text style={[s.metaBadgeText, { color: C.sub }]}>+KES {deltas[index].fareVsBest}</Text>
                           </View>
                         )}
                       </View>

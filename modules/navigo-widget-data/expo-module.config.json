@@ -1,0 +1,8 @@
+{
+  "ios": {
+    "modules": ["NavigoWidgetDataModule"]
+  },
+  "android": {
+    "modules": ["com.navigo.widget.NavigoWidgetDataModule"]
+  }
+}

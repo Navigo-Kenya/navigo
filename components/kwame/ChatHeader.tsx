@@ -45,16 +45,21 @@ export default function ChatHeader({ C, router, clearHistory }: Props) {
   };
 
   return (
-    <View style={[styles.topBar, { backgroundColor: C.bg, borderBottomColor: C.border }]}>
-      <View style={styles.topLeftRow}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()} hitSlop={15}>
-          <Ionicons name="chevron-back" size={26} color={C.text} />
+    <View style={[styles.topBar, { backgroundColor: C.bg }]}>
+      <View style={styles.leftSection}>
+        <TouchableOpacity style={styles.iconButton} onPress={() => router.back()} hitSlop={15}>
+          {/* Using a menu icon to match the ChatGPT aesthetic, or use chevron-back if nav requires */}
+          <Ionicons name="reorder-two-outline" size={28} color={C.text} /> 
         </TouchableOpacity>
-        <Text style={[styles.brandTitle, { color: C.text }]}>
-          Navigo <Text style={styles.accentText}>Kwame</Text>
+        <Text style={styles.brandTitle}>
+          Kwame
         </Text>
       </View>
-      <View style={styles.topActionsRow}>
+      
+      <View style={styles.rightSection}>
+        <TouchableOpacity style={styles.iconButton} onPress={clearHistory} hitSlop={10}>
+          <Ionicons name="create-outline" size={22} color={C.text} />
+        </TouchableOpacity>
         <TouchableOpacity style={styles.iconButton} onPress={showMenu} hitSlop={10}>
           <Ionicons name="ellipsis-horizontal" size={22} color={C.text} />
         </TouchableOpacity>
@@ -64,11 +69,31 @@ export default function ChatHeader({ C, router, clearHistory }: Props) {
 }
 
 const styles = StyleSheet.create({
-  topBar:         { height: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth },
-  topLeftRow:     { flexDirection: 'row', alignItems: 'center' },
-  backButton:     { marginRight: 8, marginLeft: -4 },
-  brandTitle:     { fontSize: 19, fontWeight: '700', letterSpacing: -0.3 },
-  accentText:     { color: ORANGE },
-  topActionsRow:  { flexDirection: 'row', alignItems: 'center' },
-  iconButton:     { padding: 6, marginLeft: 6 },
+  topBar: { 
+    height: 56, 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between', 
+    paddingHorizontal: 12,
+  },
+  leftSection: { 
+    flexDirection: 'row', 
+    alignItems: 'center',
+    gap: 12 
+  },
+  brandTitle: { 
+    fontSize: 18, 
+    fontWeight: '600', 
+    color: ORANGE,
+    letterSpacing: -0.2 
+  },
+  rightSection: { 
+    flexDirection: 'row', 
+    alignItems: 'center',
+    gap: 8
+  },
+  
+  iconButton: { 
+    padding: 6 
+  },
 });

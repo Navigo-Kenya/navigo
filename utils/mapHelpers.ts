@@ -24,9 +24,11 @@ export type RouteInfo = {
   duration: number;
 };
 
+// ── EXPANDED MANEUVER DICTIONARY ──
 export type Maneuver =
   | "straight" | "turn-left" | "turn-right"
-  | "slight-left" | "slight-right" | "u-turn" | "start";
+  | "slight-left" | "slight-right" | "sharp-left" | "sharp-right"
+  | "u-turn" | "cross" | "roundabout" | "merge" | "start";
 
 export type WalkSubStep = {
   instruction: string;
@@ -50,7 +52,6 @@ export type Step = {
   subSteps?: WalkSubStep[];
   routeName?: string;
   routeColor?: string;
-  /** Ordered stops for transit depart steps: [boarding, ...intermediate, alighting]. */
   stops?: RouteStop[];
 };
 
@@ -68,6 +69,38 @@ export function dMeters(
     Math.sin(dLat / 2) ** 2 +
     Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
+export function projectOnPolyline(lat: number, lng: number, coords: number[][]): { lat: number, lng: number, dist: number } {
+  let minDist = Infinity;
+  let pLat = lat;
+  let pLng = lng;
+  const cosLat = Math.cos(lat * Math.PI / 180);
+
+  for (let i = 0; i < coords.length - 1; i++) {
+    const [lng1, lat1] = coords[i];
+    const [lng2, lat2] = coords[i + 1];
+
+    const dx = (lng2 - lng1) * cosLat;
+    const dy = (lat2 - lat1);
+    const lenSq = dx * dx + dy * dy;
+
+    const px = (lng - lng1) * cosLat;
+    const py = (lat - lat1);
+
+    const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, (px * dx + py * dy) / lenSq));
+
+    const projLat = lat1 + t * (lat2 - lat1);
+    const projLng = lng1 + t * (lng2 - lng1);
+
+    const d = dMeters({ latitude: lat, longitude: lng }, { latitude: projLat, longitude: projLng });
+    if (d < minDist) {
+      minDist = d;
+      pLat = projLat;
+      pLng = projLng;
+    }
+  }
+  return { lat: pLat, lng: pLng, dist: minDist };
 }
 
 export function sumLineDistanceMeters(coords: number[][]) {
@@ -120,44 +153,54 @@ export function sToMin(s: number) {
 }
 
 export function humanizeStep(st: Step) {
-  // We've pre-formatted the instructions beautifully in map.tsx, 
-  // so we just return them directly!
   if (st.instruction) return st.instruction;
   return `Continue`;
 }
 
-export function stepIcon(t?: string): keyof typeof Ionicons.glyphMap {
-  if (t === "arrive") return "location-outline";
-  if (t === "depart") return "bus-outline";
-  if (t === "walk")   return "walk-outline";
-  return "ellipse-outline";
+
+// ── STEP ICONS (Mapped to MaterialIcons) ──
+export function stepIcon(t?: string) {
+  if (t === "arrive") return "place";
+  if (t === "depart") return "directions-bus";
+  if (t === "walk")   return "directions-walk";
+  return "radio-button-checked";
 }
 
+// ── NLP INSTRUCTION PARSER ──
 export function detectManeuver(instruction: string): Maneuver {
   const s = instruction.toLowerCase();
-  if (s.includes("u-turn"))                             return "u-turn";
-  if (s.includes("slight left") || s.includes("keep left"))  return "slight-left";
-  if (s.includes("slight right") || s.includes("keep right")) return "slight-right";
-  if (s.includes("turn left")  || s.includes("left"))  return "turn-left";
-  if (s.includes("turn right") || s.includes("right")) return "turn-right";
+  if (s.includes("u-turn") || s.includes("uturn")) return "u-turn";
+  if (s.includes("roundabout"))                    return "roundabout";
+  if (s.includes("sharp left"))                    return "sharp-left";
+  if (s.includes("sharp right"))                   return "sharp-right";
+  if (s.includes("slight left") || s.includes("keep left") || s.includes("fork left"))  return "slight-left";
+  if (s.includes("slight right")|| s.includes("keep right")|| s.includes("fork right")) return "slight-right";
+  if (s.includes("merge"))                         return "merge";
+  if (s.includes("cross"))                         return "cross";
+  if (s.includes("turn left") || s.match(/\bleft\b/))   return "turn-left";
+  if (s.includes("turn right") || s.match(/\bright\b/)) return "turn-right";
   return "straight";
 }
 
-export function maneuverIcon(m: Maneuver): keyof typeof Ionicons.glyphMap {
+// ── MANEUVER ICONS (Mapped to MaterialIcons) ──
+export function maneuverIcon(m: Maneuver) {
   switch (m) {
-    case "turn-left":    return "arrow-back-outline";
-    case "turn-right":   return "arrow-forward-outline";
-    case "slight-left":  return "arrow-back-outline";
-    case "slight-right": return "arrow-forward-outline";
-    case "u-turn":       return "return-down-back-outline";
-    case "start":        return "navigate-outline";
-    default:             return "arrow-up-outline";
+    case "turn-left":    return "turn-left";
+    case "turn-right":   return "turn-right";
+    case "slight-left":  return "turn-slight-left";
+    case "slight-right": return "turn-slight-right";
+    case "sharp-left":   return "turn-sharp-left";
+    case "sharp-right":  return "turn-sharp-right";
+    case "u-turn":       return "u-turn-left";
+    case "roundabout":   return "roundabout-left";
+    case "cross":        return "directions-walk";
+    case "merge":        return "merge-type";
+    case "start":        return "navigation";
+    case "straight":     return "straight";
+    default:             return "straight";
   }
 }
 
-/**
- * Generates a consistent, highly distinct, and vibrant HEX color from a route name.
- */
 export function getRouteColor(routeName: string): string {
   if (!routeName) return "#FF6F00"; 
   let hash = 0;
@@ -187,11 +230,6 @@ export type FareResult =
     }
   | { found: false };
 
-/**
- * Extracts server-resolved fare data from journey segments.
- * Returns found:false when no transit segments have DB-backed fare data,
- * which the UI should display as "No fare info for this route".
- */
 export function extractFares(segments: RouteSegment[]): FareResult {
   const transit = segments.filter((s) => s.mode !== "WALK");
   if (transit.length === 0) return { found: false };

@@ -43,12 +43,49 @@ export interface LocationResolutionAction {
   savedPlaces: SavedPlaceResponse[];
 }
 
+export interface KwamePlace {
+  name:           string;
+  address?:       string | null;
+  lat:            number;
+  lng:            number;
+  rating?:        number | null;
+  ratings_count?: number | null;
+  category?:      string | null;
+  open_now?:      boolean | null;
+}
+
+export interface CalendarEventContext {
+  title:     string;
+  start:     string;      // human-readable, e.g. "Today 14:30"
+  location?: string;
+}
+
+/** Live trip snapshot so Kwame can answer "how many stops left?" mid-ride. */
+export interface NavContext {
+  trip_status:      string;
+  destination?:     string | null;
+  next_instruction?: string | null;
+  segment_mode?:    string | null;
+  current_line?:    string | null;
+  stops_remaining?: number | null;
+  current_stop?:    string | null;
+  remaining_m?:     number | null;
+  eta?:             string | null;   // human-readable local time
+}
+
+export interface KwameContext {
+  calendar_events?: CalendarEventContext[];
+  nav?: NavContext;
+}
+
 export interface AiPlanResponse {
-  routes?: RouteSummary[]; 
+  routes?: RouteSummary[];
   spoken_response?: string;
   holding_phrase?: string | null;
-  tts_audio?: string | null; 
+  tts_audio?: string | null;
   actionRequired?: LocationResolutionAction; // Intercepts failed geocoding safely
+  places?: KwamePlace[];       // place cards (find_places / find_nearby_stops)
+  suggestions?: string[];      // tappable reply chips (suggest_replies)
 }
 
 export function mapboxThumb(lng: number, lat: number): string {
@@ -73,6 +110,7 @@ export interface VoiceSettings {
   response_style?: "casual" | "professional" | "brief";
 }
 
+// AI Service for handling route planning and voice interactions
 export const AiService = {
   async planRoute(
     sessionId: string,
@@ -83,6 +121,7 @@ export const AiService = {
     currentLng?: number,
     aliases?: UserContext['aliases'],
     voiceSettings?: VoiceSettings,
+    context?: KwameContext,
   ): Promise<AiPlanResponse> {
     const payload: Record<string, any> = { session_id: sessionId };
 
@@ -98,6 +137,7 @@ export const AiService = {
 
     if (aliases && Object.keys(aliases).length > 0) payload.aliases = aliases;
     if (voiceSettings) payload.voice_settings = voiceSettings;
+    if (context?.calendar_events?.length || context?.nav) payload.context = context;
 
     try {
       const response = await api.post<AiPlanResponse>("/journey/ai-plan", payload, {
@@ -113,11 +153,26 @@ export const AiService = {
     }
   },
 
+  // Text-to-Speech using the Kwame TTS endpoint
   async speak(text: string, voiceSettings?: VoiceSettings): Promise<{ audio: string }> {
     const response = await api.post<{ audio: string }>("/kwame/speak", {
       text,
       ...(voiceSettings ? { voice_settings: voiceSettings } : {}),
     }, { timeout: 15000 });
     return response.data;
+  },
+
+  // Transcribe audio to text using the Kwame STT endpoint
+  async transcribeAudio(audioBase64: string): Promise<string> {
+    try {
+      const response = await api.post("/kwame/transcribe", {
+        audio_base64: audioBase64
+      }, { timeout: 20000 });
+      
+      return response.data.transcript || "🗣️ Voice message";
+    } catch (error) {
+      console.error("Transcription error:", error);
+      return "🗣️ Voice message";
+    }
   },
 };

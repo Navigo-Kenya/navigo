@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { UserService, SavedPlace, SavedJourney } from "@/services/user";
+import { syncWidgetData } from "@/services/widgetBridge";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -75,12 +76,22 @@ export const useSavedStore = create<SavedStore>()(
             : s.places;
           return { places: [place, ...filtered] };
         });
+        // Keep widget data in sync for home/work pins.
+        if (data.pin === "home" || data.pin === "work") {
+          syncWidgetData({
+            [data.pin]: { name: data.name, lat: data.lat, lng: data.lng },
+          }).catch(() => {});
+        }
         return place;
       },
 
       async removePlace(id) {
+        const removing = get().places.find((p) => p.id === id);
         set((s) => ({ places: s.places.filter((p) => p.id !== id) }));
         await UserService.deletePlace(id);
+        if (removing?.pin === "home" || removing?.pin === "work") {
+          syncWidgetData({ [removing.pin as "home" | "work"]: null }).catch(() => {});
+        }
       },
 
       async addJourney(data) {

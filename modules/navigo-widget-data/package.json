@@ -1,0 +1,11 @@
+{
+  "name": "navigo-widget-data",
+  "version": "1.0.0",
+  "description": "App Group (iOS) / SharedPreferences (Android) bridge for Navigo home-screen widgets",
+  "main": "src/index",
+  "types": "src/index",
+  "peerDependencies": {
+    "expo": "*",
+    "expo-modules-core": "*"
+  }
+}

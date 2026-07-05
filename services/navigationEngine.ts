@@ -64,7 +64,7 @@ const OFF_ROUTE_THRESH_M = 45;
 /** How many consecutive strikes before we declare off-route. */
 const OFF_ROUTE_STRIKES  = 3;
 /** Within this many metres of the final coordinate = arrived. */
-const ARRIVE_M           = 20;
+const ARRIVE_M           = 5;
 /** Fallback walking speed when GPS speed is unreliable (m/s). */
 const WALK_SPEED_MPS     = 1.4;
 /** GPS speed below which we use the fallback (m/s). */
@@ -396,10 +396,15 @@ export class NavigationEngine {
     const offRoute = this.offRouteStrikes >= OFF_ROUTE_STRIKES;
 
     // ── 3. Advance step index ──────────────────────────────────────────────
+    // Step i's routeOffset is the offset of ITS OWN endpoint: once the user
+    // passes it (minus the reach buffer), the next step becomes current.
+    // (Regression note: comparing against steps[i+1].routeOffset here delayed
+    // every leg transition by one full segment — walk→bus flipped only near
+    // the END of the bus ride. Covered by navigationEngine.test.ts.)
     let newStepIndex = stepIndex;
     for (let i = stepIndex; i < this.steps.length - 1; i++) {
-      const nextOffset = this.steps[i + 1].routeOffset ?? this.totalDistM;
-      if (confirmedOffset >= nextOffset - STEP_REACH_M) {
+      const stepEndOffset = this.steps[i].routeOffset ?? this.totalDistM;
+      if (confirmedOffset >= stepEndOffset - STEP_REACH_M) {
         newStepIndex = i + 1;
       } else {
         break;
@@ -484,6 +489,17 @@ export class NavigationEngine {
   /** Reset progress (call when rerouting or restarting navigation). */
   resetProgress() {
     this.highWaterMark   = 0;
+    this.offRouteStrikes = 0;
+    this._approachPhase  = null;
+  }
+
+  /**
+   * Jump progress to a specific offset along the route (m). Used when the
+   * user manually confirms boarding a vehicle: GPS often lags the real
+   * transition, so the UI can force the engine onto the transit leg.
+   */
+  forceProgressTo(offsetM: number) {
+    this.highWaterMark   = Math.max(0, Math.min(offsetM, this.totalDistM));
     this.offRouteStrikes = 0;
     this._approachPhase  = null;
   }

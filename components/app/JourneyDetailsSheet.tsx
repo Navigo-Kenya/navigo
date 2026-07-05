@@ -1,7 +1,7 @@
 // components/app/JourneyDetailsSheet.tsx
 import { formatDist, usePrefsStore } from "@/store/prefsStore";
 import { extractFares } from "@/utils/mapHelpers";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import React, { useEffect, useRef, useState } from "react";
 import { Linking, Platform } from "react-native";
 import {
@@ -28,8 +28,14 @@ const BG         = "#FFFFFF";
 
 const SCREEN_HEIGHT = Dimensions.get("window").height;
 const MAX_Y = SCREEN_HEIGHT * 0.08;
-// Peek height: capped at 310 on large phones, shrinks to ~40% on small devices (e.g. SE).
-const PEEK_H = Math.min(310, Math.max(220, SCREEN_HEIGHT * 0.40));
+
+// Minimum height to guarantee handle + time header + route chips are fully visible
+const HANDLE_H   = 10 + 4 + 14;        // handleWrap: paddingTop + handle + paddingBottom
+const HEADER_H   = 32 + 2 + 15 + 14;  // timeText(32) + arrivalGap(2) + arrivalText(15) + paddingBottom(14)
+const CHIPS_H    = 21 + 12;            // chip row (~21) + paddingBottom(12)
+const MIN_PEEK_H = HANDLE_H + HEADER_H + CHIPS_H; // ≈ 124
+
+const PEEK_H = Math.min(340, Math.max(MIN_PEEK_H, SCREEN_HEIGHT * 0.44));
 const MIN_Y  = SCREEN_HEIGHT - PEEK_H;
 
 function arrivalTime(secs: number): string {
@@ -56,14 +62,16 @@ function RouteChips({ segments, dark, units }: { segments: any[]; dark: boolean;
       const dist = seg.distance ? formatDist(seg.distance, units) : null;
       items.push(
         <View key={i} style={[ch.walkPill, { backgroundColor: C.walkPill }]}>
-          <Ionicons name="walk" size={12} color={C.text} />
+          {/* 🛠️ FIX: Material Walk Icon */}
+          <MaterialIcons name="directions-walk" size={14} color={C.text} />
           <Text style={[ch.walkText, { color: C.text }]}>{dist ?? mins}</Text>
         </View>
       );
     } else {
       items.push(
         <View key={i} style={[ch.busPill, { backgroundColor: C.busBg, borderColor: C.busBd }]}>
-          <Ionicons name="bus-outline" size={10} color={C.text} style={{ marginRight: 3 }} />
+          {/* 🛠️ FIX: Material Bus Icon */}
+          <MaterialIcons name="directions-bus" size={13} color={C.text} style={{ marginRight: 3 }} />
           <Text style={[ch.busText, { color: C.text }]}>{seg.route_name ?? "Bus"}</Text>
         </View>
       );
@@ -89,6 +97,11 @@ interface JourneyDetailsSheetProps {
   routeLoading: boolean;
   routeInfo: any;
   navigating: boolean;
+  /** Trip paused mid-journey (progress frozen, journey intact). */
+  paused?: boolean;
+  onPauseToggle?: () => void;
+  /** Replay the route fly-through preview (hidden while navigating). */
+  onPreview?: () => void;
   onToggleNav: (start: boolean) => void;
   onClose: () => void;
   mToNice: (m: number) => string;
@@ -98,9 +111,7 @@ interface JourneyDetailsSheetProps {
   onUnsave?: () => Promise<void>;
   children?: React.ReactNode;
   scrollRef?: React.RefObject<ScrollView | null>;
-  /** Live ETA from the nav engine — updated on every GPS fix while navigating. */
   eta?: Date | null;
-  /** Live remaining distance in metres — used to update the sub-label while navigating. */
   remainingDistanceM?: number | null;
 }
 
@@ -109,6 +120,9 @@ export default function JourneyDetailsSheet({
   routeLoading,
   routeInfo,
   navigating,
+  paused = false,
+  onPauseToggle,
+  onPreview,
   onToggleNav,
   onClose,
   sToMin,
@@ -124,9 +138,7 @@ export default function JourneyDetailsSheet({
   const lastY      = useRef(MIN_Y);
   const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
-  // Anchor: initial distance + planned duration, captured on the first GPS fix after nav starts.
-  // Remaining time = durationS × (currentDistM / initialDistM) — progress-based, not clock-based.
-  // "Arrive at" = Date.now() + remaining — updates with real time even when stationary.
+  
   const navAnchorRef = useRef<{ initialDistM: number; durationS: number } | null>(null);
   useEffect(() => {
     if (navigating && routeInfo && remainingDistanceM != null && !navAnchorRef.current) {
@@ -135,13 +147,14 @@ export default function JourneyDetailsSheet({
       navAnchorRef.current = null;
     }
   }, [navigating, routeInfo, remainingDistanceM]);
-  // Force a re-render every 30 s so the countdown ticks even between GPS fixes.
+  
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!navigating) return;
     const id = setInterval(() => setTick((n) => n + 1), 30_000);
     return () => clearInterval(id);
   }, [navigating]);
+  
   const dark = useColorScheme() === "dark";
   const { prefs } = usePrefsStore();
   const C = {
@@ -197,16 +210,11 @@ export default function JourneyDetailsSheet({
         message: `Check out this Matatu route to ${to?.name || "your destination"} on Navigo:\n\n${url}`,
         title: "Shared Route",
       });
-    } catch {
-      // user cancelled or share failed — no alert needed
-    }
+    } catch {}
   };
 
   return (
-    <Animated.View
-      style={[s.panel, { backgroundColor: C.bg, height: SCREEN_HEIGHT - MAX_Y, transform: [{ translateY }] }]}
-    >
-      {/* ── DRAG ZONE ── */}
+    <Animated.View style={[s.panel, { backgroundColor: C.bg, height: SCREEN_HEIGHT - MAX_Y, transform: [{ translateY }] }]}>
       <View {...panResponder.panHandlers}>
         <View style={s.handleWrap}>
           <View style={[s.handle, { backgroundColor: C.handle }]} />
@@ -247,6 +255,11 @@ export default function JourneyDetailsSheet({
               </>
             )}
           </View>
+          {onPreview && !navigating && (
+            <Pressable onPress={onPreview} hitSlop={12} style={[s.closeBtn, { backgroundColor: C.light }]}>
+              <Ionicons name="play" size={15} color={ORANGE} />
+            </Pressable>
+          )}
           <Pressable onPress={handleClose} hitSlop={16} style={[s.closeBtn, { backgroundColor: C.light }]}>
             <Ionicons name="close" size={17} color={C.text} />
           </Pressable>
@@ -309,6 +322,25 @@ export default function JourneyDetailsSheet({
             <Text style={s.startBtnText}>{navigating ? "End" : "Start"}</Text>
           </Pressable>
 
+          {navigating && onPauseToggle && (
+            <Pressable
+              style={({ pressed }) => [
+                s.saveBtn,
+                {
+                  borderColor: paused ? "#F59E0B" : C.border,
+                  backgroundColor: paused ? "rgba(245,158,11,0.12)" : "transparent",
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+              onPress={onPauseToggle}
+            >
+              <Ionicons name={paused ? "play" : "pause"} size={16} color={paused ? "#F59E0B" : GREY} />
+              <Text style={[s.saveBtnText, { color: paused ? "#F59E0B" : GREY }]}>
+                {paused ? "Resume" : "Pause"}
+              </Text>
+            </Pressable>
+          )}
+
           <Pressable
             style={({ pressed }) => [s.saveBtn, { borderColor: isSaved ? ORANGE : C.border, backgroundColor: isSaved ? "rgba(255,111,0,0.1)" : "transparent", opacity: pressed ? 0.7 : 1 }]}
             onPress={async () => {
@@ -350,7 +382,6 @@ export default function JourneyDetailsSheet({
           </Pressable>
         </View>
 
-        {/* Open in Maps */}
         <Pressable
           style={({ pressed }) => [s.mapsLink, { opacity: pressed ? 0.6 : 1 }]}
           onPress={() => {
@@ -383,7 +414,6 @@ export default function JourneyDetailsSheet({
         <View style={[s.divider, { backgroundColor: C.border }]} />
       </View>
 
-      {/* ── SCROLLABLE STEPS ── */}
       <View style={s.scroll}>
         <ScrollView
           ref={scrollRef}
@@ -419,10 +449,8 @@ const s = StyleSheet.create({
     flexDirection:        "column",
     overflow:             "hidden",
   },
-
   handleWrap: { alignItems: "center", paddingTop: 10, paddingBottom: 14 },
   handle:     { width: 40, height: 4, borderRadius: 2 },
-
   header: {
     flexDirection:    "row",
     alignItems:       "flex-start",
@@ -442,13 +470,10 @@ const s = StyleSheet.create({
     justifyContent: "center",
     marginTop:      2,
   },
-
   chipsRow: { paddingHorizontal: 20, paddingBottom: 12 },
   divider:  { height: StyleSheet.hairlineWidth },
-
   scroll:        { flex: 1 },
   scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 120 },
-
   actionBar: {
     flexDirection:    "row",
     gap:              10,
@@ -477,7 +502,6 @@ const s = StyleSheet.create({
     borderWidth:    1.5,
   },
   saveBtnText: { color: ORANGE, fontSize: 16, fontWeight: "600" },
-
   fareRow: {
     flexDirection:    "row",
     alignItems:       "center",
@@ -488,7 +512,6 @@ const s = StyleSheet.create({
   },
   fareTotal:     { fontSize: 13, color: GREY },
   fareBreakdown: { fontSize: 11, marginTop: 1 },
-
   mapsLink: {
     flexDirection:    "row",
     alignItems:       "center",

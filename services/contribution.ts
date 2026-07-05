@@ -50,6 +50,8 @@ export interface CommunityStats {
   submissions_count: number;
   badges_count: number;
   badges_preview: Pick<Badge, "slug" | "name" | "icon" | "color">[];
+  streak_days: number;
+  contributed_today: boolean;
 }
 
 export interface StopReview {
@@ -71,6 +73,7 @@ export interface CreateContributionResult {
   points_awarded: number;
   new_badges: string[];
   new_level: number | null;
+  streak_days: number;
 }
 
 export interface CreateContributionPayload {
@@ -123,8 +126,8 @@ export const ContributionService = {
     });
   },
 
-  async getLeaderboard(): Promise<{ id: number; name: string; avatar: string | null; points: number }[]> {
-    const res = await api.get<{ data: any[] }>("/community/leaderboard");
+  async getLeaderboard(period: "all" | "weekly" = "all"): Promise<{ id: number; name: string; avatar: string | null; points: number }[]> {
+    const res = await api.get<{ data: any[]; period: string }>("/community/leaderboard", { params: { period } });
     return res.data.data;
   },
 

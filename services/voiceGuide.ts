@@ -2,29 +2,51 @@
 // Thin wrapper around expo-speech for navigation announcements.
 // Callers decide WHEN to speak; this module decides HOW.
 import { setAudioModeAsync } from "expo-audio";
+import { Platform } from "react-native";
 import * as Speech from "expo-speech";
+import { usePrefsStore } from "@/store/prefsStore";
 import type { ApproachPhase, NavStep } from "./navigationEngine";
 
 type NavHints = "off" | "concise" | "detailed";
 
 // On iOS, AVSpeechSynthesizer respects the ringer/silent switch by default.
 // Setting playsInSilentMode overrides this so navigation voice works even
-// when the phone is on silent. We configure it once and cache the result.
-let _audioConfigured = false;
+// when the phone is on silent. Audio routing/ducking follows the user's
+// voice-guidance prefs, re-applied whenever they change.
+let _appliedKey: string | null = null;
 let _audioPromise: Promise<void> | null = null;
 
+function currentAudioPrefs() {
+  const { voiceDucking, voiceOutput } = usePrefsStore.getState().prefs;
+  return { voiceDucking, voiceOutput };
+}
+
 function prepareAudio(): Promise<void> {
-  if (_audioConfigured) return Promise.resolve();
+  const { voiceDucking, voiceOutput } = currentAudioPrefs();
+  const key = `${voiceDucking}:${voiceOutput}`;
+  if (_appliedKey === key) return Promise.resolve();
+
+  const interruptionMode =
+    voiceDucking === "pause" ? "doNotMix"
+    : voiceDucking === "mix" ? "mixWithOthers"
+    : "duckOthers";
+
   if (!_audioPromise) {
     _audioPromise = setAudioModeAsync({
       playsInSilentMode: true,
       allowsRecording: false,
-    })
-      .then(() => { _audioConfigured = true; })
+      interruptionMode,
+      interruptionModeAndroid: interruptionMode === "mixWithOthers" ? "duckOthers" : interruptionMode,
+      // Android-only: route nav voice through the earpiece for privacy on a matatu.
+      ...(Platform.OS === "android"
+        ? { shouldRouteThroughEarpiece: voiceOutput === "earpiece" }
+        : {}),
+    } as Parameters<typeof setAudioModeAsync>[0])
+      .then(() => { _appliedKey = key; })
       .catch((error) => {
         console.warn("Failed to set audio mode for TTS:", error);
-        _audioPromise = null;
-      }); // allow retry on next call
+      })
+      .finally(() => { _audioPromise = null; }); // allow re-apply on pref change
   }
   return _audioPromise ?? Promise.resolve();
 }

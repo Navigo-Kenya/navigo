@@ -1,0 +1,11 @@
+{
+  "name": "navigo-live-activity",
+  "version": "1.0.0",
+  "description": "ActivityKit Live Activity bridge for Navigo (iOS 16.1+)",
+  "main": "src/index",
+  "types": "src/index",
+  "peerDependencies": {
+    "expo": "*",
+    "expo-modules-core": "*"
+  }
+}

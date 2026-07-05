@@ -28,7 +28,7 @@ module.exports = {
         "applinks:navigo.co.ke"
       ],
       buildNumber: "1",
-      supportsTablet: true,
+      supportsTablet: false,
       // iOS Maps Config
       config: {
         googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "",
@@ -44,12 +44,6 @@ module.exports = {
         UIBackgroundModes: ["location", "remote-notification", "audio"],
         NSMicrophoneUsageDescription: "Navigo uses your microphone so you can speak your destination to the built-in AI trip-planning assistant.",
         NSSpeechRecognitionUsageDescription: "Navigo transcribes your voice so the AI assistant can understand your destination and plan your matatu journey.",
-        // Lock iPad to portrait — orientation:"portrait" only sets the phone key.
-        // Without this, supportsTablet:true lets iPads rotate freely.
-        "UISupportedInterfaceOrientations~ipad": [
-          "UIInterfaceOrientationPortrait",
-          "UIInterfaceOrientationPortraitUpsideDown",
-        ],
       },
     },
 
@@ -93,6 +87,7 @@ module.exports = {
         "ACCESS_BACKGROUND_LOCATION",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_LOCATION",
+        "FOREGROUND_SERVICE_DATA_SYNC",
         "POST_NOTIFICATIONS",
         "VIBRATE",
         "CAMERA",
@@ -108,18 +103,45 @@ module.exports = {
     },
 
     plugins: [
+      // Phase 3 extension targets — iOS ActivityKit + WidgetKit, Android Glance widget
+      "@bacons/apple-targets",
+      require("./plugins/withLiveActivity"),
+      require("./plugins/withAndroidWidget"),
+      "@notifee/react-native",
       "expo-asset",
       "expo-router",
       "expo-secure-store",
       "expo-task-manager",
       "expo-apple-authentication",
       "expo-audio",
+      "expo-quick-actions",
+      [
+        "expo-camera",
+        {
+          cameraPermission: "Navigo uses the camera for AR walking guidance, a live view with a direction arrow to your stage.",
+        },
+      ],
+      [
+        "@sentry/react-native/expo",
+        {
+          // Fill in once the Sentry org exists; builds succeed without it
+          // (source-map upload is skipped when unset).
+          organization: process.env.SENTRY_ORG ?? "",
+          project: process.env.SENTRY_PROJECT ?? "navigo-app",
+        },
+      ],
       [
         "expo-image-picker",
         {
           photosPermission: "Allow $(PRODUCT_NAME) to access your photo library to upload stop photos and choose a profile picture.",
           cameraPermission: "Allow $(PRODUCT_NAME) to use your camera to take transit stop photos and update your profile picture.",
           isAccessMediaLocationEnabled: true,
+        },
+      ],
+      [
+        "expo-calendar",
+        {
+          calendarPermission: "Navigo reads your upcoming events so the AI assistant can plan trips to your meetings.",
         },
       ],
       [

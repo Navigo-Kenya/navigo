@@ -8,13 +8,29 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import NetInfo from "@react-native-community/netinfo";
 import { useNetworkStore } from "@/store/networkStore";
 import { registerLocationTask } from "@/tasks/locationTask";
+// Side-effect import: defines the alight-geofence TaskManager task at module
+// scope so the OS can relaunch it even when the JS nav loop is dead.
+import "@/services/alightGeofence";
 import { requestNotificationPermission, registerPushToken, syncTokenWithBackend, setupNotificationTapHandler } from "@/services/notifications";
 import { useNotificationStore } from "@/store/notificationStore";
 import { useAuthStore } from "@/store/authStore";
 import api from "@/services/apiClient";
+import { syncQuickActions } from "@/services/quickActions";
+import { useSavedStore } from "@/store/savedStore";
+import { useQuickActionRouting } from "expo-quick-actions/router";
 import Mapbox from "@rnmapbox/maps";
+import * as Sentry from "@sentry/react-native";
 
 Mapbox.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_TOKEN ?? "");
+
+// Crash/ANR reporting — inert until EXPO_PUBLIC_SENTRY_DSN is set in .env
+// (create the Sentry org, then drop both DSNs in; no code change needed).
+const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN;
+Sentry.init({
+  dsn: SENTRY_DSN,
+  enabled: !!SENTRY_DSN,
+  tracesSampleRate: 0.1,
+});
 
 // Register background location task at module-eval time, before any component mounts.
 registerLocationTask();
@@ -31,11 +47,24 @@ const qc = new QueryClient({
   },
 });
 
-export default function RootLayout() {
+function RootLayout() {
   const [loaded] = useFonts({ Inter_400Regular, Inter_600SemiBold, Inter_700Bold });
   const setOnline         = useNetworkStore((s) => s.setOnline);
   const setPushToken      = useNotificationStore((s) => s.setPushToken);
   const setPermGranted    = useNotificationStore((s) => s.setPermissionGranted);
+
+  // Home-screen quick actions deep-link into the router (params.href).
+  useQuickActionRouting();
+  useEffect(() => {
+    (async () => {
+      try {
+        if (useAuthStore.getState().isAuthenticated) {
+          await useSavedStore.getState().fetch();
+        }
+      } catch { /* guest / offline — static shortcuts only */ }
+      syncQuickActions();
+    })();
+  }, []);
 
   useEffect(() => {
     const unsub = NetInfo.addEventListener((state) => {
@@ -90,3 +119,6 @@ export default function RootLayout() {
     </SafeAreaProvider>
   );
 }
+
+// Sentry.wrap adds the error boundary + touch-event breadcrumbs.
+export default Sentry.wrap(RootLayout);

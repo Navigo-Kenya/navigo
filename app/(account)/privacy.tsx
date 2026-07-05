@@ -360,6 +360,26 @@ export default function Privacy() {
             onPress={handleExportData}
           />
           <Divider C={C} />
+          <NavRow
+            C={C}
+            icon="sparkles-outline"
+            label="Kwame memory"
+            description="See and delete what the assistant remembers about you"
+            onPress={() => router.push("/(account)/kwame-memory" as any)}
+          />
+          {__DEV__ && (
+            <>
+              <Divider C={C} />
+              <NavRow
+                C={C}
+                icon="analytics-outline"
+                label="Dev: navigation traces"
+                description="Replay recorded nav sessions through the engine"
+                onPress={() => router.push("/(account)/dev-replay" as any)}
+              />
+            </>
+          )}
+          <Divider C={C} />
           <ToggleRow
             C={C}
             icon="bar-chart-outline"

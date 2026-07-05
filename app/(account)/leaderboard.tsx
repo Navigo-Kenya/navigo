@@ -147,20 +147,21 @@ export default function LeaderboardScreen() {
   const C    = makeC(dark);
   const { user } = useAuthStore();
 
+  const [period, setPeriod]   = useState<"all" | "weekly">("all");
   const [data, setData]       = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(false);
 
-  const load = () => {
+  const load = (p: "all" | "weekly" = period) => {
     setLoading(true);
     setError(false);
-    ContributionService.getLeaderboard()
+    ContributionService.getLeaderboard(p)
       .then(setData)
       .catch(() => setError(true))
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(period); }, [period]);
 
   const [second, first, third] = [data[1], data[0], data[2]];
   const rest = data.slice(3);
@@ -191,9 +192,26 @@ export default function LeaderboardScreen() {
         </View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+          {/* Period tabs */}
+          <View style={[ls.tabs, { backgroundColor: C.card }]}>
+            {(["all", "weekly"] as const).map((p) => (
+              <Pressable
+                key={p}
+                onPress={() => setPeriod(p)}
+                style={[ls.tab, period === p && { backgroundColor: ORANGE }]}
+              >
+                <Text style={[ls.tabText, { color: period === p ? "#FFF" : C.sub }]}>
+                  {p === "all" ? "All Time" : "This Week"}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
           {/* Podium */}
           <View style={[ls.podiumWrapper, { backgroundColor: C.card }]}>
-            <Text style={[ls.podiumTitle, { color: C.sub }]}>TOP CONTRIBUTORS</Text>
+            <Text style={[ls.podiumTitle, { color: C.sub }]}>
+              {period === "weekly" ? "TOP THIS WEEK" : "TOP CONTRIBUTORS"}
+            </Text>
             <View style={ls.podium}>
               <PodiumStep entry={second} rank={2} height={72}  avatarSize={44} color={SILVER} C={C} />
               <PodiumStep entry={first}  rank={1} height={100} avatarSize={56} color={GOLD}   C={C} />
@@ -234,7 +252,10 @@ const ls = StyleSheet.create({
   errorText:    { fontSize: 15, fontWeight: "500" },
   retryBtn:     { marginTop: 4, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: ORANGE, borderRadius: 10 },
   retryText:    { color: "#FFF", fontWeight: "700", fontSize: 14 },
-  podiumWrapper:{ marginHorizontal: 16, marginTop: 16, borderRadius: 16, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 0, overflow: "hidden" },
+  tabs:         { flexDirection: "row", marginHorizontal: 16, marginTop: 16, borderRadius: 12, padding: 4, gap: 4 },
+  tab:          { flex: 1, paddingVertical: 8, borderRadius: 9, alignItems: "center" },
+  tabText:      { fontSize: 13, fontWeight: "600" },
+  podiumWrapper:{ marginHorizontal: 16, marginTop: 10, borderRadius: 16, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 0, overflow: "hidden" },
   podiumTitle:  { fontSize: 11, fontWeight: "700", letterSpacing: 0.6, textAlign: "center", marginBottom: 16 },
   podium:       { flexDirection: "row", alignItems: "flex-end", gap: 8, minHeight: 200 },
   listCard:     { marginHorizontal: 16, marginTop: 12, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },

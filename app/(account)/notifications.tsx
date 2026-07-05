@@ -336,7 +336,7 @@ export default function NotificationsScreen() {
             C={C} disabled={sub}
             icon="alarm-outline"
             label="Journey reminders"
-            description="Nudge 10 min before your saved departure"
+            description="Morning briefing + nudge before saved departures"
             value={p.journeyReminder}
             onChange={() => toggle("journeyReminder")}
           />

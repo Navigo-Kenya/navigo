@@ -10,6 +10,19 @@ export interface TravelPrefs {
   navView:       "flat" | "tilted";
   maxWalkMeters: 500 | 1000 | 1500 | 2000;
   showFares:     boolean;
+  /** Default sort criterion for itinerary alternatives. */
+  routeRanking:  "fastest" | "cheapest" | "least_walking" | "fewest_transfers";
+  /** What voice guidance does to other audio (music) while speaking. */
+  voiceDucking:  "duck" | "pause" | "mix";
+  /** Voice guidance output route. Earpiece is Android-only. */
+  voiceOutput:   "default" | "earpiece";
+  /** Record anonymized nav traces for the dev replay harness. */
+  devTraces:     boolean;
+  /**
+   * Native puck + camera follow during navigation (60 fps, immune to JS
+   * stalls). Rollback flag: false restores the JS glide/camera loops.
+   */
+  nativeFollow:  boolean;
 }
 
 const DEFAULTS: TravelPrefs = {
@@ -19,6 +32,11 @@ const DEFAULTS: TravelPrefs = {
   navView:       "tilted",
   maxWalkMeters: 1500,
   showFares:     true,
+  routeRanking:  "fastest",
+  voiceDucking:  "duck",
+  voiceOutput:   "default",
+  devTraces:     false,
+  nativeFollow:  true,
 };
 
 interface PrefsStore {

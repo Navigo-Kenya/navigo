@@ -1,6 +1,8 @@
+import BadgeUnlockModal from "@/components/contribution/BadgeUnlockModal";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as Location from "expo-location";
+import * as Notifications from "expo-notifications";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -433,14 +435,18 @@ function BottomSheet({
   );
 }
 
+type BadgeUnlockCb = (pts: number, badges: string[], streak?: number) => void;
+
 // ── Delay Report Sheet ───────────────────────────────────────────────────────
 function DelayReportSheet({
   visible,
   onClose,
+  onBadgeUnlock,
   C,
 }: {
   visible: boolean;
   onClose: () => void;
+  onBadgeUnlock: BadgeUnlockCb;
   C: ReturnType<typeof makeC>;
 }) {
   const [selectedStop, setSelectedStop] = useState<UnifiedLocation | null>(null);
@@ -465,11 +471,8 @@ function DelayReportSheet({
       });
       onClose();
       setNote(""); setSeverity("minor"); setSelectedStop(null);
-      if (result.points_awarded > 0) {
-        Alert.alert("", `+${result.points_awarded} Safiri Points earned!`);
-      }
-      if (result.new_badges.length > 0) {
-        setTimeout(() => Alert.alert("Badge unlocked!", `You earned: ${result.new_badges.join(", ")}`), 600);
+      if (result.points_awarded > 0 || result.new_badges.length > 0) {
+        onBadgeUnlock(result.points_awarded, result.new_badges, result.streak_days);
       }
     } catch {
       Alert.alert("Error", "Could not submit. Please try again.");
@@ -542,10 +545,12 @@ function DelayReportSheet({
 function StopReviewSheet({
   visible,
   onClose,
+  onBadgeUnlock,
   C,
 }: {
   visible: boolean;
   onClose: () => void;
+  onBadgeUnlock: BadgeUnlockCb;
   C: ReturnType<typeof makeC>;
 }) {
   const [selectedStop, setSelectedStop] = useState<UnifiedLocation | null>(null);
@@ -600,8 +605,8 @@ function StopReviewSheet({
       });
       onClose();
       setSafety(0); setComfort(0); setCleanliness(0); setSelectedStop(null); setReviewText("");
-      if (result.points_awarded > 0) {
-        Alert.alert("", `+${result.points_awarded} Safiri Points earned!`);
+      if (result.points_awarded > 0 || result.new_badges.length > 0) {
+        onBadgeUnlock(result.points_awarded, result.new_badges, result.streak_days);
       }
     } catch {
       Alert.alert("Error", "Could not submit. Please try again.");
@@ -672,14 +677,16 @@ function StopReviewSheet({
 function StopEditSheet({
   visible,
   onClose,
+  onBadgeUnlock,
   C,
 }: {
   visible: boolean;
   onClose: () => void;
+  onBadgeUnlock: BadgeUnlockCb;
   C: ReturnType<typeof makeC>;
 }) {
   const [selectedStop, setSelectedStop]       = useState<UnifiedLocation | null>(null);
-  const [field, setField]                     = useState<"name" | "location" | "routes">("name");
+  const [field, setField]                     = useState<"name" | "location" | "routes" | "landmark">("name");
   const [currentVal, setCurrentVal]           = useState("");
   const [proposedVal, setProposedVal]         = useState("");
   const [editNote, setEditNote]               = useState("");
@@ -687,10 +694,11 @@ function StopEditSheet({
   const [loading, setLoading]                 = useState(false);
   const { submit } = useContributionStore();
 
-  const FIELDS: { key: "name" | "location" | "routes"; label: string }[] = [
+  const FIELDS: { key: "name" | "location" | "routes" | "landmark"; label: string }[] = [
     { key: "name",     label: "Name"     },
     { key: "location", label: "Location" },
     { key: "routes",   label: "Routes"   },
+    { key: "landmark", label: "Landmark" },
   ];
 
   useEffect(() => {
@@ -699,6 +707,7 @@ function StopEditSheet({
       case "name":     setCurrentVal(selectedStop.name); break;
       case "location": setCurrentVal(`${selectedStop.lat.toFixed(5)}, ${selectedStop.lng.toFixed(5)}`); break;
       case "routes":   setCurrentVal(selectedStop.route_nams ?? ""); break;
+      case "landmark": setCurrentVal(""); break;
     }
   }, [selectedStop, field]);
 
@@ -778,11 +787,16 @@ function StopEditSheet({
           <Text style={[sh.fieldLabel, { color: C.sub, marginTop: 12 }]}>PROPOSED VALUE</Text>
           <TextInput
             style={[sh.input, { backgroundColor: C.input, color: C.text, borderColor: C.border }]}
-            placeholder="What it should say…"
+            placeholder={field === "landmark" ? "E.g. in front of Hilton Hotel…" : "What it should say…"}
             placeholderTextColor={C.sub}
             value={proposedVal}
             onChangeText={setProposedVal}
           />
+          {field === "landmark" && (
+            <Text style={[sh.pointsHint, { color: C.sub, marginTop: 0, marginBottom: 0, textAlign: "left", fontSize: 12 }]}>
+              A nearby landmark helps riders find the boarding point (e.g. "in front of Hilton")
+            </Text>
+          )}
 
           {field === "location" && (
             <Pressable
@@ -1075,6 +1089,30 @@ function relativeTime(dateStr: string): string {
   return `${days}d ago`;
 }
 
+// ── Schedule a 19:00 streak-preservation local notification (opt-in, one/day)
+async function scheduleStreakReminder() {
+  try {
+    const now = new Date();
+    const fire = new Date(now);
+    fire.setHours(19, 0, 0, 0);
+    if (fire <= now) return; // already past 19:00 today
+    // Cancel any existing one before scheduling (idempotent)
+    await Notifications.cancelScheduledNotificationAsync("streak-reminder").catch(() => {});
+    await Notifications.scheduleNotificationAsync({
+      identifier: "streak-reminder",
+      content: {
+        title: "🔥 Don't lose your streak!",
+        body: "Contribute before midnight to keep your streak alive.",
+        sound: true,
+        data: { screen: "/(tabs)/contribution" },
+      },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: fire },
+    });
+  } catch {
+    // Notifications not available — streak feature still works without reminder.
+  }
+}
+
 // ── ContributionRow ──────────────────────────────────────────────────────────
 function ContributionRow({
   item,
@@ -1151,10 +1189,21 @@ export default function ContributionScreen() {
 
   const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null);
   const [refreshing, setRefreshing]   = useState(false);
+  const [badgeModal, setBadgeModal]   = useState<{
+    visible: boolean; pointsAwarded: number; badges: string[]; streakDays?: number;
+  }>({ visible: false, pointsAwarded: 0, badges: [] });
 
   useEffect(() => {
     fetchStore().catch(() => {});
   }, [fetchStore]);
+
+  // Schedule 19:00 reminder only when the user has an active streak and hasn't
+  // contributed today — purely advisory, dismissed if they contribute before then.
+  useEffect(() => {
+    if (stats && stats.streak_days > 0 && !stats.contributed_today) {
+      scheduleStreakReminder();
+    }
+  }, [stats?.streak_days, stats?.contributed_today]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -1218,7 +1267,15 @@ export default function ContributionScreen() {
               </View>
             )}
             <View style={{ flex: 1 }}>
-              <Text style={[s.levelLabel, { color: C.text }]}>{stats?.level_label ?? "Commuter"}</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Text style={[s.levelLabel, { color: C.text }]}>{stats?.level_label ?? "Commuter"}</Text>
+                {(stats?.streak_days ?? 0) > 0 && (
+                  <View style={[s.streakPill, { backgroundColor: ORANGE + "18" }]}>
+                    <Text style={s.streakFlame}>🔥</Text>
+                    <Text style={[s.streakCount, { color: ORANGE }]}>{stats!.streak_days}</Text>
+                  </View>
+                )}
+              </View>
               <Text style={[s.levelSub, { color: C.sub }]}>
                 Level {stats?.level ?? 1} · {levelPoints} pts
               </Text>
@@ -1383,10 +1440,39 @@ export default function ContributionScreen() {
       </ScrollView>
 
       {/* ── Action Sheets ── */}
-      <DelayReportSheet visible={activeSheet === "delay"}    onClose={() => setActiveSheet(null)} C={C} />
-      <StopReviewSheet  visible={activeSheet === "review"}   onClose={() => setActiveSheet(null)} C={C} />
-      <StopEditSheet    visible={activeSheet === "edit"}     onClose={() => setActiveSheet(null)} C={C} />
-      <NewStopSheet     visible={activeSheet === "new_stop"} onClose={() => setActiveSheet(null)} C={C} />
+      <DelayReportSheet
+        visible={activeSheet === "delay"}
+        onClose={() => setActiveSheet(null)}
+        onBadgeUnlock={(pts, badges, streak) =>
+          setBadgeModal({ visible: true, pointsAwarded: pts, badges, streakDays: streak })
+        }
+        C={C}
+      />
+      <StopReviewSheet
+        visible={activeSheet === "review"}
+        onClose={() => setActiveSheet(null)}
+        onBadgeUnlock={(pts, badges, streak) =>
+          setBadgeModal({ visible: true, pointsAwarded: pts, badges, streakDays: streak })
+        }
+        C={C}
+      />
+      <StopEditSheet
+        visible={activeSheet === "edit"}
+        onClose={() => setActiveSheet(null)}
+        onBadgeUnlock={(pts, badges, streak) =>
+          setBadgeModal({ visible: true, pointsAwarded: pts, badges, streakDays: streak })
+        }
+        C={C}
+      />
+      <NewStopSheet visible={activeSheet === "new_stop"} onClose={() => setActiveSheet(null)} C={C} />
+
+      <BadgeUnlockModal
+        visible={badgeModal.visible}
+        onDismiss={() => setBadgeModal((p) => ({ ...p, visible: false }))}
+        pointsAwarded={badgeModal.pointsAwarded}
+        badges={badgeModal.badges}
+        streakDays={badgeModal.streakDays}
+      />
     </View>
   );
 }
@@ -1651,6 +1737,17 @@ const s = StyleSheet.create({
   badgeMore:     { justifyContent: "center" },
   badgeMoreText: { fontSize: 20, fontWeight: "800", color: GREY, textAlign: "center" },
   badgeMoreSub:  { fontSize: 11, textAlign: "center" },
+
+  streakPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  streakFlame: { fontSize: 12 },
+  streakCount: { fontSize: 12, fontWeight: "700" },
 
   leaderboardCta: {
     flexDirection: "row",

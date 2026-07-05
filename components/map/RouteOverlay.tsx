@@ -80,15 +80,21 @@ interface RouteOverlayProps {
   intermediateStops:  IntermediateStop[];
   onIntermStopPress:  (stop: IntermediateStop) => void;
   boardingNodeId?:    string | null;
-  currentStepIndex?:  number;
-  currentWalkLegIdx?: number;
+  /** Index of the route segment being traversed (-1 when not navigating). */
+  activeSegIdx?:      number;
   userLat?:           number;
   userLng?:           number;
 }
 
+/** Legs are created with ids `walk-<segIdx>` / `transit-<segIdx>`. */
+function segIdxOf(id: string): number {
+  const n = parseInt(id.split("-")[1], 10);
+  return Number.isNaN(n) ? -1 : n;
+}
+
 function _RouteOverlay({
   walkLegs, transitLegs, nodeMarkers, locMarkers, intermediateStops, onIntermStopPress,
-  boardingNodeId, currentStepIndex, currentWalkLegIdx = -1, userLat, userLng,
+  boardingNodeId, activeSegIdx = -1, userLat, userLng,
 }: RouteOverlayProps) {
   const intermGeoJson = useMemo<GeoJSON.FeatureCollection>(() => ({
     type: "FeatureCollection",
@@ -108,10 +114,13 @@ function _RouteOverlay({
 
   return (
     <>
-      {walkLegs.map((leg, i) => {
-        const isActive = currentWalkLegIdx >= 0 && i === currentWalkLegIdx;
-        const isPast   = currentWalkLegIdx >= 0 && i  < currentWalkLegIdx;
-        const color    = isPast ? hexWithAlpha("#8E8E93", 0.20) : "#8E8E93";
+      {walkLegs.map((leg) => {
+        const segIdx   = segIdxOf(leg.id);
+        const isActive = activeSegIdx >= 0 && segIdx === activeSegIdx;
+        const isPast   = activeSegIdx >= 0 && segIdx  < activeSegIdx;
+        // Past walk legs fade almost out — during a transit leg they no
+        // longer read as "still to walk".
+        const color    = isPast ? hexWithAlpha("#8E8E93", 0.12) : "#8E8E93";
         const rawCoords = isActive && userLat != null && userLng != null
           ? trimPolylineAhead(leg.coords, userLat, userLng)
           : leg.coords;
@@ -133,20 +142,20 @@ function _RouteOverlay({
               id={`walk-line-${leg.id}`}
               style={{
                 lineColor: color,
-                lineWidth: 3,
-                // Avoid passing undefined — omit lineDasharray when leg is past.
-                ...(isPast ? {} : { lineDasharray: [6, 5] }),
+                lineWidth: 6,
                 lineCap:   "round",
                 lineJoin:  "round",
+                lineDasharray: [0, 1.5],
               }}
             />
           </NativeShapeSource>
         );
       })}
 
-      {transitLegs.map((leg, i) => {
-        const traveled = currentStepIndex != null && i < currentStepIndex;
-        const color = traveled ? hexWithAlpha(leg.color, 0.28) : leg.color;
+      {transitLegs.map((leg) => {
+        const segIdx   = segIdxOf(leg.id);
+        const traveled = activeSegIdx >= 0 && segIdx < activeSegIdx;
+        const isActive = activeSegIdx >= 0 && segIdx === activeSegIdx;
 
         const geojson: GeoJSON.Feature<GeoJSON.LineString> = {
           type: "Feature",
@@ -157,18 +166,57 @@ function _RouteOverlay({
           properties: {},
         };
 
+        // Consumed portion of the ACTIVE transit leg: the full line renders
+        // dimmed underneath, the part still ahead renders bright on top and
+        // shrinks as the bus advances.
+        const aheadCoords = isActive && userLat != null && userLng != null
+          ? trimPolylineAhead(leg.coords, userLat, userLng)
+          : null;
+        const aheadGeojson: GeoJSON.Feature<GeoJSON.LineString> | null =
+          aheadCoords && aheadCoords.length >= 2
+            ? {
+                type: "Feature",
+                geometry: {
+                  type: "LineString",
+                  coordinates: aheadCoords.map((c) => [c.longitude, c.latitude]),
+                },
+                properties: {},
+              }
+            : null;
+
+        const baseColor = traveled
+          ? hexWithAlpha(leg.color, 0.15)
+          : isActive && aheadGeojson
+            ? hexWithAlpha(leg.color, 0.30)
+            : leg.color;
+
         return (
-          <NativeShapeSource key={`${leg.id}-${leg.color}`} id={`transit-src-${leg.id}`} shape={geojson}>
-            <NativeLineLayer
-              id={`transit-line-${leg.id}`}
-              style={{
-                lineColor:  color,
-                lineWidth:  traveled ? 4 : 8,
-                lineCap:    "round",
-                lineJoin:   "round",
-              }}
-            />
-          </NativeShapeSource>
+          <React.Fragment key={`${leg.id}-${leg.color}`}>
+            <NativeShapeSource id={`transit-src-${leg.id}`} shape={geojson}>
+              <NativeLineLayer
+                id={`transit-line-${leg.id}`}
+                style={{
+                  lineColor:  baseColor,
+                  lineWidth:  traveled ? 4 : 8,
+                  lineCap:    "round",
+                  lineJoin:   "round",
+                }}
+              />
+            </NativeShapeSource>
+            {aheadGeojson && (
+              <NativeShapeSource id={`transit-ahead-src-${leg.id}`} shape={aheadGeojson}>
+                <NativeLineLayer
+                  id={`transit-ahead-line-${leg.id}`}
+                  style={{
+                    lineColor: leg.color,
+                    lineWidth: 8,
+                    lineCap:   "round",
+                    lineJoin:  "round",
+                  }}
+                />
+              </NativeShapeSource>
+            )}
+          </React.Fragment>
         );
       })}
 
@@ -204,8 +252,7 @@ export const RouteOverlay = React.memo(_RouteOverlay, (prev, next) =>
   prev.locMarkers        === next.locMarkers        &&
   prev.intermediateStops === next.intermediateStops &&
   prev.boardingNodeId    === next.boardingNodeId    &&
-  prev.currentStepIndex  === next.currentStepIndex  &&
-  prev.currentWalkLegIdx === next.currentWalkLegIdx &&
+  prev.activeSegIdx      === next.activeSegIdx      &&
   prev.userLat           === next.userLat           &&
   prev.userLng           === next.userLng
 );

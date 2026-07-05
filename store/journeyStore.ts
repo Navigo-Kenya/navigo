@@ -2,7 +2,7 @@
 import type { Route } from "@/services/route";
 import { create } from "zustand";
 
-export type TripStatus = "IDLE" | "WAITING_FOR_BUS" | "IN_TRANSIT" | "ARRIVED";
+export type TripStatus = "IDLE" | "WAITING_FOR_BUS" | "IN_TRANSIT" | "PAUSED" | "ARRIVED";
 
 // We create a unified interface so the app can handle both physical Stops and Mapbox Locations (like "KFC")
 export interface UnifiedLocation {

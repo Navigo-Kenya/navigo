@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { RouteSummary, LocationResolutionAction } from '../services/ai';
+import { RouteSummary, LocationResolutionAction, KwamePlace } from '../services/ai';
 
 export interface Message {
   id: string;
@@ -8,6 +8,8 @@ export interface Message {
   text: string;
   routes?: RouteSummary[] | null;
   actionRequired?: LocationResolutionAction | null;
+  places?: KwamePlace[] | null;
+  suggestions?: string[] | null;
 }
 
 interface ChatState {
@@ -15,6 +17,7 @@ interface ChatState {
   currentSessionId: string | null;
   isLoading: boolean;
   addMessage: (msg: Message) => void;
+  updateMessageText: (id: string, newText: string) => void;
   clearHistory: () => void;
   loadHistory: (sessionId: string) => Promise<void>;
 }
@@ -38,21 +41,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
     
     if (currentSessionId) {
       const storageKey = `navigo_history_${currentSessionId}`;
-      AsyncStorage.setItem(storageKey, JSON.stringify(updated)).catch((err) =>
-        console.error(`Failed to sync message history for session ${currentSessionId}:`, err)
-      );
+      AsyncStorage.setItem(storageKey, JSON.stringify(updated)).catch(console.error);
+    }
+  },
+
+  // This is the function that seamlessly swaps "Transcribing..." with real text
+  updateMessageText: (id, newText) => {
+    const { messages, currentSessionId } = get();
+    const updated = messages.map(msg => 
+      msg.id === id ? { ...msg, text: newText } : msg
+    );
+    
+    set({ messages: updated });
+    
+    if (currentSessionId) {
+      const storageKey = `navigo_history_${currentSessionId}`;
+      AsyncStorage.setItem(storageKey, JSON.stringify(updated)).catch(console.error);
     }
   },
   
   clearHistory: () => {
     const { currentSessionId } = get();
-    const fallbackMsg = DEFAULT_WELCOME_MESSAGE('Kwame');
-    
-    set({ messages: [fallbackMsg] });
+    set({ messages: [DEFAULT_WELCOME_MESSAGE('Kwame')] });
     
     if (currentSessionId) {
-      const storageKey = `navigo_history_${currentSessionId}`;
-      AsyncStorage.removeItem(storageKey).catch(console.error);
+      AsyncStorage.removeItem(`navigo_history_${currentSessionId}`).catch(console.error);
     }
   },
   
@@ -73,7 +86,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       set({ messages: [DEFAULT_WELCOME_MESSAGE('Kwame')] });
     } catch (e) {
-      console.error(`Failed loading safe state records for session ${sessionId}:`, e);
       set({ messages: [DEFAULT_WELCOME_MESSAGE('Kwame')] });
     } finally {
       set({ isLoading: false });

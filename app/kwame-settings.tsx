@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Switch, ActivityIndicator, useColorScheme, Animated,
+  Switch, ActivityIndicator, useColorScheme, Animated, Alert
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,13 +14,14 @@ const ORANGE = '#FF6F00';
 
 function makeC(dark: boolean) {
   return {
-    bg:      dark ? '#0D0D0D' : '#F2F2F7',
+    bg:      dark ? '#000000' : '#F2F2F7', 
     card:    dark ? '#1C1C1E' : '#FFFFFF',
     raised:  dark ? '#2C2C2E' : '#F0F0F5',
     text:    dark ? '#FFFFFF' : '#1C1C1E',
-    sub:     dark ? '#8E8E93' : '#6C6C70',
+    sub:     dark ? '#8E8E93' : '#8E8E93',
     border:  dark ? '#38383A' : '#E5E5EA',
-    divider: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+    divider: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+    activeBg:dark ? 'rgba(255, 111, 0, 0.12)' : 'rgba(255, 111, 0, 0.08)',
   };
 }
 
@@ -39,23 +40,14 @@ const LANGUAGES = [
   { code: 'en-US', flag: '🇺🇸', name: 'English', region: 'American accent' },
   { code: 'en-KE', flag: '🇰🇪', name: 'English', region: 'Kenyan accent'   },
   { code: 'sw-KE', flag: '🇰🇪', name: 'Swahili', region: 'Kenya'           },
+  { code: 'fr-FR', flag: '🇫🇷', name: 'French',  region: 'Standard'        },
 ] as const;
 
-// Each language has its own preview voice + text so the preview sounds authentic.
-// voiceId: null → reuse the user's selected persona voice (works for en-US only).
-const LANG_PREVIEWS: Record<string, { voiceId: string | null; text: string }> = {
-  'en-US': {
-    voiceId: null,
-    text: "Hello! I'm Kwame, your Nairobi transit guide. Ready to navigate the city?",
-  },
-  'en-KE': {
-    voiceId: 'en-KE-Standard-B',
-    text: "Hello! I'm Kwame, your Nairobi transit guide. Ready to navigate the city?",
-  },
-  'sw-KE': {
-    voiceId: 'sw-KE-Standard-B',
-    text: "Habari! Mimi ni Kwame, msaidizi wako wa usafiri wa Nairobi. Tuko tayari kwenda!",
-  },
+const LANG_PREVIEWS: Record<string, string> = {
+  'en-US': "Hi there! I'm Kwame, your transit guide. Ready to navigate the city?",
+  'en-KE': "Sasa! I'm Kwame, your transit guide. Ready to hit the road?",
+  'sw-KE': "Habari! Mimi ni Kwame, msaidizi wako wa usafiri. Tuko tayari kwenda!",
+  'fr-FR': "Bonjour ! Je suis Kwame, votre guide de transport. Prêt à explorer la ville ?",
 };
 
 const STYLES = [
@@ -78,7 +70,7 @@ function SectionLabel({ label, C }: { label: string; C: C }) {
 function RangeBar({ pct, C }: { pct: number; C: C }) {
   const anim = useRef(new Animated.Value(pct)).current;
   useEffect(() => {
-    Animated.spring(anim, { toValue: pct, useNativeDriver: false, speed: 30, bounciness: 0 }).start();
+    Animated.spring(anim, { toValue: pct, useNativeDriver: false, speed: 25, bounciness: 4 }).start();
   }, [pct]);
   return (
     <View style={[s.rangeTrack, { backgroundColor: C.divider }]}>
@@ -100,14 +92,12 @@ function StepRow({
       <View style={s.stepInner}>
         <Text style={[s.stepLabel, { color: C.text }]}>{label}</Text>
         <View style={s.stepControls}>
-          <TouchableOpacity onPress={onDec} hitSlop={10}
-            style={[s.stepBtn, { backgroundColor: C.raised, borderColor: C.border }]}>
-            <Ionicons name="remove" size={14} color={C.text} />
+          <TouchableOpacity onPress={onDec} hitSlop={10} style={[s.stepBtn, { backgroundColor: C.raised }]}>
+            <Ionicons name="remove" size={16} color={C.text} />
           </TouchableOpacity>
           <Text style={[s.stepValue, { color: ORANGE }]}>{display}</Text>
-          <TouchableOpacity onPress={onInc} hitSlop={10}
-            style={[s.stepBtn, { backgroundColor: C.raised, borderColor: C.border }]}>
-            <Ionicons name="add" size={14} color={C.text} />
+          <TouchableOpacity onPress={onInc} hitSlop={10} style={[s.stepBtn, { backgroundColor: C.raised }]}>
+            <Ionicons name="add" size={16} color={C.text} />
           </TouchableOpacity>
         </View>
       </View>
@@ -116,95 +106,16 @@ function StepRow({
   );
 }
 
-function VoiceRow({
-  voice, selected, isLast, onSelect, onPreview, previewing, C,
-}: {
-  voice: typeof VOICES[number]; selected: boolean; isLast: boolean;
-  onSelect: () => void; onPreview: () => void; previewing: boolean; C: C;
-}) {
+function PreviewActionBtn({ isPreviewing, isPlaying, onToggle, C }: any) {
   return (
-    <TouchableOpacity
-      onPress={onSelect}
-      activeOpacity={0.6}
-      style={[s.voiceRow, !isLast && { borderBottomColor: C.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
-    >
-      <View style={[s.initCircle, { backgroundColor: C.raised, borderColor: selected ? ORANGE : 'transparent' }]}>
-        <Text style={[s.initLetter, { color: selected ? ORANGE : C.sub }]}>{voice.name[0]}</Text>
-      </View>
-
-      <View style={s.voiceLabels}>
-        <Text style={[s.voiceName, { color: selected ? ORANGE : C.text }]}>{voice.name}</Text>
-        <Text style={[s.voiceTrait, { color: C.sub }]}>
-          {voice.gender === 'M' ? 'Male' : 'Female'} · {voice.trait}
-        </Text>
-      </View>
-
-      <TouchableOpacity onPress={onPreview} hitSlop={12}
-        style={[s.previewBtn, { borderColor: C.border }]}>
-        {previewing
-          ? <ActivityIndicator size="small" color={ORANGE} />
-          : <Ionicons name="play" size={13} color={C.sub} />}
-      </TouchableOpacity>
-
-      <View style={[s.checkDot, { opacity: selected ? 1 : 0 }]}>
-        <Ionicons name="checkmark" size={12} color="#FFF" />
-      </View>
-    </TouchableOpacity>
-  );
-}
-
-function LangRow({
-  lang, selected, isLast, onSelect, onPreview, previewing, C,
-}: {
-  lang: typeof LANGUAGES[number]; selected: boolean; isLast: boolean;
-  onSelect: () => void; onPreview: () => void; previewing: boolean; C: C;
-}) {
-  return (
-    <TouchableOpacity
-      onPress={onSelect}
-      activeOpacity={0.6}
-      style={[s.listRow, !isLast && { borderBottomColor: C.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
-    >
-      <Text style={s.langFlag}>{lang.flag}</Text>
-      <View style={s.listLabels}>
-        <Text style={[s.listPrimary, { color: C.text }]}>{lang.name}</Text>
-        <Text style={[s.listSecondary, { color: C.sub }]}>{lang.region}</Text>
-      </View>
-      <TouchableOpacity onPress={onPreview} hitSlop={12}
-        style={[s.previewBtn, { borderColor: C.border }]}>
-        {previewing
-          ? <ActivityIndicator size="small" color={ORANGE} />
-          : <Ionicons name="play" size={13} color={C.sub} />}
-      </TouchableOpacity>
-      <View style={[s.checkDot, { opacity: selected ? 1 : 0 }]}>
-        <Ionicons name="checkmark" size={12} color="#FFF" />
-      </View>
-    </TouchableOpacity>
-  );
-}
-
-function StyleRow({
-  item, selected, isLast, onSelect, C,
-}: {
-  item: typeof STYLES[number]; selected: boolean;
-  isLast: boolean; onSelect: () => void; C: C;
-}) {
-  return (
-    <TouchableOpacity
-      onPress={onSelect}
-      activeOpacity={0.6}
-      style={[s.listRow, !isLast && { borderBottomColor: C.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
-    >
-      <View style={[s.styleIcon, { backgroundColor: C.raised }]}>
-        <Ionicons name={item.icon as any} size={17} color={selected ? ORANGE : C.sub} />
-      </View>
-      <View style={s.listLabels}>
-        <Text style={[s.listPrimary, { color: selected ? ORANGE : C.text }]}>{item.label}</Text>
-        <Text style={[s.listSecondary, { color: C.sub }]}>{item.desc}</Text>
-      </View>
-      <View style={[s.checkDot, { opacity: selected ? 1 : 0 }]}>
-        <Ionicons name="checkmark" size={12} color="#FFF" />
-      </View>
+    <TouchableOpacity onPress={onToggle} hitSlop={12} style={[s.previewBtn, { backgroundColor: isPlaying ? ORANGE : C.raised }]}>
+      {isPreviewing && !isPlaying ? (
+        <ActivityIndicator size="small" color={ORANGE} />
+      ) : isPlaying ? (
+        <Ionicons name="square" size={12} color="#FFF" />
+      ) : (
+        <Ionicons name="play" size={14} color={C.text} style={{ marginLeft: 2 }} />
+      )}
     </TouchableOpacity>
   );
 }
@@ -218,64 +129,76 @@ export default function KwameSettingsScreen() {
   const insets  = useSafeAreaInsets();
 
   const { settings, load, set } = useKwameSettingsStore();
-  // Single previewing ID covers both voice-persona and language rows — prevents concurrent previews.
-  const [previewingId, setPreviewingId] = useState<string | null>(null);
-  const [previewUri,   setPreviewUri]   = useState<string | null>(null);
+  
+  const [loadingPreviewId, setLoadingPreviewId] = useState<string | null>(null);
+  const [playingId, setPlayingId]               = useState<string | null>(null);
+  const [previewUri, setPreviewUri]             = useState<string | null>(null);
 
   const previewPlayer = useAudioPlayer(previewUri);
   useEffect(() => { load(); }, []);
 
   useEffect(() => {
     if (previewUri && previewPlayer) {
+      setLoadingPreviewId(null);
       previewPlayer.volume = 1.0;
       previewPlayer.play();
       const playTime = (previewPlayer.duration || 4) * 1000;
       const timer = setTimeout(() => {
-        setPreviewingId(null);
+        setPlayingId(null);
         setPreviewUri(null);
-      }, playTime + 400);
+      }, playTime + 200);
       return () => clearTimeout(timer);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewUri, previewPlayer]);
 
-  const handleVoicePreview = async (voiceId: string) => {
-    if (previewingId) return;
-    setPreviewingId(voiceId);
+  const togglePreview = async (id: string, fetchAudioContent: () => Promise<string>) => {
+    if (playingId === id || loadingPreviewId === id) {
+      previewPlayer?.pause();
+      setPlayingId(null);
+      setLoadingPreviewId(null);
+      setPreviewUri(null);
+      return;
+    }
+
+    previewPlayer?.pause();
+    setPreviewUri(null);
+    setPlayingId(null);
+    setLoadingPreviewId(id);
+
     try {
       await AudioModule.setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
-      const { audio } = await AiService.speak(
-        "Hi there! I'm Kwame, your Nairobi transit guide. Ready to navigate the city?",
-        {
-          voice_name:    voiceId,
-          speaking_rate: settings.speakingRate,
-          pitch:         settings.pitch,
-          language_code: settings.languageCode,
-        }
-      );
+      const audio = await fetchAudioContent();
+      setPlayingId(id);
       setPreviewUri(`data:audio/mp3;base64,${audio}`);
     } catch {
-      setPreviewingId(null);
+      setLoadingPreviewId(null);
+      Alert.alert("Preview Failed", "Could not load the voice preview. Check your connection.");
     }
   };
 
-  const handleLangPreview = async (langCode: string) => {
-    if (previewingId) return;
-    const preview = LANG_PREVIEWS[langCode];
-    if (!preview) return;
-    setPreviewingId(langCode);
-    try {
-      await AudioModule.setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
-      const { audio } = await AiService.speak(preview.text, {
-        voice_name:    preview.voiceId ?? settings.voiceName,
-        speaking_rate: settings.speakingRate,
-        pitch:         settings.pitch,
-        language_code: langCode,
+  const handleVoicePreview = (voiceId: string) => {
+    togglePreview(voiceId, async () => {
+      // Dynamically fetch the text matching the user's currently selected language 
+      const text = LANG_PREVIEWS[settings.languageCode] || LANG_PREVIEWS['en-US'];
+      
+      const { audio } = await AiService.speak(text, { 
+        voice_name: voiceId, 
+        speaking_rate: settings.speakingRate, 
+        pitch: settings.pitch, 
+        language_code: settings.languageCode // Respects the active language instead of forcing en-US
       });
-      setPreviewUri(`data:audio/mp3;base64,${audio}`);
-    } catch {
-      setPreviewingId(null);
-    }
+      return audio;
+    });
+  };
+
+  const handleLangPreview = (langCode: string) => {
+    togglePreview(langCode, async () => {
+      const { audio } = await AiService.speak(
+        LANG_PREVIEWS[langCode],
+        { voice_name: settings.voiceName, speaking_rate: settings.speakingRate, pitch: settings.pitch, language_code: langCode }
+      );
+      return audio;
+    });
   };
 
   const speedPct = ((settings.speakingRate - 0.75)         / (1.5 - 0.75)) * 100;
@@ -287,13 +210,12 @@ export default function KwameSettingsScreen() {
     <SafeAreaView edges={['top']} style={[s.root, { backgroundColor: C.bg }]}>
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <View style={[s.header, { backgroundColor: C.bg, borderBottomColor: C.border }]}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12} style={s.headerBack}>
-          <Ionicons name="chevron-back" size={26} color={C.text} />
+      <View style={[s.header, { backgroundColor: C.bg }]}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={15} style={s.headerBack}>
+          <Ionicons name="chevron-back" size={28} color={C.text} />
         </TouchableOpacity>
         <View style={s.headerCenter}>
           <Text style={[s.headerTitle, { color: C.text }]}>Voice Settings</Text>
-          <Text style={[s.headerKwame, { color: ORANGE }]}>Kwame</Text>
         </View>
         <View style={s.headerSpacer} />
       </View>
@@ -302,27 +224,39 @@ export default function KwameSettingsScreen() {
 
         {/* ── Voice persona ──────────────────────────────────────────────── */}
         <SectionLabel label="VOICE PERSONA" C={C} />
-        <View style={[s.card, { backgroundColor: C.card, borderColor: C.border }]}>
-          {VOICES.map((v, i) => (
-            <VoiceRow
-              key={v.id}
-              voice={v}
-              selected={settings.voiceName === v.id}
-              isLast={i === VOICES.length - 1}
-              onSelect={() => set('voiceName', v.id)}
-              onPreview={() => handleVoicePreview(v.id)}
-              previewing={previewingId === v.id}
-              C={C}
-            />
-          ))}
+        <View style={[s.card, { backgroundColor: C.card }]}>
+          {VOICES.map((v, i) => {
+            const isSelected = settings.voiceName === v.id;
+            return (
+              <TouchableOpacity
+                key={v.id} activeOpacity={0.7}
+                onPress={() => set('voiceName', v.id)}
+                style={[s.rowLayout, !isSelected && isSelected && { backgroundColor: C.activeBg }, i !== VOICES.length - 1 && { borderBottomColor: C.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
+              >
+                <View style={[s.initCircle, { backgroundColor: isSelected ? ORANGE : C.raised }]}>
+                  <Text style={[s.initLetter, { color: isSelected ? '#FFF' : C.sub }]}>{v.name[0]}</Text>
+                </View>
+                <View style={s.rowLabels}>
+                  <Text style={[s.rowTitle, { color: isSelected ? ORANGE : C.text }]}>{v.name}</Text>
+                  <Text style={[s.rowSubtitle, { color: C.sub }]}>{v.gender === 'M' ? 'Male' : 'Female'} · {v.trait}</Text>
+                </View>
+                
+                <PreviewActionBtn 
+                  isPreviewing={loadingPreviewId === v.id} 
+                  isPlaying={playingId === v.id} 
+                  onToggle={() => handleVoicePreview(v.id)} 
+                  C={C} 
+                />
+                
+                {isSelected && <Ionicons name="checkmark" size={20} color={ORANGE} style={s.trailingCheck} />}
+              </TouchableOpacity>
+            )
+          })}
         </View>
-        <Text style={[s.footnote, { color: C.sub }]}>
-          Tap ▶ to preview with your current speed and pitch.
-        </Text>
 
         {/* ── Playback ───────────────────────────────────────────────────── */}
         <SectionLabel label="PLAYBACK" C={C} />
-        <View style={[s.card, { backgroundColor: C.card, borderColor: C.border }]}>
+        <View style={[s.card, { backgroundColor: C.card }]}>
           <StepRow
             label="Speed"
             display={`${settings.speakingRate.toFixed(2)}×`}
@@ -342,54 +276,76 @@ export default function KwameSettingsScreen() {
         </View>
 
         {/* ── Language ───────────────────────────────────────────────────── */}
-        <SectionLabel label="LANGUAGE" C={C} />
-        <View style={[s.card, { backgroundColor: C.card, borderColor: C.border }]}>
-          {LANGUAGES.map((lang, i) => (
-            <LangRow
-              key={lang.code}
-              lang={lang}
-              selected={settings.languageCode === lang.code}
-              isLast={i === LANGUAGES.length - 1}
-              onSelect={() => set('languageCode', lang.code)}
-              onPreview={() => handleLangPreview(lang.code)}
-              previewing={previewingId === lang.code}
-              C={C}
-            />
-          ))}
+        <SectionLabel label="LANGUAGE & ACCENT" C={C} />
+        <View style={[s.card, { backgroundColor: C.card }]}>
+          {LANGUAGES.map((lang, i) => {
+            const isSelected = settings.languageCode === lang.code;
+            return (
+              <TouchableOpacity
+                key={lang.code} activeOpacity={0.7}
+                onPress={() => set('languageCode', lang.code)}
+                style={[s.rowLayout, i !== LANGUAGES.length - 1 && { borderBottomColor: C.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
+              >
+                <Text style={s.langFlag}>{lang.flag}</Text>
+                <View style={s.rowLabels}>
+                  <Text style={[s.rowTitle, { color: isSelected ? ORANGE : C.text }]}>{lang.name}</Text>
+                  <Text style={[s.rowSubtitle, { color: C.sub }]}>{lang.region}</Text>
+                </View>
+
+                <PreviewActionBtn 
+                  isPreviewing={loadingPreviewId === lang.code} 
+                  isPlaying={playingId === lang.code} 
+                  onToggle={() => handleLangPreview(lang.code)} 
+                  C={C} 
+                />
+
+                {isSelected && <Ionicons name="checkmark" size={20} color={ORANGE} style={s.trailingCheck} />}
+              </TouchableOpacity>
+            )
+          })}
         </View>
         <Text style={[s.footnote, { color: C.sub }]}>
-          Tap ▶ to hear how Kwame sounds in each language. Affects directions and local terms.
+          Kwame's voice will automatically adjust to fit the selected region's accent.
         </Text>
 
         {/* ── Personality ────────────────────────────────────────────────── */}
         <SectionLabel label="PERSONALITY" C={C} />
-        <View style={[s.card, { backgroundColor: C.card, borderColor: C.border }]}>
-          {STYLES.map((item, i) => (
-            <StyleRow
-              key={item.value}
-              item={item}
-              selected={settings.responseStyle === item.value}
-              isLast={i === STYLES.length - 1}
-              onSelect={() => set('responseStyle', item.value)}
-              C={C}
-            />
-          ))}
+        <View style={[s.card, { backgroundColor: C.card }]}>
+          {STYLES.map((item, i) => {
+            const isSelected = settings.responseStyle === item.value;
+            return (
+              <TouchableOpacity
+                key={item.value} activeOpacity={0.7}
+                onPress={() => set('responseStyle', item.value)}
+                style={[s.rowLayout, i !== STYLES.length - 1 && { borderBottomColor: C.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
+              >
+                <View style={[s.styleIcon, { backgroundColor: isSelected ? ORANGE : C.raised }]}>
+                  <Ionicons name={item.icon as any} size={18} color={isSelected ? '#FFF' : C.sub} />
+                </View>
+                <View style={s.rowLabels}>
+                  <Text style={[s.rowTitle, { color: isSelected ? ORANGE : C.text }]}>{item.label}</Text>
+                  <Text style={[s.rowSubtitle, { color: C.sub }]}>{item.desc}</Text>
+                </View>
+                {isSelected && <Ionicons name="checkmark" size={20} color={ORANGE} style={s.trailingCheck} />}
+              </TouchableOpacity>
+            )
+          })}
         </View>
 
         {/* ── Behaviour ──────────────────────────────────────────────────── */}
         <SectionLabel label="BEHAVIOUR" C={C} />
-        <View style={[s.card, { backgroundColor: C.card, borderColor: C.border }]}>
-          <View style={s.toggleRow}>
-            <View style={s.toggleLabels}>
-              <Text style={[s.listPrimary, { color: C.text }]}>Auto-listen</Text>
-              <Text style={[s.listSecondary, { color: C.sub }]}>
-                Restart listening after Kwame finishes speaking
+        <View style={[s.card, { backgroundColor: C.card }]}>
+          <View style={s.rowLayout}>
+            <View style={s.rowLabels}>
+              <Text style={[s.rowTitle, { color: C.text }]}>Auto-listen</Text>
+              <Text style={[s.rowSubtitle, { color: C.sub }]}>
+                Restart microphone after Kwame finishes speaking
               </Text>
             </View>
             <Switch
               value={settings.autoListen}
               onValueChange={(v) => set('autoListen', v)}
-              trackColor={{ false: C.border, true: ORANGE }}
+              trackColor={{ false: C.raised, true: ORANGE }}
               thumbColor="#FFFFFF"
             />
           </View>
@@ -397,7 +353,7 @@ export default function KwameSettingsScreen() {
 
         {/* ── Voice detection ────────────────────────────────────────────── */}
         <SectionLabel label="VOICE DETECTION" C={C} />
-        <View style={[s.card, { backgroundColor: C.card, borderColor: C.border }]}>
+        <View style={[s.card, { backgroundColor: C.card }]}>
           <StepRow
             label="Sensitivity"
             display={`${settings.silenceThresholdDb} dB`}
@@ -415,7 +371,7 @@ export default function KwameSettingsScreen() {
             C={C}
           />
         </View>
-        <Text style={[s.footnote, { color: C.sub }]}>
+        <Text style={[s.footnote, { color: C.sub, marginBottom: 20 }]}>
           Lower sensitivity reduces false triggers. Higher hold adds patience before sending.
         </Text>
 
@@ -432,80 +388,67 @@ const s = StyleSheet.create({
 
   // Header
   header: {
-    height: 64, flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between', paddingHorizontal: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    height: 54, flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'space-between', paddingHorizontal: 12,
   },
-  headerBack:   { width: 40 },
-  headerSpacer: { width: 40 },
+  headerBack:   { width: 44, alignItems: 'flex-start' },
+  headerSpacer: { width: 44 },
   headerCenter: { alignItems: 'center' },
-  headerTitle:  { fontSize: 17, fontWeight: '600', letterSpacing: -0.3 },
-  headerKwame:  { fontSize: 11, fontWeight: '700', letterSpacing: 0.6, marginTop: 2 },
+  headerTitle:  { fontSize: 17, fontWeight: '600' },
 
-  content: { paddingHorizontal: 16, paddingTop: 20 },
+  content: { paddingHorizontal: 16, paddingTop: 10 },
 
   sectionLabel: {
-    fontSize: 11, fontWeight: '600', letterSpacing: 0.8,
-    marginBottom: 8, marginTop: 22, marginLeft: 4,
+    fontSize: 12, fontWeight: '600', letterSpacing: 0.6,
+    marginBottom: 8, marginTop: 24, marginLeft: 16,
   },
 
-  footnote: { fontSize: 12, lineHeight: 17, marginTop: 6, marginLeft: 4 },
+  footnote: { fontSize: 13, lineHeight: 18, marginTop: 10, marginHorizontal: 16 },
 
-  card: { borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  card: { borderRadius: 20, overflow: 'hidden' },
 
   // Range bar
-  rangeTrack: { height: 2, borderRadius: 1, marginHorizontal: 16, marginBottom: 14, overflow: 'hidden' },
-  rangeFill:  { height: '100%', borderRadius: 1, backgroundColor: ORANGE },
+  rangeTrack: { height: 4, borderRadius: 2, marginHorizontal: 16, marginBottom: 16, overflow: 'hidden' },
+  rangeFill:  { height: '100%', borderRadius: 2, backgroundColor: ORANGE },
 
   // Step row
   stepOuter:    { borderBottomWidth: StyleSheet.hairlineWidth },
   stepInner:    {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10,
+    paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12,
   },
-  stepLabel:    { fontSize: 15, fontWeight: '500', flex: 1, letterSpacing: -0.1 },
-  stepControls: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  stepLabel:    { fontSize: 16, fontWeight: '500', flex: 1 },
+  stepControls: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   stepBtn: {
-    width: 30, height: 30, borderRadius: 15, borderWidth: StyleSheet.hairlineWidth,
+    width: 32, height: 32, borderRadius: 16,
     justifyContent: 'center', alignItems: 'center',
   },
-  stepValue: { fontSize: 14, fontWeight: '600', minWidth: 56, textAlign: 'center' },
+  stepValue: { fontSize: 15, fontWeight: '600', minWidth: 50, textAlign: 'center' },
 
-  // Voice row
-  voiceRow: {
+  // Unified Rows for Voice/Language/Style
+  rowLayout: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 13,
+    paddingHorizontal: 16, paddingVertical: 14,
   },
+  rowLabels: { flex: 1, marginRight: 10 },
+  rowTitle: { fontSize: 16, fontWeight: '600', marginBottom: 2 },
+  rowSubtitle: { fontSize: 13 },
+  trailingCheck: { marginLeft: 14 },
+
+  // Specific Row Assets
   initCircle: {
-    width: 38, height: 38, borderRadius: 19,
+    width: 42, height: 42, borderRadius: 21,
     justifyContent: 'center', alignItems: 'center',
-    marginRight: 13, borderWidth: 1.5,
+    marginRight: 14,
   },
-  initLetter:  { fontSize: 17, fontWeight: '700' },
-  voiceLabels: { flex: 1 },
-  voiceName:   { fontSize: 15, fontWeight: '600', letterSpacing: -0.2 },
-  voiceTrait:  { fontSize: 12, marginTop: 2 },
+  initLetter:  { fontSize: 18, fontWeight: '700' },
+  langFlag:    { fontSize: 26, marginRight: 14 },
+  styleIcon:   { width: 42, height: 42, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 14 },
+  
+  // Play preview button
   previewBtn: {
-    width: 30, height: 30, borderRadius: 15,
-    borderWidth: StyleSheet.hairlineWidth,
+    width: 34, height: 34, borderRadius: 17,
     justifyContent: 'center', alignItems: 'center',
-    marginRight: 10,
+    marginLeft: 10,
   },
-  checkDot: {
-    width: 20, height: 20, borderRadius: 10,
-    backgroundColor: ORANGE,
-    justifyContent: 'center', alignItems: 'center',
-  },
-
-  // Shared list row (language + style)
-  listRow:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14 },
-  langFlag:      { fontSize: 24, marginRight: 14 },
-  listLabels:    { flex: 1 },
-  listPrimary:   { fontSize: 15, fontWeight: '600', letterSpacing: -0.2 },
-  listSecondary: { fontSize: 12, marginTop: 2 },
-  styleIcon:     { width: 36, height: 36, borderRadius: 9, justifyContent: 'center', alignItems: 'center', marginRight: 13 },
-
-  // Toggle row
-  toggleRow:    { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14 },
-  toggleLabels: { flex: 1, marginRight: 12 },
 });

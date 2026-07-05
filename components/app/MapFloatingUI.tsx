@@ -1,6 +1,6 @@
 // components/app/MapFloatingUI.tsx
 import { Step, detectManeuver, maneuverIcon, mToNice, stepIcon } from "@/utils/mapHelpers";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import React, { JSX, useEffect, useRef } from "react";
 import { Animated, Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -12,6 +12,9 @@ const GREY   = "#8E8E93";
 const WHITE  = "#FFFFFF";
 const BLUE   = "#007AFF";
 const GREEN  = "#34C759";
+
+/** Distance (m) at which the maneuver progress bar starts filling. */
+const PROGRESS_RANGE_M = 300;
 
 interface MapFloatingUIProps {
   onRecenter:         () => void;
@@ -43,10 +46,20 @@ interface MapFloatingUIProps {
   cameraHeading?:     number;
   onResetNorth:       () => void;
   headingUp?:         boolean;
-  // Walking-specific nav enhancements
   stepEta?:           Date | null;
   walkInstruction?:   string | null;
   walkDestination?:   string | null;
+  /** User is near the boarding stop — offer the manual "I'm on board" trigger. */
+  canBoardTransit?:   boolean;
+  onBoardTransit?:    () => void;
+  /** User appears to be inside a building (GPS accuracy heuristic). */
+  isIndoor?:          boolean;
+  /** Trip is paused (duka stop) — guidance frozen, journey intact. */
+  paused?:            boolean;
+  onResume?:          () => void;
+  /** AR walking guidance available (walk legs during navigation). */
+  showAR?:            boolean;
+  onOpenAR?:          () => void;
 }
 
 function formatEta(date: Date): string {
@@ -57,10 +70,58 @@ function formatEta(date: Date): string {
   return `${h}:${m} ${ampm}`;
 }
 
-/** Compact distance for the "In X m" prefix. */
 function navDist(m: number): string {
   if (m < 1000) return `${Math.round(m / 10) * 10} m`;
   return `${(m / 1000).toFixed(1)} km`;
+}
+
+/**
+ * Slides + fades its content in whenever `bannerKey` changes, so switching
+ * between banner states (search → journey → nav → arrival…) feels like one
+ * surface morphing instead of components popping in and out.
+ */
+function AnimatedBanner({ bannerKey, children }: { bannerKey: string; children: React.ReactNode }) {
+  const anim = useRef(new Animated.Value(1)).current;
+  const prevKey = useRef(bannerKey);
+
+  useEffect(() => {
+    if (prevKey.current === bannerKey) return;
+    prevKey.current = bannerKey;
+    anim.setValue(0);
+    Animated.spring(anim, { toValue: 1, friction: 9, tension: 70, useNativeDriver: true }).start();
+  }, [bannerKey, anim]);
+
+  return (
+    <Animated.View
+      style={{
+        opacity: anim,
+        transform: [
+          { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [-16, 0] }) },
+          { scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) },
+        ],
+      }}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
+/** Round action button with press-down scale feedback. */
+function Fab({
+  onPress, bg, small = false, children,
+}: { onPress: () => void; bg: string; small?: boolean; children: React.ReactNode }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        s.fab,
+        small && s.layerFab,
+        { backgroundColor: bg, transform: [{ scale: pressed ? 0.9 : 1 }], opacity: pressed ? 0.85 : 1 },
+      ]}
+    >
+      {children}
+    </Pressable>
+  );
 }
 
 export default function MapFloatingUI({
@@ -73,12 +134,16 @@ export default function MapFloatingUI({
   onOpenReport, onOpenLayers,
   nextNextPreview, approachPhase, cameraHeading, onResetNorth, headingUp = false,
   stepEta, walkInstruction, walkDestination,
+  canBoardTransit = false, onBoardTransit, isIndoor = false,
+  paused = false, onResume,
+  showAR = false, onOpenAR,
 }: MapFloatingUIProps): JSX.Element {
-  const insets    = useSafeAreaInsets();
-  const lastTap   = useRef(0);
+  const insets = useSafeAreaInsets();
 
-  // Pulse navIconBox when imminent turn is approaching
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const pulseAnim    = useRef(new Animated.Value(1)).current;
+  const bottomAnim   = useRef(new Animated.Value(0)).current;
+  const progressAnim = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
     if (approachPhase !== "imminent") { pulseAnim.setValue(1); return; }
     const loop = Animated.loop(Animated.sequence([
@@ -88,43 +153,61 @@ export default function MapFloatingUI({
     loop.start();
     return () => loop.stop();
   }, [approachPhase, pulseAnim]);
-  const dark      = useColorScheme() === "dark";
-  const cardBg    = dark ? "#1C1C1E" : WHITE;
-  const textColor = dark ? "#FFFFFF" : BLACK;
-  const lightBg   = dark ? "#2C2C2E" : "#F2F2F7";
-  const softOrange = dark ? "rgba(255,111,0,0.18)" : "#FFF3E0";
 
-  const handleNavBtn = () => {
-    if (navigating) {
-      onResetNorth();
-    } else {
-      onRecenter();
-    }
-  };
+  useEffect(() => {
+    Animated.spring(bottomAnim, {
+      toValue: -bottomOffset,
+      friction: 8,
+      tension: 65,
+      useNativeDriver: true,
+    }).start();
+  }, [bottomOffset, bottomAnim]);
 
-  // ── Build instruction text with "In X m" prefix ───────────────────────────
-  const showCountdown = distanceToNextStepM != null && distanceToNextStepM > 40;
-  const instructionText = nextPreview
-    ? showCountdown
-      ? `In ${navDist(distanceToNextStepM!)}, ${nextPreview}`
-      : nextPreview
-    : null;
+  // Maneuver progress: fills as the user closes the last PROGRESS_RANGE_M
+  // toward the next maneuver (Waze-style anticipation cue).
+  useEffect(() => {
+    if (!navigating || distanceToNextStepM == null) { progressAnim.setValue(0); return; }
+    const p = 1 - Math.min(PROGRESS_RANGE_M, Math.max(0, distanceToNextStepM)) / PROGRESS_RANGE_M;
+    Animated.timing(progressAnim, { toValue: p, duration: 350, useNativeDriver: false }).start();
+  }, [navigating, distanceToNextStepM, progressAnim]);
 
-  // ── Sub-text: stops remaining (transit) or distance remaining (walk) ──────
+  const dark       = useColorScheme() === "dark";
+  const cardBg     = dark ? "#1C1C1E" : WHITE;
+  const textColor  = dark ? "#FFFFFF" : BLACK;
+  const lightBg    = dark ? "#2C2C2E" : "#F2F2F7";
+
+  // Current leg is a transit ride (not a walk): color the banner blue, Waze-style.
+  const transitLeg = !walkInstruction && nextStep?.type != null && nextStep.type !== "WALK";
+  const bannerBg   = transitLeg ? BLUE : ORANGE;
+
   const subText = (() => {
-    if (stopsRemaining != null && stopsRemaining > 0) {
-      return `${stopsRemaining} stop${stopsRemaining === 1 ? "" : "s"} remaining`;
-    }
-    if (showNavSub && remainingDistanceM != null) {
-      return `${mToNice(remainingDistanceM)} remaining`;
-    }
+    if (stopsRemaining != null && stopsRemaining > 0) return `${stopsRemaining} stop${stopsRemaining === 1 ? "" : "s"} remaining`;
+    if (showNavSub && remainingDistanceM != null) return `${mToNice(remainingDistanceM)} remaining`;
     return null;
   })();
 
-  // ── Top banner priority: arrived > off-route > navigating > journey > idle ─
+  let bannerKey: string;
   let topContent: React.ReactNode;
 
-  if (arrivalSoonShown) {
+  if (paused) {
+    bannerKey = "paused";
+    topContent = (
+      <Pressable onPress={onResume} style={s.pausedBanner}>
+        <View style={s.navIconBox}>
+          <Ionicons name="pause" size={22} color={WHITE} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={s.navInstruction}>Trip paused</Text>
+          <Text style={s.navSub}>Progress is frozen — tap to resume</Text>
+        </View>
+        <View style={s.resumePill}>
+          <Ionicons name="play" size={14} color="#B45309" />
+          <Text style={s.resumePillText}>Resume</Text>
+        </View>
+      </Pressable>
+    );
+  } else if (arrivalSoonShown) {
+    bannerKey = "arrival";
     topContent = (
       <View style={[s.arrivalBanner, { backgroundColor: cardBg }]}>
         <Ionicons name="checkmark-circle" size={20} color={GREEN} />
@@ -133,10 +216,11 @@ export default function MapFloatingUI({
     );
   } else if (navigating && (navStatus === "off_route" || navStatus === "rerouting")) {
     const rerouting = navStatus === "rerouting";
+    bannerKey = "offroute";
     topContent = (
       <View style={s.offRouteBanner}>
         <View style={s.navIconBox}>
-          <Ionicons name={rerouting ? "refresh" : "warning"} size={20} color={WHITE} />
+          <MaterialIcons name={rerouting ? "autorenew" : "warning-amber"} size={24} color={WHITE} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={s.navInstruction} numberOfLines={1}>
@@ -149,10 +233,11 @@ export default function MapFloatingUI({
       </View>
     );
   } else if (wrongDirection && navigating) {
+    bannerKey = "wrongdir";
     topContent = (
       <View style={s.offRouteBanner}>
         <View style={s.navIconBox}>
-          <Ionicons name="arrow-back-circle" size={20} color={WHITE} />
+          <MaterialIcons name="u-turn-left" size={24} color={WHITE} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={s.navInstruction}>Wrong direction</Text>
@@ -160,45 +245,78 @@ export default function MapFloatingUI({
         </View>
       </View>
     );
-  } else if (navigating && (walkInstruction || instructionText)) {
-    // Walking with sub-step instructions: show turn-by-turn text and distance to
-    // boarding stop as sub-text. Transit legs keep the existing layout unchanged.
-    const isWalkSub     = !!walkInstruction;
-    const mainText      = isWalkSub ? walkInstruction! : instructionText!;
-    const iconName      = isWalkSub
+  } else if (navigating && (walkInstruction || nextPreview)) {
+    const isWalkSub = !!walkInstruction;
+    const mainText  = isWalkSub ? walkInstruction! : nextPreview!;
+    const iconName  = isWalkSub
       ? maneuverIcon(detectManeuver(walkInstruction!))
-      : (nextStep ? stepIcon(nextStep.type) : "navigate");
-    const walkSubText   = isWalkSub && distanceToNextStepM != null && distanceToNextStepM > 40
-      ? `${navDist(distanceToNextStepM)}${walkDestination ? " to " + walkDestination : ""}`
-      : isWalkSub ? (walkDestination ?? null)
-      : subText;
-    const displayEta    = isWalkSub && stepEta ? stepEta : eta;
+      : (nextStep ? stepIcon(nextStep.type) : "navigation");
 
+    // Distance lives under the maneuver icon (Waze layout), not in the sentence.
+    const showDistance = distanceToNextStepM != null && distanceToNextStepM > 15;
+
+    const navSubText = isWalkSub
+      ? (walkDestination ? `to ${walkDestination}` : subText)
+      : subText;
+
+    const displayEta = isWalkSub && stepEta ? stepEta : eta;
+
+    bannerKey = transitLeg ? "nav-transit" : "nav-walk";
     topContent = (
-      <View style={s.navBanner}>
-        <Animated.View style={[s.navIconBox, { transform: [{ scale: pulseAnim }] }]}>
-          <Ionicons name={iconName} size={20} color={WHITE} />
-        </Animated.View>
-        <View style={{ flex: 1 }}>
-          <Text style={s.navInstruction} numberOfLines={2}>{mainText}</Text>
-          {walkSubText && <Text style={s.navSub} numberOfLines={1}>{walkSubText}</Text>}
-          {nextNextPreview && (
-            <View style={s.thenChip}>
-              <Ionicons name="return-down-forward" size={11} color="rgba(255,255,255,0.70)" />
-              <Text style={s.thenText} numberOfLines={1}>then {nextNextPreview}</Text>
+      <View style={[s.navBanner, { backgroundColor: bannerBg }]}>
+        <View style={s.navBannerRow}>
+          <Animated.View style={[s.navIconCol, { transform: [{ scale: pulseAnim }] }]}>
+            <View style={s.navIconBox}>
+              <MaterialIcons name={iconName as any} size={28} color={WHITE} />
             </View>
-          )}
+            {showDistance && (
+              <Text style={s.navIconDist}>{navDist(distanceToNextStepM!)}</Text>
+            )}
+          </Animated.View>
+
+          <View style={{ flex: 1 }}>
+            <Text style={s.navInstruction} numberOfLines={2}>{mainText}</Text>
+            {navSubText && <Text style={s.navSub} numberOfLines={1}>{navSubText}</Text>}
+
+            {nextNextPreview && (
+              <View style={s.thenChip}>
+                <MaterialIcons name="subdirectory-arrow-right" size={14} color="rgba(255,255,255,0.70)" />
+                <Text style={s.thenText} numberOfLines={1}>then {nextNextPreview}</Text>
+              </View>
+            )}
+          </View>
+
+          <View style={s.navEtaContainer}>
+            <Pressable
+              onPress={onOpenKwame}
+              style={({ pressed }) => [s.navKwamePill, pressed && { opacity: 0.7 }]}
+            >
+              <Ionicons name="sparkles" size={12} color={bannerBg} />
+              <Text style={[s.navKwamePillText, { color: bannerBg }]}>AI</Text>
+            </Pressable>
+            {displayEta && <Text style={s.navEta}>{formatEta(displayEta)}</Text>}
+          </View>
         </View>
-        {displayEta && <Text style={s.navEta}>{formatEta(displayEta)}</Text>}
+
+        {/* Approach progress toward the next maneuver */}
+        <View style={s.progressTrack}>
+          <Animated.View
+            style={[
+              s.progressFill,
+              { width: progressAnim.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }) },
+            ]}
+          />
+        </View>
       </View>
     );
   } else if (waitingForBus && activeJourney) {
     const seg       = activeJourney.route?.segments?.find((s: any) => s.mode !== "WALK");
     const routeName = seg?.route_name ?? "";
     const boardStop = seg?.from?.name ?? "boarding stop";
+    bannerKey = "waiting";
     topContent = (
       <View style={[s.journeyBanner, { backgroundColor: cardBg }]}>
-        <Ionicons name="time-outline" size={20} color={BLUE} />
+        <MaterialIcons name="directions-bus" size={24} color={BLUE} />
         <View style={{ flex: 1 }}>
           <Text style={[s.journeyText, { color: textColor }]} numberOfLines={1}>
             Waiting for Line {routeName}
@@ -211,9 +329,10 @@ export default function MapFloatingUI({
       </View>
     );
   } else if (activeJourney) {
+    bannerKey = "journey";
     topContent = (
       <View style={[s.journeyBanner, { backgroundColor: cardBg }]}>
-        <Ionicons name="navigate-circle" size={20} color={ORANGE} />
+        <MaterialIcons name="place" size={24} color={ORANGE} />
         <Text style={[s.journeyText, { color: textColor }]} numberOfLines={1}>
           To {activeJourney.toLoc.name}
         </Text>
@@ -223,394 +342,227 @@ export default function MapFloatingUI({
       </View>
     );
   } else {
+    bannerKey = "search";
     topContent = (
-      <Pressable style={[s.searchBar, { backgroundColor: cardBg }]} onPress={onOpenSearch}>
-        <View style={s.searchTouchable}>
-          <Ionicons name="search" size={18} color={GREY} />
-          <Text style={s.searchPlaceholder}>{"Search destination…"}</Text>
-        </View>
-        <Pressable onPress={onOpenKwame} style={[s.kwameChip, { backgroundColor: softOrange }]}>
-          <Ionicons name="sparkles" size={14} color={ORANGE} />
-          <Text style={s.kwameChipText}>AI</Text>
+      <View style={[s.searchBar, { backgroundColor: cardBg }]}>
+        <Pressable style={s.searchTouchable} onPress={onOpenSearch}>
+          <Ionicons name="search" size={20} color={dark ? "#A0A0A5" : "#666"} />
+          <Text style={[s.searchPlaceholder, { color: dark ? "#A0A0A5" : "#666" }]}>Search destination...</Text>
         </Pressable>
-      </Pressable>
+
+        <View style={[s.searchDivider, { backgroundColor: dark ? "#333" : "#E5E5EA" }]} />
+
+        <Pressable
+          onPress={onOpenKwame}
+          hitSlop={10}
+          style={({ pressed }) => [s.searchKwameBtn, pressed && { transform: [{ scale: 0.88 }] }]}
+        >
+          <Ionicons name="sparkles" size={22} color={ORANGE} />
+        </Pressable>
+      </View>
     );
   }
 
-  // ── Recenter button: locked (camera follows user) vs unlocked (user panned) ─
   const cameraUnlocked = navigating && !followMe;
+  const isRotated = Math.abs(cameraHeading ?? 0) > 5;
+
+  let actionIcon: keyof typeof Ionicons.glyphMap = "locate";
+  let actionColor = ORANGE;
+  let actionBg = cardBg;
+  let actionHandler = onRecenter;
+
+  if (navigating) {
+    if (cameraUnlocked) {
+      actionIcon = "locate";
+      actionColor = WHITE;
+      actionBg = BLUE;
+      actionHandler = onResetNorth;
+    } else {
+      actionIcon = headingUp ? "compass" : "navigate";
+      actionColor = BLUE;
+      actionBg = cardBg;
+      actionHandler = onResetNorth;
+    }
+  } else {
+    if (isRotated && !followMe) {
+      actionIcon = "compass-outline";
+      actionColor = ORANGE;
+      actionBg = cardBg;
+      actionHandler = onResetNorth;
+    } else {
+      actionIcon = followMe ? "locate" : "locate-outline";
+      actionColor = followMe ? BLUE : ORANGE;
+      actionBg = cardBg;
+      actionHandler = onRecenter;
+    }
+  }
 
   return (
     <>
       <View style={[s.topArea, { paddingTop: (insets.top || 44) + 8 }]}>
-        {topContent}
+        <AnimatedBanner bannerKey={bannerKey}>
+          {topContent}
+        </AnimatedBanner>
+
+        {!navigating && (
+          <View style={s.layersContainer}>
+            <Fab onPress={onOpenLayers} bg={cardBg} small>
+              <Ionicons name="layers" size={20} color={ORANGE} />
+            </Fab>
+          </View>
+        )}
       </View>
 
-      {/* Top Right Floating Stack */}
-      {navigating && (
-        <View style={[s.topRightStack, { top: (insets.top || 44) + 86 }]}>
-          <Pressable onPress={onOpenKwame} style={[s.navBtn, { backgroundColor: cardBg }]}>
-            <Ionicons name="sparkles" size={22} color={ORANGE} />
+      {/* Indoor mini-map card (left side, mirrors the FAB stack) — taps into
+          AR guidance, which is exactly what helps when GPS degrades indoors. */}
+      {isIndoor && (
+        <Animated.View
+          style={[
+            s.indoorCard,
+            {
+              backgroundColor: cardBg,
+              bottom: (insets.bottom || 0) + 36,
+              transform: [{ translateY: bottomAnim }],
+            },
+          ]}
+        >
+          <Pressable onPress={onOpenAR} disabled={!onOpenAR} style={{ alignItems: "center" }}>
+            <View style={s.indoorGrid}>
+              {Array.from({ length: 9 }).map((_, i) => (
+                <View key={i} style={[s.indoorCell, { borderColor: lightBg }]} />
+              ))}
+              <View style={s.indoorDot} />
+            </View>
+            <View style={s.indoorLabelRow}>
+              <Ionicons name="business-outline" size={11} color={GREY} />
+              <Text style={s.indoorLabel}>Indoor</Text>
+            </View>
+            <Text style={s.indoorSub}>{onOpenAR ? "Tap for AR view" : "AR view soon"}</Text>
           </Pressable>
-        
-
-          {/* Report Button */}
-          <Pressable
-            onPress={onOpenReport}
-            style={[
-              s.navBtn,
-              { backgroundColor: cardBg },
-              dark && {
-                borderTopColor:    "rgba(255,255,255,0.08)",
-                borderBottomColor: "rgba(0,0,0,0.30)",
-                borderLeftColor:   "rgba(0,0,0,0.12)",
-                borderRightColor:  "rgba(0,0,0,0.12)",
-              },
-            ]}
-          >
-            <Ionicons name="warning-outline" size={22} color={ORANGE} />
-          </Pressable>
-
-          {/* Compass / heading-mode toggle — three states:
-              unlocked (panned away): blue locate → tap to re-lock
-              locked + north-up:      orange navigate-circle → tap for heading-up
-              locked + heading-up:    blue compass → tap back to north-up */}
-          <Pressable
-            onPress={handleNavBtn}
-            style={[
-              s.navBtn,
-              { backgroundColor: (cameraUnlocked || headingUp) ? BLUE : cardBg },
-              dark && !cameraUnlocked && !headingUp && {
-                borderTopColor:    "rgba(255,255,255,0.08)",
-                borderBottomColor: "rgba(0,0,0,0.30)",
-                borderLeftColor:   "rgba(0,0,0,0.12)",
-                borderRightColor:  "rgba(0,0,0,0.12)",
-              },
-            ]}
-          >
-            <Ionicons
-              name={cameraUnlocked ? "locate" : headingUp ? "compass" : "navigate-circle-outline"}
-              size={22}
-              color={(cameraUnlocked || headingUp) ? WHITE : ORANGE}
-            />
-          </Pressable>
-      </View>
+        </Animated.View>
       )}
 
-      <View style={[s.stack, { bottom: (insets.bottom || 0) + 36 + bottomOffset }]}>
+      <Animated.View
+        style={[
+          s.bottomRightStack,
+          {
+            bottom: (insets.bottom || 0) + 36,
+            transform: [{ translateY: bottomAnim }],
+          },
+        ]}
+      >
+        {canBoardTransit && onBoardTransit && (
+          <Pressable
+            onPress={onBoardTransit}
+            style={({ pressed }) => [s.boardPill, { transform: [{ scale: pressed ? 0.94 : 1 }] }]}
+          >
+            <MaterialIcons name="directions-bus" size={18} color={WHITE} />
+            <Text style={s.boardPillText}>{"I'm on board"}</Text>
+          </Pressable>
+        )}
+
+        {showAR && onOpenAR && (
+          <Fab onPress={onOpenAR} bg={cardBg}>
+            <MaterialIcons name="view-in-ar" size={22} color={ORANGE} />
+          </Fab>
+        )}
+
         {gpsLost && navigating && (
           <View style={s.gpsLostPill}>
             <Ionicons name="warning-outline" size={12} color={WHITE} />
             <Text style={s.gpsLostText}>GPS lost</Text>
           </View>
         )}
+
         {navigating && currentSpeedKph != null && currentSpeedKph > 1 && (
           <View style={[s.speedPill, { backgroundColor: cardBg }]}>
             <Text style={[s.speedVal, { color: textColor }]}>{currentSpeedKph}</Text>
             <Text style={s.speedUnit}>km/h</Text>
           </View>
         )}
-        {!navigating && (
-          <View>
-            {/* Compass / north-reset — only when map has rotated */}
-            {Math.abs(cameraHeading ?? 0) > 5 && (
-              <Pressable
-                onPress={onResetNorth}
-                style={[s.navBtn, { backgroundColor: cardBg }]}
-              >
-                <Ionicons name="compass-outline" size={22} color={ORANGE} />
-              </Pressable>
-            )}
 
-            {/* Layers Button */}
-            <Pressable
-              onPress={onOpenLayers}
-              accessibilityRole="button"
-              accessibilityLabel="Map layers"
-              style={[
-                s.navBtn,
-                { backgroundColor: cardBg },
-                dark && {
-                  borderTopColor:    "rgba(255,255,255,0.08)",
-                  borderBottomColor: "rgba(0,0,0,0.30)",
-                  borderLeftColor:   "rgba(0,0,0,0.12)",
-                  borderRightColor:  "rgba(0,0,0,0.12)",
-                },
-              ]}
-            >
-              <Ionicons name="layers-outline" size={22} color={ORANGE} />
-            </Pressable>
+        <Fab onPress={onOpenReport} bg={cardBg}>
+          <Ionicons name="warning" size={22} color={ORANGE} />
+        </Fab>
 
-            {/* Report Button */}
-            <Pressable
-              onPress={onOpenReport}
-              accessibilityRole="button"
-              accessibilityLabel="Report an incident"
-            style={[
-              s.navBtn,
-              { backgroundColor: cardBg },
-              dark && {
-                borderTopColor:    "rgba(255,255,255,0.08)",
-                borderBottomColor: "rgba(0,0,0,0.30)",
-                borderLeftColor:   "rgba(0,0,0,0.12)",
-                borderRightColor:  "rgba(0,0,0,0.12)",
-              },
-            ]}
-          >
-            <Ionicons name="warning-outline" size={22} color={ORANGE} />
-          </Pressable>
-
-          {/* Recenter/Compass */}
-          <Pressable
-            onPress={handleNavBtn}
-            style={[
-              s.navBtn,
-              { backgroundColor: cameraUnlocked ? BLUE : cardBg },
-              dark && !cameraUnlocked && {
-                borderTopColor:    "rgba(255,255,255,0.08)",
-                borderBottomColor: "rgba(0,0,0,0.30)",
-                borderLeftColor:   "rgba(0,0,0,0.12)",
-                borderRightColor:  "rgba(0,0,0,0.12)",
-              },
-            ]}
-          >
-            <Ionicons
-              name={cameraUnlocked ? "locate" : navigating ? "compass" : "navigate"}
-              size={22}
-              color={cameraUnlocked ? WHITE : navigating ? BLUE : ORANGE}
-            />
-          </Pressable>
-          {/* Dot indicator: camera is unlocked from user position */}
-          {cameraUnlocked && (
-            <View style={s.unlockedDot} />
-          )}
-
-        </View>
-        )}
-      </View>
+        <Fab onPress={actionHandler} bg={actionBg}>
+          <Ionicons name={actionIcon} size={24} color={actionColor} />
+          {cameraUnlocked && <View style={s.unlockedDot} />}
+        </Fab>
+      </Animated.View>
     </>
   );
 }
 
 const mapShadow = {
-  shadowColor:   "#000",
-  shadowOpacity: 0.18,
-  shadowRadius:  12,
-  shadowOffset:  { width: 0, height: 4 },
-  elevation:     8,
+  shadowColor: "#000",
+  shadowOpacity: 0.12,
+  shadowRadius: 12,
+  shadowOffset: { width: 0, height: 4 },
+  elevation: 8,
 } as const;
 
 const s = StyleSheet.create({
-  topArea: {
-    position:        "absolute",
-    top: 0, left: 0, right: 0,
-    paddingHorizontal: 16,
-    zIndex:          10,
-  },
-  
-  topRightStack: { 
-    // marginTop: 15,
-    position: "absolute", 
-    right: 16, 
-    zIndex: 15, 
-    gap: 4 
+  topArea:           { position: "absolute", top: 0, left: 0, right: 0, paddingHorizontal: 16, zIndex: 10 },
 
-  },
+  searchBar:         { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 999, paddingVertical: 10, paddingHorizontal: 16, minHeight: 52, ...mapShadow },
+  searchTouchable:   { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
+  searchPlaceholder: { fontSize: 16, fontWeight: "400" },
+  searchDivider:     { width: 1, height: 24, marginHorizontal: 10 },
+  searchKwameBtn:    { padding: 4 },
 
-  searchBar: {
-    flexDirection:    "row",
-    alignItems:       "center",
-    gap:              10,
-    borderRadius:     16,
-    paddingVertical:  14,
-    paddingHorizontal: 16,
-    ...mapShadow,
-  },
-  searchPlaceholder: {
-    flex:       1,
-    fontSize:   16,
-    color:      GREY,
-    fontWeight: "400",
-  },
-  searchTouchable: {
-    flex:          1,
-    flexDirection: "row",
-    alignItems:    "center",
-    gap:           10,
-  },
-  kwameChip: {
-    flexDirection:    "row",
-    alignItems:       "center",
-    gap:              4,
-    borderRadius:     8,
-    paddingHorizontal: 12,
-    paddingVertical:  9,
-  },
-  kwameChipText: {
-    fontSize:      12,
-    fontWeight:    "700",
-    color:         ORANGE,
-    letterSpacing: 0.3,
-  },
+  layersContainer:   { alignItems: "flex-end", marginTop: 12 },
 
-  journeyBanner: {
-    flexDirection:    "row",
-    alignItems:       "center",
-    gap:              10,
-    borderRadius:     16,
-    paddingVertical:  13,
-    paddingHorizontal: 16,
-    ...mapShadow,
-  },
-  journeyText: {
-    flex:       1,
-    fontSize:   16,
-    fontWeight: "600",
-  },
-  bannerClose: {
-    width:          26,
-    height:         26,
-    borderRadius:   13,
-    alignItems:     "center",
-    justifyContent: "center",
-  },
+  journeyBanner:     { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 16, paddingVertical: 13, paddingHorizontal: 16, ...mapShadow },
+  journeyText:       { flex: 1, fontSize: 16, fontWeight: "600" },
+  bannerClose:       { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center" },
 
-  navBanner: {
-    flexDirection:    "row",
-    alignItems:       "center",
-    gap:              12,
-    backgroundColor:  ORANGE,
-    borderRadius:     16,
-    paddingVertical:  13,
-    paddingHorizontal: 14,
-    ...mapShadow,
-  },
-  offRouteBanner: {
-    flexDirection:    "row",
-    alignItems:       "center",
-    gap:              12,
-    backgroundColor:  RED,
-    borderRadius:     16,
-    paddingVertical:  13,
-    paddingHorizontal: 14,
-    ...mapShadow,
-  },
-  navIconBox: {
-    width:          36,
-    height:         36,
-    borderRadius:   10,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    alignItems:     "center",
-    justifyContent: "center",
-  },
-  navInstruction: { color: WHITE, fontSize: 15, fontWeight: "600" },
-  navSub:         { color: "rgba(255,255,255,0.72)", fontSize: 12, marginTop: 2 },
-  navEta:         { color: WHITE, fontSize: 15, fontWeight: "700", flexShrink: 0 },
+  navBanner:         { borderRadius: 16, overflow: "hidden", ...mapShadow },
+  navBannerRow:      { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 13, paddingHorizontal: 14 },
+  offRouteBanner:    { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: RED, borderRadius: 16, paddingVertical: 13, paddingHorizontal: 14, ...mapShadow },
+  navIconCol:        { alignItems: "center", gap: 3 },
+  navIconBox:        { width: 40, height: 40, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
+  navIconDist:       { color: WHITE, fontSize: 12, fontWeight: "800", fontVariant: ["tabular-nums"] },
+  navInstruction:    { color: WHITE, fontSize: 16, fontWeight: "700" },
+  navSub:            { color: "rgba(255,255,255,0.85)", fontSize: 13, marginTop: 2, fontWeight: "500" },
+  navEta:            { color: WHITE, fontSize: 15, fontWeight: "700", flexShrink: 0 },
 
-  arrivalBanner: {
-    flexDirection:    "row",
-    alignItems:       "center",
-    gap:              8,
-    alignSelf:        "center",
-    borderRadius:     999,
-    paddingVertical:  10,
-    paddingHorizontal: 20,
-    ...mapShadow,
-  },
-  arrivalText: { fontSize: 16, fontWeight: "700", color: GREEN },
-  waitingSub:  { fontSize: 12, marginTop: 1 },
+  navEtaContainer:   { alignItems: "flex-end", justifyContent: "center", gap: 6 },
+  navKwamePill:      { flexDirection: "row", alignItems: "center", backgroundColor: WHITE, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, gap: 4 },
+  navKwamePillText:  { fontSize: 10, fontWeight: "800" },
 
-  stack: {
-    position:   "absolute",
-    right:      16,
-    alignItems: "center",
-    gap:        12,
-    zIndex:     5,
-  },
+  progressTrack:     { height: 3, backgroundColor: "rgba(255,255,255,0.22)" },
+  progressFill:      { height: 3, backgroundColor: WHITE, borderTopRightRadius: 2, borderBottomRightRadius: 2 },
 
-  navBtn: {
-    width:          52,
-    height:         52,
-    borderRadius:   26,
-    alignItems:     "center",
-    justifyContent: "center",
-    shadowColor:    "#000",
-    shadowOffset:   { width: 0, height: 6 },
-    shadowOpacity:  0.22,
-    shadowRadius:   4,
-    elevation:      12,
-    borderTopWidth:    1,
-    borderTopColor:    "rgba(255,255,255,0.9)",
-    borderBottomWidth: 2,
-    borderBottomColor: "rgba(0,0,0,0.10)",
-    borderLeftWidth:   StyleSheet.hairlineWidth,
-    borderLeftColor:   "rgba(0,0,0,0.05)",
-    borderRightWidth:  StyleSheet.hairlineWidth,
-    borderRightColor:  "rgba(0,0,0,0.05)",
-    marginTop:          8,
-  },
-  unlockedDot: {
-    position:        "absolute",
-    top:             2,
-    right:           2,
-    width:           10,
-    height:          10,
-    borderRadius:    5,
-    backgroundColor: ORANGE,
-    borderWidth:     2,
-    borderColor:     WHITE,
-  },
+  arrivalBanner:     { flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "center", borderRadius: 999, paddingVertical: 10, paddingHorizontal: 20, ...mapShadow },
+  arrivalText:       { fontSize: 16, fontWeight: "700", color: GREEN },
+  waitingSub:        { fontSize: 12, marginTop: 1 },
 
-  nearBtn: {
-    width:          52,
-    height:         52,
-    borderRadius:   16,
-    alignItems:     "center",
-    justifyContent: "center",
-    shadowColor:    "#000",
-    shadowOpacity:  0.12,
-    shadowRadius:   6,
-    shadowOffset:   { width: 0, height: 3 },
-    elevation:      5,
-    borderWidth:    StyleSheet.hairlineWidth,
-    borderColor:    "rgba(0,0,0,0.06)",
-  },
-  badge: {
-    position:       "absolute",
-    top:            -4,
-    right:          -4,
-    backgroundColor: ORANGE,
-    borderRadius:   999,
-    minWidth:       18,
-    height:         18,
-    paddingHorizontal: 4,
-    alignItems:     "center",
-    justifyContent: "center",
-    borderWidth:    2,
-    borderColor:    WHITE,
-  },
-  badgeText: { color: WHITE, fontSize: 10, fontWeight: "700", lineHeight: 12 },
+  bottomRightStack:  { position: "absolute", right: 16, alignItems: "flex-end", gap: 12, zIndex: 15 },
+  fab:               { width: 48, height: 48, borderRadius: 14, alignItems: "center", justifyContent: "center", ...mapShadow },
+  layerFab:          { width: 44, height: 44, borderRadius: 12 },
 
-  gpsLostPill: {
-    flexDirection:    "row",
-    alignItems:       "center",
-    gap:              4,
-    backgroundColor:  RED,
-    borderRadius:     999,
-    paddingVertical:  5,
-    paddingHorizontal: 10,
-  },
-  gpsLostText: { color: WHITE, fontSize: 11, fontWeight: "600" },
+  boardPill:         { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: BLUE, borderRadius: 999, paddingVertical: 12, paddingHorizontal: 18, ...mapShadow },
+  boardPillText:     { color: WHITE, fontSize: 14, fontWeight: "800" },
 
-  speedPill: {
-    alignItems:       "center",
-    borderRadius:     12,
-    paddingVertical:  6,
-    paddingHorizontal: 10,
-    ...mapShadow,
-  },
-  speedVal:  { fontSize: 15, fontWeight: "700" },
-  speedUnit: { fontSize: 10, color: GREY, fontWeight: "500", marginTop: -1 },
-  thenChip:  { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
-  thenText:  { fontSize: 11, color: "rgba(255,255,255,0.70)", fontWeight: "500" },
+  pausedBanner:      { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#F59E0B", borderRadius: 16, paddingVertical: 13, paddingHorizontal: 14, ...mapShadow },
+  resumePill:        { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: WHITE, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  resumePillText:    { color: "#B45309", fontSize: 13, fontWeight: "800" },
+
+  indoorCard:        { position: "absolute", left: 16, width: 92, borderRadius: 18, padding: 8, alignItems: "center", zIndex: 15, ...mapShadow },
+  indoorGrid:        { width: 74, height: 56, flexDirection: "row", flexWrap: "wrap", borderRadius: 10, overflow: "hidden", backgroundColor: "rgba(142,142,147,0.10)" },
+  indoorCell:        { width: "33.33%", height: "33.33%", borderWidth: StyleSheet.hairlineWidth },
+  indoorDot:         { position: "absolute", top: 24, left: 34, width: 8, height: 8, borderRadius: 4, backgroundColor: ORANGE, borderWidth: 1.5, borderColor: WHITE },
+  indoorLabelRow:    { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 6 },
+  indoorLabel:       { fontSize: 11, fontWeight: "700", color: GREY },
+  indoorSub:         { fontSize: 9, color: GREY, marginTop: 1 },
+
+  unlockedDot:       { position: "absolute", top: 4, right: 4, width: 10, height: 10, borderRadius: 5, backgroundColor: ORANGE, borderWidth: 2, borderColor: WHITE },
+  gpsLostPill:       { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: RED, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10, ...mapShadow },
+  gpsLostText:       { color: WHITE, fontSize: 11, fontWeight: "600" },
+  speedPill:         { alignItems: "center", borderRadius: 12, paddingVertical: 6, paddingHorizontal: 10, ...mapShadow },
+  speedVal:          { fontSize: 15, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  speedUnit:         { fontSize: 10, color: GREY, fontWeight: "500", marginTop: -1 },
+  thenChip:          { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
+  thenText:          { fontSize: 12, color: "rgba(255,255,255,0.85)", fontWeight: "600" },
 });

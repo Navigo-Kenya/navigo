@@ -1,22 +1,22 @@
 // app/(account)/offline-maps.tsx
+// Vector offline maps: pick a region on a Mapbox map and download it as
+// native style packs (light + dark). Mapbox then serves those tiles
+// automatically whenever the device is offline — no manual tile plumbing.
 import { ScreenHeader } from "@/components/app/ScreenHeader";
+import { formatBytes } from "@/services/offlineTiles";
 import {
-  type BBox,
-  DL_MAX_ZOOM,
-  DL_MIN_ZOOM,
-  TILE_PATH_TEMPLATE_DARK,
-  TILE_PATH_TEMPLATE_LIGHT,
-  deletePack,
-  downloadPack,
-  estimatePack,
-  formatBytes,
-} from "@/services/offlineTiles";
-import { useNetworkStore } from "@/store/networkStore";
+  PACK_MAX_ZOOM,
+  PACK_MIN_ZOOM,
+  cleanupLegacyRasterTiles,
+  deleteRegionPacks,
+  downloadRegionPacks,
+  estimateRegion,
+} from "@/services/offlinePacks";
 import { useAuthStore } from "@/store/authStore";
-import { useOfflineMapStore } from "@/store/offlineMapStore";
+import { useOfflineMapStore, type OfflineBBox } from "@/store/offlineMapStore";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Pressable,
@@ -26,8 +26,8 @@ import {
   View,
   useColorScheme,
 } from "react-native";
-import MapView, { PROVIDER_GOOGLE, UrlTile, type Region } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MapView, Camera } from "@rnmapbox/maps";
 
 const ORANGE = "#FF6F00";
 
@@ -44,22 +44,10 @@ function makeC(dark: boolean) {
   };
 }
 
-const DEFAULT_REGION: Region = {
-  latitude: -1.2864, longitude: 36.8172, latitudeDelta: 0.14, longitudeDelta: 0.14,
-};
-const PRESETS: { label: string; region: Region }[] = [
-  { label: "Nairobi CBD",     region: { latitude: -1.2864, longitude: 36.8172, latitudeDelta: 0.05, longitudeDelta: 0.05 } },
-  { label: "Greater Nairobi", region: { latitude: -1.2921, longitude: 36.8219, latitudeDelta: 0.32, longitudeDelta: 0.32 } },
+const PRESETS: { label: string; center: [number, number]; zoom: number }[] = [
+  { label: "Nairobi CBD",     center: [36.8172, -1.2864], zoom: 13 },
+  { label: "Greater Nairobi", center: [36.8219, -1.2921], zoom: 10.5 },
 ];
-
-function bboxFromRegion(r: Region): BBox {
-  return {
-    north: r.latitude  + r.latitudeDelta  / 2,
-    south: r.latitude  - r.latitudeDelta  / 2,
-    east:  r.longitude + r.longitudeDelta / 2,
-    west:  r.longitude - r.longitudeDelta / 2,
-  };
-}
 
 export default function OfflineMaps() {
   const dark   = useColorScheme() === "dark";
@@ -68,7 +56,6 @@ export default function OfflineMaps() {
   const router = useRouter();
 
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  const isOnline        = useNetworkStore((s) => s.isOnline);
 
   const pack        = useOfflineMapStore((s) => s.pack);
   const progress    = useOfflineMapStore((s) => s.progress);
@@ -78,13 +65,16 @@ export default function OfflineMaps() {
   const setProgress = useOfflineMapStore((s) => s.setProgress);
 
   const mapRef    = useRef<MapView>(null);
-  const cancelRef = useRef(false);
+  const cameraRef = useRef<Camera>(null);
 
-  const [region,      setRegion]      = useState<Region>(DEFAULT_REGION);
-  const [regionName,  setRegionName]  = useState("Greater Nairobi");
+  const [bbox, setBbox]               = useState<OfflineBBox | null>(null);
+  const [regionName, setRegionName]   = useState("Greater Nairobi");
   const [downloading, setDownloading] = useState(false);
 
-  const est = useMemo(() => estimatePack(bboxFromRegion(region)), [region]);
+  // Legacy raster tiles from the old downloader are dead weight — clean once.
+  useEffect(() => { cleanupLegacyRasterTiles(); }, []);
+
+  const est = useMemo(() => (bbox ? estimateRegion(bbox) : null), [bbox]);
 
   // ── Guest wall ────────────────────────────────────────────────────────────
   if (!isAuthenticated) {
@@ -110,44 +100,56 @@ export default function OfflineMaps() {
     );
   }
 
-  const handlePreset = (p: { label: string; region: Region }) => {
+  const refreshBounds = async () => {
+    try {
+      const bounds = await mapRef.current?.getVisibleBounds();
+      if (bounds) {
+        const [[east, north], [west, south]] = bounds as [[number, number], [number, number]];
+        setBbox({ north, south, east, west });
+      }
+    } catch {
+      // map not ready yet
+    }
+  };
+
+  const handlePreset = (p: (typeof PRESETS)[number]) => {
     setRegionName(p.label);
-    mapRef.current?.animateToRegion(p.region, 500);
+    cameraRef.current?.setCamera({
+      centerCoordinate: p.center,
+      zoomLevel: p.zoom,
+      animationDuration: 500,
+    });
   };
 
   const handleDownload = async () => {
+    if (!bbox || !est) {
+      Alert.alert("Pick an area", "Pan the map so your area fills the frame first.");
+      return;
+    }
     if (est.tooLarge) {
       Alert.alert("Area too large", "Zoom in to select a smaller area before downloading.");
       return;
     }
-    const bbox = bboxFromRegion(region);
-    cancelRef.current = false;
+
     setDownloading(true);
     setStatus("downloading");
     setProgress(0);
     try {
-      const res = await downloadPack(
-        bbox, DL_MIN_ZOOM, DL_MAX_ZOOM,
-        (done, total) => setProgress(total ? done / total : 0),
-        () => cancelRef.current,
-      );
-      if (res.cancelled) {
-        setStatus(pack ? "ready" : "idle");
-        return;
-      }
+      const res = await downloadRegionPacks(bbox, setProgress);
       setPack({
         id:        `pack-${Date.now()}`,
         name:      regionName,
         bbox,
-        minZoom:   DL_MIN_ZOOM,
-        maxZoom:   DL_MAX_ZOOM,
+        minZoom:   PACK_MIN_ZOOM,
+        maxZoom:   PACK_MAX_ZOOM,
         tileCount: res.tileCount,
         bytes:     res.bytes,
         createdAt: Date.now(),
         styles:    { light: true, dark: true },
+        engine:    "mapbox",
       });
     } catch (e: any) {
-      setStatus("error");
+      setStatus(pack ? "ready" : "idle");
       Alert.alert("Download failed", e?.message ?? "Could not download the offline map.");
     } finally {
       setDownloading(false);
@@ -157,12 +159,12 @@ export default function OfflineMaps() {
   const handleDelete = () => {
     Alert.alert(
       "Delete offline map",
-      "This removes the downloaded tiles from your device. You can download them again anytime.",
+      "This removes the downloaded map data from your device. You can download it again anytime.",
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Delete", style: "destructive",
-          onPress: async () => { await deletePack(); clearPack(); },
+          onPress: async () => { await deleteRegionPacks(); clearPack(); },
         },
       ],
     );
@@ -188,7 +190,7 @@ export default function OfflineMaps() {
               <View style={{ flex: 1 }}>
                 <Text style={[s.packName, { color: C.text }]}>{pack.name}</Text>
                 <Text style={[s.packMeta, { color: C.subText }]}>
-                  {formatBytes(pack.bytes)} · {pack.tileCount.toLocaleString()} tiles · {new Date(pack.createdAt).toLocaleDateString()}
+                  {formatBytes(pack.bytes)} · vector (light & dark) · {new Date(pack.createdAt).toLocaleDateString()}
                 </Text>
               </View>
               <Pressable onPress={handleDelete} hitSlop={10} style={s.deleteBtn}>
@@ -208,21 +210,18 @@ export default function OfflineMaps() {
             <MapView
               ref={mapRef}
               style={StyleSheet.absoluteFill}
-              provider={PROVIDER_GOOGLE}
-              initialRegion={DEFAULT_REGION}
-              onRegionChangeComplete={setRegion}
+              styleURL={dark ? "mapbox://styles/mapbox/dark-v11" : undefined}
+              logoEnabled={false}
+              attributionEnabled={false}
+              scaleBarEnabled={false}
               pitchEnabled={false}
               rotateEnabled={false}
-              // When offline, remove the blank Google base and show downloaded
-              // tiles so the user can see exactly what they've got.
-              mapType={!isOnline && pack ? "none" : "standard"}
+              onMapIdle={refreshBounds}
             >
-              {pack && (
-                <UrlTile
-                  urlTemplate={`file://${dark ? TILE_PATH_TEMPLATE_DARK : TILE_PATH_TEMPLATE_LIGHT}`}
-                  tileSize={256}
-                />
-              )}
+              <Camera
+                ref={cameraRef}
+                defaultSettings={{ centerCoordinate: [36.8219, -1.2921], zoomLevel: 10.5 }}
+              />
             </MapView>
             {/* Selection frame hint */}
             <View pointerEvents="none" style={s.frame} />
@@ -244,9 +243,11 @@ export default function OfflineMaps() {
           <View style={[s.estimate, { borderColor: C.hairline }]}>
             <Ionicons name="cloud-download-outline" size={16} color={C.subText} />
             <Text style={[s.estimateText, { color: C.text }]}>
-              {est.tooLarge
-                ? "Area too large — zoom in"
-                : `≈ ${formatBytes(est.approxBytes)} · ${est.tileCount.toLocaleString()} tiles × 2 (light & dark)`}
+              {!est
+                ? "Move the map to pick an area"
+                : est.tooLarge
+                  ? "Area too large — zoom in"
+                  : `Vector maps · z${PACK_MIN_ZOOM}–${PACK_MAX_ZOOM} · light & dark styles`}
             </Text>
           </View>
 
@@ -256,18 +257,13 @@ export default function OfflineMaps() {
               <View style={[s.progressTrack, { backgroundColor: C.track }]}>
                 <View style={[s.progressFill, { width: `${pct}%` }]} />
               </View>
-              <View style={s.dlRow}>
-                <Text style={[s.dlPct, { color: C.subText }]}>{pct}%</Text>
-                <Pressable onPress={() => { cancelRef.current = true; }} hitSlop={8}>
-                  <Text style={s.cancelText}>Cancel</Text>
-                </Pressable>
-              </View>
+              <Text style={[s.dlPct, { color: C.subText }]}>{pct}%</Text>
             </View>
           ) : (
             <Pressable
               onPress={handleDownload}
-              disabled={est.tooLarge}
-              style={[s.primaryBtn, est.tooLarge && { opacity: 0.5 }]}
+              disabled={!!est?.tooLarge}
+              style={[s.primaryBtn, est?.tooLarge && { opacity: 0.5 }]}
             >
               <Ionicons name="download-outline" size={18} color="#FFFFFF" />
               <Text style={s.primaryBtnText}>{pack ? "Update / download area" : "Download this area"}</Text>
@@ -278,7 +274,8 @@ export default function OfflineMaps() {
         <View style={s.note}>
           <Ionicons name="information-circle-outline" size={14} color={C.subText} />
           <Text style={[s.noteText, { color: C.subText }]}>
-            When you lose connection, Hopln automatically switches to your downloaded map so stops and journeys keep working.
+            When you lose connection, the map automatically uses your downloaded
+            area — labels, streets and journeys keep working at every zoom.
           </Text>
         </View>
       </ScrollView>
@@ -333,9 +330,7 @@ const s = StyleSheet.create({
   dlBlock: { marginTop: 14, gap: 8 },
   progressTrack: { height: 8, borderRadius: 4, overflow: "hidden" },
   progressFill:  { height: 8, borderRadius: 4, backgroundColor: ORANGE },
-  dlRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  dlPct: { fontSize: 13, fontWeight: "600" },
-  cancelText: { fontSize: 14, fontWeight: "600", color: "#FF3B30" },
+  dlPct: { fontSize: 13, fontWeight: "600", textAlign: "center" },
 
   // Pack card
   packRow:  { flexDirection: "row", alignItems: "center", gap: 12 },

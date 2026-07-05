@@ -3,20 +3,28 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-// Toggles for the on-map layer system. Persisted locally so a user's choices
-// survive restarts. Add future layers here (coolSpots, heatmap, saved…).
 export interface MapLayers {
   reports: boolean;
+  traffic: boolean;
+  biking: boolean;
+  bus: boolean;
+  coolSpots: boolean;
+  mapType: "default" | "satellite" | "hybrid";
 }
 
 const DEFAULTS: MapLayers = {
   reports: true,
+  traffic: false,
+  biking: false,
+  bus: false,
+  coolSpots: false,
+  mapType: "default",
 };
 
 interface MapLayersState {
   layers: MapLayers;
   toggle: (key: keyof MapLayers) => void;
-  setLayer: (key: keyof MapLayers, value: boolean) => void;
+  setLayer: (key: keyof MapLayers, value: any) => void;
 }
 
 export const useMapLayersStore = create<MapLayersState>()(
@@ -30,7 +38,6 @@ export const useMapLayersStore = create<MapLayersState>()(
       name:    "navigo:store:map_layers",
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (s) => ({ layers: s.layers }),
-      // Backfill defaults for any newly-added layer keys after an app update.
       merge: (persisted, current) => ({
         ...current,
         layers: { ...DEFAULTS, ...((persisted as { layers?: Partial<MapLayers> })?.layers ?? {}) },

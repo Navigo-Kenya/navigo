@@ -9,7 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { useEffect } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View, useColorScheme } from "react-native";
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View, useColorScheme } from "react-native";
 
 const ORANGE  = "#FF6F00";
 const BLACK   = "#1C1C1E";
@@ -83,6 +83,19 @@ const WALK_LABEL: Record<number, string> = {
   1000: "1 km",
   1500: "1.5 km",
   2000: "2 km",
+};
+
+const RANKING_LABEL: Record<string, string> = {
+  fastest:          "Fastest",
+  cheapest:         "Cheapest",
+  least_walking:    "Least walking",
+  fewest_transfers: "Fewest transfers",
+};
+
+const DUCKING_LABEL: Record<string, string> = {
+  duck:  "Lower volume",
+  pause: "Pause music",
+  mix:   "Play together",
 };
 
 export default function Profile() {
@@ -188,6 +201,17 @@ export default function Profile() {
         />
         <View style={[s.sep, { backgroundColor: C.hairline }]} />
         <Row
+          C={C} icon="swap-vertical-outline" label="Route sorting"
+          value={RANKING_LABEL[prefs.routeRanking]}
+          onPress={() => pickPref("routeRanking", "Preferred route sorting", [
+            { label: "Fastest",          value: "fastest"          },
+            { label: "Cheapest",         value: "cheapest"         },
+            { label: "Least walking",    value: "least_walking"    },
+            { label: "Fewest transfers", value: "fewest_transfers" },
+          ])}
+        />
+        <View style={[s.sep, { backgroundColor: C.hairline }]} />
+        <Row
           C={C} icon="walk" label="Max walking distance"
           value={WALK_LABEL[prefs.maxWalkMeters]}
           onPress={() => pickPref("maxWalkMeters", "Max walking distance", [
@@ -222,6 +246,33 @@ export default function Profile() {
           value={offlinePack ? formatBytes(offlinePack.bytes) : "Off"}
           onPress={() => router.push("/(account)/offline-maps" as any)}
         />
+      </View>
+
+      {/* Voice guidance */}
+      <View style={[s.section, { backgroundColor: C.card }]}>
+        <Text style={[s.sectionTitle, { color: C.subText }]}>VOICE GUIDANCE</Text>
+        <Row
+          C={C} icon="musical-notes-outline" label="When music is playing"
+          value={DUCKING_LABEL[prefs.voiceDucking]}
+          onPress={() => pickPref("voiceDucking", "When music is playing", [
+            { label: "Lower its volume", value: "duck"  },
+            { label: "Pause it",         value: "pause" },
+            { label: "Play together",    value: "mix"   },
+          ])}
+        />
+        {Platform.OS === "android" && (
+          <>
+            <View style={[s.sep, { backgroundColor: C.hairline }]} />
+            <Row
+              C={C} icon="volume-medium-outline" label="Play voice through"
+              value={prefs.voiceOutput === "earpiece" ? "Earpiece" : "Speaker"}
+              onPress={() => pickPref("voiceOutput", "Play voice through", [
+                { label: "Speaker (default)", value: "default"  },
+                { label: "Earpiece",          value: "earpiece" },
+              ])}
+            />
+          </>
+        )}
       </View>
 
       {/* Saved places */}

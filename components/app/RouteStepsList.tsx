@@ -1,6 +1,6 @@
 // components/app/RouteStepsList.tsx
 import { RouteStop, Step, WalkSubStep, getRouteColor, maneuverIcon, mToNice, sToMin } from "@/utils/mapHelpers";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import React, { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View, useColorScheme } from "react-native";
 
@@ -18,29 +18,30 @@ function formatStepEta(d: Date): string {
 
 const RAIL_W = 46;
 
-// ─── Walk connector dots ──────────────────────────────────────────────────────
+// ─── Seamless Walk Connector ──────────────────────────────────────────────────
 
 function WalkDots() {
   const dark = useColorScheme() === "dark";
-  const dotColor = dark ? "#4A4A4A" : "#C7C7CC";
+  const dotColor = dark ? "#555555" : "#C7C7CC";
   return (
-    <View style={wd.col}>
-      {[0, 1, 2].map((i) => <View key={i} style={[wd.dot, { backgroundColor: dotColor }]} />)}
+    <View style={wd.railContainer}>
+      <View style={[wd.dottedLine, { borderColor: dotColor }]} />
     </View>
   );
 }
 const wd = StyleSheet.create({
-  col: { width: RAIL_W, alignItems: "center", paddingVertical: 4, gap: 6 },
-  dot: { width: 4, height: 4, borderRadius: 2 },
+  railContainer: { width: RAIL_W, alignItems: "center", height: 24 },
+  dottedLine:    { width: 0, flex: 1, borderWidth: 1.5, borderStyle: "dotted", borderRadius: 1 },
 });
 
-// ─── Origin node ──────────────────────────────────────────────────────────────
+// ─── 1. ORIGIN NODE ───────────────────────────────────────────────────────────
 
 function OriginNode() {
   const dark = useColorScheme() === "dark";
   const ringBg = dark ? "rgba(255,111,0,0.22)" : "#FFE2C2";
   const textColor = dark ? "#FFFFFF" : BLACK;
   const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  
   return (
     <View style={orig.row}>
       <View style={orig.rail}>
@@ -54,146 +55,165 @@ function OriginNode() {
   );
 }
 const orig = StyleSheet.create({
-  row:       { flexDirection: "row", alignItems: "center", paddingVertical: 4 },
+  row:       { flexDirection: "row", alignItems: "center", paddingVertical: 8, marginBottom: 4 },
   rail:      { width: RAIL_W, alignItems: "center" },
-  outerRing: { width: 16, height: 16, borderRadius: 8, alignItems: "center", justifyContent: "center" },
-  innerDot:  { width: 9, height: 9, borderRadius: 5, backgroundColor: "#FF6F00" },
-  label:     { flex: 1, fontSize: 15, fontWeight: "600" },
-  time:      { fontSize: 13, color: GREY },
+  outerRing: { width: 18, height: 18, borderRadius: 9, alignItems: "center", justifyContent: "center" },
+  innerDot:  { width: 10, height: 10, borderRadius: 5, backgroundColor: "#FF6F00" },
+  label:     { flex: 1, fontSize: 16, fontWeight: "600" },
+  time:      { fontSize: 13, color: GREY, fontWeight: "500" },
 });
 
-// ─── Walk sub-step ────────────────────────────────────────────────────────────
+// ─── 2. WALK SUB-STEP ─────────────────────────────────────────────────────────
 
 function SubStep({ sub, isLast }: { sub: WalkSubStep; isLast: boolean }) {
   const dark = useColorScheme() === "dark";
-  const iconBg    = dark ? "#2C2C2E" : LIGHT_GREY;
   const textColor = dark ? "#FFFFFF" : BLACK;
   const borderColor = dark ? "#2C2C2E" : BORDER;
+
   return (
     <View style={[ss.row, !isLast && ss.divided, !isLast && { borderBottomColor: borderColor }]}>
-      <View style={[ss.iconWrap, { backgroundColor: iconBg }]}>
-        <Ionicons name={maneuverIcon(sub.maneuver)} size={14} color={GREY} />
+      <MaterialIcons name={maneuverIcon(sub.maneuver) as any} size={22} color={textColor} style={ss.icon} />
+      <View style={ss.textCol}>
+        <Text style={[ss.instruction, { color: textColor }]}>{sub.instruction}</Text>
+        {sub.note && <Text style={ss.note}>{sub.note}</Text>}
       </View>
-      <Text style={[ss.instruction, { color: textColor }]} numberOfLines={2}>{sub.instruction}</Text>
       {sub.distance > 0 && <Text style={ss.dist}>{mToNice(sub.distance)}</Text>}
     </View>
   );
 }
 const ss = StyleSheet.create({
-  row:         { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10 },
+  row:         { flexDirection: "row", alignItems: "center", paddingVertical: 14, paddingRight: 4 },
   divided:     { borderBottomWidth: StyleSheet.hairlineWidth },
-  iconWrap:    { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  instruction: { flex: 1, fontSize: 13, fontWeight: "500" },
-  dist:        { fontSize: 12, color: GREY, flexShrink: 0 },
+  icon:        { marginRight: 14, opacity: 0.8 },
+  textCol:     { flex: 1, paddingRight: 10 },
+  instruction: { fontSize: 15, fontWeight: "500", lineHeight: 20 },
+  note:        { fontSize: 13, color: GREY, marginTop: 2, lineHeight: 18 },
+  dist:        { fontSize: 13, color: GREY, fontWeight: "600", flexShrink: 0 },
 });
 
-// ─── Walk row ─────────────────────────────────────────────────────────────────
+// ─── 3. WALK SECTION ──────────────────────────────────────────────────────────
 
-function WalkRow({ step, isActive, isPassed, stepEta, navigating }: { step: Step; isActive: boolean; isPassed: boolean; stepEta?: Date; navigating: boolean }) {
-  const [open, setOpen] = useState(isActive);
+function WalkSection({ step, isActive, isPassed, stepEta, navigating }: { step: Step; isActive: boolean; isPassed: boolean; stepEta?: Date; navigating: boolean }) {
+  const [open, setOpen] = useState<boolean>(isActive || true);
   const hasSubs = (step.subSteps?.length ?? 0) > 0;
   const dark = useColorScheme() === "dark";
-  const textColor   = dark ? "#FFFFFF" : BLACK;
-  const pillBg      = dark ? "#2C2C2E" : LIGHT_GREY;
-  const subCardBg   = dark ? "#2C2C2E" : LIGHT_GREY;
+  const C = { bg: dark ? "#1C1C1E" : BG, text: dark ? "#FFFFFF" : BLACK };
+  const dotColor = dark ? "#555555" : "#C7C7CC";
 
   return (
-    <View style={{ opacity: isPassed ? 0.35 : 1 }}>
-      <Pressable style={wr.row} onPress={() => hasSubs && setOpen((v) => !v)} disabled={!hasSubs}>
-        <View style={wr.rail}>
-          <View style={{ width: 36, height: 36, alignItems: "center", justifyContent: "center" }}>
-            <Ionicons name="walk" size={20} color={isActive ? ORANGE : GREY} />
-          </View>
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={[wr.walkText, { color: textColor }, isActive && { color: ORANGE }]}>
-            Walk {sToMin(step.duration).replace("~", "")} ({mToNice(step.distance)})
-          </Text>
-          {navigating && stepEta && stepEta.getTime() !== 0
-            ? <Text style={wr.stepEtaText}>{"→  "}{formatStepEta(stepEta)}</Text>
-            : null}
-        </View>
-        {hasSubs && (
-          <View style={[wr.chevronPill, { backgroundColor: pillBg }]}>
-            <Ionicons name={open ? "chevron-up" : "chevron-down"} size={13} color={GREY} />
-          </View>
-        )}
-      </Pressable>
+    <View style={[ws.container, { opacity: isPassed ? 0.4 : 1 }]}>
+      <View style={ws.railContainer}>
+         <View style={[StyleSheet.absoluteFill, { alignItems: "center" }]}>
+            <View style={[ws.dottedLine, { borderColor: dotColor }]} />
+         </View>
+         <View style={[ws.iconBg, { backgroundColor: C.bg }]}>
+            <MaterialIcons name="directions-walk" size={22} color={isActive ? ORANGE : GREY} />
+         </View>
+      </View>
 
-      {open && hasSubs && (
-        <View style={wr.subContainer}>
-          <View style={{ width: RAIL_W }} />
-          <View style={[wr.subCard, { backgroundColor: subCardBg }]}>
+      <View style={ws.content}>
+        <Pressable style={ws.headerRow} onPress={() => hasSubs && setOpen(!open)} disabled={!hasSubs}>
+          <View style={{ flex: 1 }}>
+            <Text style={[ws.walkText, { color: C.text }, isActive && { color: ORANGE }]}>
+              {step.instruction || "Walk"}
+            </Text>
+            <Text style={ws.metaText}>
+              {sToMin(step.duration).replace("~", "")} ({mToNice(step.distance)})
+              {navigating && stepEta && stepEta.getTime() !== 0 ? `  ·  Arrive at ${formatStepEta(stepEta)}` : ""}
+            </Text>
+          </View>
+          {hasSubs && (
+            <MaterialIcons name={open ? "expand-less" : "expand-more"} size={22} color={GREY} />
+          )}
+        </Pressable>
+
+        {open && hasSubs && (
+          <View style={ws.subContainer}>
             {step.subSteps!.map((sub, j) => (
               <SubStep key={j} sub={sub} isLast={j === step.subSteps!.length - 1} />
             ))}
           </View>
-        </View>
-      )}
+        )}
+      </View>
     </View>
   );
 }
-const wr = StyleSheet.create({
-  row:          { flexDirection: "row", alignItems: "center", paddingVertical: 5, gap: 6 },
-  rail:         { width: RAIL_W, alignItems: "center" },
-  walkText:     { fontSize: 15, fontWeight: "500" },
-  chevronPill:  { width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center" },
-  subContainer: { flexDirection: "row", paddingBottom: 8 },
-  subCard:      { flex: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 2, marginRight: 4 },
-  stepEtaText:  { fontSize: 13, color: GREY },
+const ws = StyleSheet.create({
+  container:    { flexDirection: "row", minHeight: 40 },
+  railContainer:{ width: RAIL_W, alignItems: "center" },
+  dottedLine:   { width: 0, flex: 1, borderWidth: 1.5, borderStyle: "dotted", borderRadius: 1 },
+  iconBg:       { position: "absolute", top: 12, paddingVertical: 4, paddingHorizontal: 4 }, 
+  content:      { flex: 1, paddingBottom: 8 },
+  headerRow:    { flexDirection: "row", alignItems: "center", paddingVertical: 12, minHeight: 48 },
+  walkText:     { fontSize: 16, fontWeight: "600" },
+  metaText:     { fontSize: 13, color: GREY, marginTop: 2 },
+  subContainer: { marginLeft: 0, marginBottom: 8 }, 
 });
 
-// ─── Stops list ───────────────────────────────────────────────────────────────
+// ─── 4. ELEGANT STOPS LIST (Cinematic Accordion) ──────────────────────────────
 
 function StopsList({ stops, routeColor }: { stops: RouteStop[]; routeColor: string }) {
   const dark = useColorScheme() === "dark";
-  const nameColor = dark ? "#ABABAB" : "#555";
+  const nameColor = dark ? "#CCCCCC" : "#555555";
+  const pressedColor = dark ? "#2C2C2E" : "#E5E5EA";
   const intermediate = stops.slice(1, -1);
+  
   if (intermediate.length === 0) return null;
 
   return (
-    <View style={sl.container}>
+    <View style={[sl.container, { borderLeftColor: routeColor + "40" }]}>
       {intermediate.map((stop, idx) => (
-        <View key={idx} style={sl.row}>
-          <View style={sl.track}>
-            {idx > 0 && <View style={[sl.line, { backgroundColor: routeColor + "55" }]} />}
-            <View style={[sl.dot, { backgroundColor: routeColor }]} />
-            {idx < intermediate.length - 1 && <View style={[sl.line, { backgroundColor: routeColor + "55" }]} />}
-          </View>
+        <Pressable 
+          key={idx} 
+          style={({ pressed }) => [sl.row, pressed && { backgroundColor: pressedColor }]}
+          onPress={() => {/* Ready for future modal/action */}}
+        >
+          {/* 🛠️ FIX: Replaced simple dot with a miniature bus/transit icon */}
+          <MaterialIcons name="directions-bus" size={14} color={routeColor} style={sl.icon} />
           <Text style={[sl.name, { color: nameColor }]} numberOfLines={1}>{stop.name}</Text>
-        </View>
+        </Pressable>
       ))}
     </View>
   );
 }
 const sl = StyleSheet.create({
-  container: { marginTop: 6, marginBottom: 2 },
-  row:       { flexDirection: "row", alignItems: "center", minHeight: 30 },
-  track:     { width: 22, alignItems: "center", alignSelf: "stretch", justifyContent: "center" },
-  dot:       { width: 7, height: 7, borderRadius: 3.5, zIndex: 1 },
-  line:      { position: "absolute", top: 0, bottom: 0, width: 2, borderRadius: 1 },
-  name:      { flex: 1, fontSize: 13, paddingLeft: 8, paddingVertical: 2 },
+  container: { 
+    marginTop: 4, 
+    marginBottom: 12, 
+    marginLeft: 6,       
+    paddingLeft: 12,     
+    borderLeftWidth: 2,  
+  },
+  row: { 
+    flexDirection: "row", 
+    alignItems: "center", 
+    minHeight: 32, 
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    marginBottom: 2
+  },
+  icon: { 
+    marginRight: 10,
+    opacity: 0.75 // Softens the icon so it doesn't fight the main bus node
+  },
+  name: { 
+    flex: 1, 
+    fontSize: 14, 
+    fontWeight: "500",
+    paddingVertical: 2 
+  },
 });
 
-// ─── Transit section ──────────────────────────────────────────────────────────
+// ─── 5. TRANSIT SECTION (Thick Unified Rail) ──────────────────────────────────
 
 function TransitSection({
   depart, arrive, routeColor, stopName, alightName, isActive, isPassed, stopsRemaining, boardEta,
 }: {
-  depart: Step; arrive: Step;
-  routeColor: string; stopName: string; alightName: string;
-  isActive: boolean; isPassed: boolean;
-  stopsRemaining?: number | null;
-  boardEta?: Date;
+  depart: Step; arrive: Step; routeColor: string; stopName: string; alightName: string; isActive: boolean; isPassed: boolean; stopsRemaining?: number | null; boardEta?: Date;
 }) {
   const [rideExpanded, setRideExpanded] = useState(false);
   const dark = useColorScheme() === "dark";
-  const C = {
-    bg:       dark ? "#1C1C1E" : BG,
-    text:     dark ? "#FFFFFF" : BLACK,
-    border:   dark ? "#2C2C2E" : BORDER,
-    pillBg:   dark ? "#2C2C2E" : LIGHT_GREY,
-  };
+  const C = { bg: dark ? "#1C1C1E" : BG, text: dark ? "#FFFFFF" : BLACK, border: dark ? "#2C2C2E" : BORDER };
 
   const routeNameMatch = depart.instruction?.match(/^Board Line (.+) at /);
   const routeName = routeNameMatch?.[1] ?? (depart as any).routeName ?? "";
@@ -205,151 +225,124 @@ function TransitSection({
 
   return (
     <View style={[ts.wrapper, isPassed && { opacity: 0.35 }]}>
-      <View style={ts.row}>
-        <View style={ts.rail}>
-          <View style={{ width: 40, height: 40, alignItems: "center", justifyContent: "center" }}>
-            <View style={[ts.busCircle, { backgroundColor: C.bg, borderColor: C.border }]}>
-              <Ionicons name="bus" size={18} color={C.text} />
-            </View>
-          </View>
-          <View style={[ts.verticalBar, { backgroundColor: routeColor, height: 20, marginTop: -2 }]} />
-        </View>
-        <View style={ts.headerText}>
-          <Text style={[ts.stopNameMain, { color: C.text }]}>{stopName}</Text>
-          {isActive && boardEta && boardEta.getTime() !== 0 && (
-            <Text style={[ts.stopEtaLabel, { color: routeColor }]}>{formatStepEta(boardEta)}</Text>
-          )}
-        </View>
+      
+      <View style={ts.railContainer}>
+         <View style={[StyleSheet.absoluteFill, { alignItems: "center" }]}>
+            <View style={[ts.solidLine, { backgroundColor: routeColor }]} />
+         </View>
+         <View style={[ts.busCircle, { backgroundColor: routeColor }]}>
+            <MaterialIcons name="directions-bus" size={18} color="#FFFFFF" />
+         </View>
+         <View style={[ts.alightCircle, { borderColor: routeColor, backgroundColor: C.bg }]} />
       </View>
 
-      <View style={ts.row}>
-        <View style={ts.rail}>
-          <View style={[ts.verticalBar, { backgroundColor: routeColor, flex: 1 }]} />
+      <View style={ts.content}>
+        <View style={ts.boardingRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={[ts.nodeTitle, { color: C.text }]}>{stopName}</Text>
+            {(depart as any).from?.landmark ? (
+              <Text style={[ts.landmarkSub, { color: routeColor }]}>
+                in front of {(depart as any).from.landmark}
+              </Text>
+            ) : null}
+          </View>
+          {isActive && boardEta && boardEta.getTime() !== 0 && (
+            <Text style={[ts.etaText, { color: routeColor }]}>{formatStepEta(boardEta)}</Text>
+          )}
         </View>
-        <View style={ts.middleContent}>
+
+        <View style={ts.rideContent}>
           <View style={ts.routeInfoRow}>
-            <View style={[ts.badge, { borderColor: routeColor + "60" }]}>
-              <Text style={[ts.badgeText, { color: routeColor }]}>{routeName}</Text>
+            <View style={[ts.badge, { backgroundColor: routeColor }]}>
+              <Text style={ts.badgeText}>{routeName}</Text>
             </View>
-            <Text style={[ts.destinationText, { color: C.text }]} numberOfLines={1}>{alightName}</Text>
+            <Text style={[ts.destinationText, { color: C.text }]} numberOfLines={1}>Towards {alightName}</Text>
           </View>
 
           <Pressable
-            style={[ts.rideRow, { borderTopColor: isActive ? routeColor + "40" : C.border }]}
+            style={ts.rideSummary}
             onPress={() => hasSubs && setRideExpanded(v => !v)}
             disabled={!hasSubs}
           >
-            <View style={ts.rideLeft}>
-              <Text style={[ts.rideText, { color: C.text }, isActive && { color: ORANGE }]}>
-                {isActive && stopsRemaining != null
-                  ? `${stopsRemaining} stop${stopsRemaining !== 1 ? "s" : ""} remaining`
-                  : `Ride ${stopCount} stop${stopCount !== 1 ? "s" : ""}`}
-                {(rideDur || rideDist) ? (
-                  <Text style={ts.rideMeta}>{"  ·  "}{rideDur}{rideDur && rideDist ? "  ·  " : ""}{rideDist}</Text>
-                ) : null}
-              </Text>
-            </View>
+            <Text style={[ts.rideSummaryText, { color: C.text }, isActive && { color: ORANGE, fontWeight: "600" }]}>
+              {isActive && stopsRemaining != null
+                ? `${stopsRemaining} stop${stopsRemaining !== 1 ? "s" : ""} remaining`
+                : `Ride ${stopCount} stop${stopCount !== 1 ? "s" : ""}`}
+              {(rideDur || rideDist) ? (
+                <Text style={ts.rideDuration}>{"  ·  "}{rideDur}{rideDur && rideDist ? "  ·  " : ""}{rideDist}</Text>
+              ) : null}
+            </Text>
             {hasSubs && (
-              <View style={[ts.chevronPill, { backgroundColor: C.pillBg }]}>
-                <Ionicons name={rideExpanded ? "chevron-up" : "chevron-down"} size={12} color={GREY} />
-              </View>
+              <MaterialIcons name={rideExpanded ? "expand-less" : "expand-more"} size={22} color={GREY} />
             )}
           </Pressable>
 
           {rideExpanded && hasSubs && <StopsList stops={stops} routeColor={routeColor} />}
         </View>
-      </View>
 
-      <View style={ts.row}>
-        <View style={ts.rail}>
-          <View style={[ts.verticalBar, { backgroundColor: routeColor, height: 10 }]} />
-          <View style={[ts.openCircle, { borderColor: routeColor, backgroundColor: C.bg }]} />
+        <View style={ts.alightingRow}>
+          <Text style={[ts.nodeTitle, { color: C.text }]}>{alightName}</Text>
         </View>
-        <Text style={[ts.stopNameMain, { color: C.text }]}>{alightName}</Text>
       </View>
     </View>
   );
 }
 
 const ts = StyleSheet.create({
-  wrapper:    { marginBottom: 10 },
-  row:        { flexDirection: "row" },
-  rail:       { width: RAIL_W, alignItems: "center" },
-  verticalBar: { width: 16 },
-  busCircle: {
-    width: 32, height: 32, borderRadius: 16,
-    borderWidth: 1, alignItems: "center", justifyContent: "center",
-    zIndex: 2, elevation: 2,
-  },
-  headerText:      { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: 0 },
-  stopEtaLabel:    { fontSize: 13, fontWeight: "600", flexShrink: 0 },
-  stopNameMain:    { fontSize: 16, fontWeight: "500" },
-  middleContent:   { flex: 1, paddingVertical: 12 },
-  routeInfoRow:    { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 4 },
-  badge:           { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
-  badgeText:       { fontSize: 15, fontWeight: "500" },
-  destinationText: { fontSize: 16 },
-  rideRow: {
-    flexDirection:  "row", alignItems: "center", justifyContent: "space-between",
-    borderTopWidth: StyleSheet.hairlineWidth, paddingVertical: 12, marginTop: 10,
-  },
-  rideLeft:    { flex: 1 },
-  rideText:    { fontSize: 15 },
-  rideMeta:    { fontSize: 13, color: GREY },
-  chevronPill: { width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center", marginLeft: 8 },
-  openCircle:  { width: 18, height: 18, borderRadius: 9, borderWidth: 4, marginTop: -6 },
+  wrapper:       { flexDirection: "row", minHeight: 80, marginBottom: 8 },
+  railContainer: { width: RAIL_W, alignItems: "center" },
+  solidLine:     { width: 6, flex: 1, borderRadius: 3 },
+  busCircle:     { position: "absolute", top: 12, width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", zIndex: 2 },
+  alightCircle:  { position: "absolute", bottom: 16, width: 16, height: 16, borderRadius: 8, borderWidth: 4, zIndex: 2 },
+  content:       { flex: 1, paddingBottom: 0 },
+  boardingRow:   { flexDirection: "row", alignItems: "center", paddingVertical: 14, minHeight: 48, justifyContent: "space-between" },
+  nodeTitle:     { fontSize: 16, fontWeight: "600" },
+  etaText:       { fontSize: 14, fontWeight: "700" },
+  rideContent:   { paddingVertical: 8 },
+  routeInfoRow:  { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
+  badge:         { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  badgeText:     { fontSize: 14, fontWeight: "700", color: "#FFF" },
+  destinationText: { fontSize: 16, fontWeight: "500", flex: 1 },
+  rideSummary:   { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: BORDER },
+  rideSummaryText:{ fontSize: 15 },
+  rideDuration:  { fontSize: 13, fontWeight: "400", color: GREY },
+  alightingRow:  { flexDirection: "row", alignItems: "center", paddingVertical: 12, minHeight: 44 },
+  landmarkSub:   { fontSize: 12, fontWeight: "500", marginTop: 2, fontStyle: "italic" },
 });
 
-// ─── Destination node ─────────────────────────────────────────────────────────
-
+// ─── 6. DESTINATION NODE ──────────────────────────────────────────────────────
 function DestNode({ name }: { name: string }) {
   const dark = useColorScheme() === "dark";
   const textColor = dark ? "#FFFFFF" : BLACK;
-  const dotColor  = dark ? "#FFFFFF" : BLACK;
+
   return (
     <View style={dn.row}>
-      <View style={{ width: RAIL_W, alignItems: "center" }}>
-        <View style={[dn.dot, { backgroundColor: dotColor }]} />
+      <View style={dn.rail}>
+        <MaterialIcons name="place" size={26} color={ORANGE} />
       </View>
       <Text style={[dn.label, { color: textColor }]}>{name}</Text>
     </View>
   );
 }
 const dn = StyleSheet.create({
-  row:   { flexDirection: "row", alignItems: "center", paddingVertical: 5 },
-  dot:   { width: 14, height: 14, borderRadius: 7 },
-  label: { flex: 1, fontSize: 16, fontWeight: "700" },
+  row:   { flexDirection: "row", alignItems: "center", paddingTop: 4, paddingBottom: 24 },
+  rail:  { width: RAIL_W, alignItems: "center" },
+  label: { flex: 1, fontSize: 18, fontWeight: "700" },
 });
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
-
+// ─── MAIN LIST ────────────────────────────────────────────────────────────────
 interface RouteStepsListProps {
-  steps: Step[];
-  nextStepIdx: number;
-  navigating: boolean;
-  selectedName: string;
-  stopsRemaining?: number | null;
-  scrollRef?: React.RefObject<ScrollView | null>;
-  stepETAs?: Date[];
+  steps: Step[]; nextStepIdx: number; navigating: boolean; selectedName: string;
+  stopsRemaining?: number | null; scrollRef?: React.RefObject<ScrollView | null>; stepETAs?: Date[];
 }
 
-export default function RouteStepsList({
-  steps,
-  nextStepIdx,
-  navigating,
-  selectedName,
-  stopsRemaining,
-  scrollRef,
-  stepETAs,
-}: RouteStepsListProps) {
+export default function RouteStepsList({ steps, nextStepIdx, navigating, selectedName, stopsRemaining, scrollRef, stepETAs }: RouteStepsListProps) {
   const groupOffsets = useRef<Map<number, number>>(new Map());
 
   useEffect(() => {
     if (!navigating || !scrollRef?.current) return;
     const y = groupOffsets.current.get(nextStepIdx);
-    if (y != null) {
-      scrollRef.current.scrollTo({ y: Math.max(0, y - 20), animated: true });
-    }
+    if (y != null) scrollRef.current.scrollTo({ y: Math.max(0, y - 20), animated: true });
   }, [nextStepIdx, navigating, scrollRef]);
 
   if (steps.length === 0) return null;
@@ -384,13 +377,9 @@ export default function RouteStepsList({
             const isPassed = navigating && nextStepIdx > g.flatIdx;
             const stepEta  = stepETAs?.[myEngineIdx];
             return (
-              <React.Fragment key={gi}>
-                <WalkDots />
-                <View onLayout={(e) => groupOffsets.current.set(g.flatIdx, e.nativeEvent.layout.y)}>
-                  <WalkRow step={g.step} isActive={isActive} isPassed={isPassed} stepEta={stepEta} navigating={navigating} />
-                </View>
-                <WalkDots />
-              </React.Fragment>
+              <View key={gi} onLayout={(e) => groupOffsets.current.set(g.flatIdx, e.nativeEvent.layout.y)}>
+                <WalkSection step={g.step} isActive={isActive} isPassed={isPassed} stepEta={stepEta} navigating={navigating} />
+              </View>
             );
           }
 

@@ -22,7 +22,9 @@ const DEFAULTS: KwameSettings = {
   responseStyle:      "casual",
   autoListen:         true,
   silenceThresholdDb: -35,
-  silenceHoldMs:      1100,
+  // Auto-submit after this much sustained user silence (clamped 2000-3000 ms
+  // by the adaptive VAD in kwame.tsx).
+  silenceHoldMs:      2500,
 };
 
 interface KwameSettingsStore {

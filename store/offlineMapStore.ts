@@ -20,6 +20,8 @@ export interface OfflinePack {
   bytes:     number; // combined (light + dark)
   createdAt: number;
   styles:    { light: boolean; dark: boolean };
+  /** "mapbox" = native vector packs (TileStore). Absent = legacy raster. */
+  engine?:   "mapbox";
 }
 
 export type OfflineStatus = "idle" | "downloading" | "ready" | "error";
@@ -52,10 +54,10 @@ export const useOfflineMapStore = create<OfflineMapState>()(
       partialize: (s) => ({ pack: s.pack }),
       merge: (persisted, current) => {
         const pack = (persisted as { pack?: OfflinePack | null })?.pack ?? null;
-        // Packs from before the dual-style update lack the `styles` field and
-        // their tiles are in the old flat directory — clear them so the user
-        // re-downloads into the new light/ dark/ structure.
-        if (pack && !pack.styles) return { ...current, pack: null, status: "idle" as const };
+        // Legacy raster packs (no `engine: "mapbox"`) are obsolete — the map
+        // now serves native vector packs. Clear so the user re-downloads;
+        // the raster directory itself is removed by cleanupLegacyRasterTiles.
+        if (pack && pack.engine !== "mapbox") return { ...current, pack: null, status: "idle" as const };
         return { ...current, pack, status: pack ? ("ready" as const) : ("idle" as const) };
       },
     },
