@@ -260,6 +260,22 @@ export default function JourneyDetailsSheet({
               <Ionicons name="play" size={15} color={ORANGE} />
             </Pressable>
           )}
+          {navigating && onPauseToggle && (
+            <Pressable
+              onPress={onPauseToggle}
+              hitSlop={12}
+              style={[
+                s.closeBtn,
+                {
+                  backgroundColor: paused ? "rgba(245,158,11,0.14)" : C.light,
+                  borderWidth: paused ? 1 : 0,
+                  borderColor: paused ? "#F59E0B" : "transparent",
+                },
+              ]}
+            >
+              <Ionicons name={paused ? "play" : "pause"} size={16} color={paused ? "#F59E0B" : C.text} />
+            </Pressable>
+          )}
           <Pressable onPress={handleClose} hitSlop={16} style={[s.closeBtn, { backgroundColor: C.light }]}>
             <Ionicons name="close" size={17} color={C.text} />
           </Pressable>
@@ -321,25 +337,6 @@ export default function JourneyDetailsSheet({
             <Ionicons name={navigating ? "stop-circle-outline" : "navigate"} size={17} color="#fff" />
             <Text style={s.startBtnText}>{navigating ? "End" : "Start"}</Text>
           </Pressable>
-
-          {navigating && onPauseToggle && (
-            <Pressable
-              style={({ pressed }) => [
-                s.saveBtn,
-                {
-                  borderColor: paused ? "#F59E0B" : C.border,
-                  backgroundColor: paused ? "rgba(245,158,11,0.12)" : "transparent",
-                  opacity: pressed ? 0.7 : 1,
-                },
-              ]}
-              onPress={onPauseToggle}
-            >
-              <Ionicons name={paused ? "play" : "pause"} size={16} color={paused ? "#F59E0B" : GREY} />
-              <Text style={[s.saveBtnText, { color: paused ? "#F59E0B" : GREY }]}>
-                {paused ? "Resume" : "Pause"}
-              </Text>
-            </Pressable>
-          )}
 
           <Pressable
             style={({ pressed }) => [s.saveBtn, { borderColor: isSaved ? ORANGE : C.border, backgroundColor: isSaved ? "rgba(255,111,0,0.1)" : "transparent", opacity: pressed ? 0.7 : 1 }]}

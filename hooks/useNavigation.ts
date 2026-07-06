@@ -122,7 +122,6 @@ export function useNavigation() {
 
   const [navState, setNavState]                 = useState<EngineResult | null>(null);
   const [location, setLocation]                 = useState<Coords | null>(null);
-  const [breadcrumbs, setBreadcrumbs]           = useState<Coords[]>([]);
   const [locationPermissionDenied, setPermDenied] = useState(false);
   const [gpsLost, setGpsLost]                   = useState(false);
   const [wrongDirection, setWrongDirection]     = useState(false);
@@ -338,7 +337,9 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
     // At rest, GPS fixes orbit the true position; the EMA turns that into a
     // slow random walk. Anchor the position and ignore wander under
     // STATIONARY_LOCK_M until the user genuinely moves.
-    if (speed === 0) {
+    // Use the clamped rawSpeed (0 when <0.6 m/s) rather than the EMA speed
+    // which takes several ticks to decay to 0 after stopping.
+    if (rawSpeed === 0) {
       const anchor = stationaryAnchorRef.current;
       if (!anchor || distM(anchor.latitude, anchor.longitude, lat, lng) > STATIONARY_LOCK_M) {
         stationaryAnchorRef.current = { latitude: lat, longitude: lng, heading, speed: 0 };
@@ -390,31 +391,6 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
     if (!inTransitTrip || usePrefsStore.getState().prefs.nativeFollow) {
       glideDisplayRef.current = finalLocation;
       setLocation(finalLocation);
-    }
-
-    // ── BREADCRUMB PUSHER ──
-    if (useJourneyStore.getState().tripStatus === "IN_TRANSIT" && speed > 0.4) {
-      setBreadcrumbs(prev => {
-        if (prev.length > 0) {
-          const last = prev[prev.length - 1];
-          const jumpDist = distM(last.latitude, last.longitude, displayLat, displayLng);
-          
-          // TELEPORT FILTER: Exiting a building
-          if (jumpDist > 20) {
-            return [finalLocation];
-          }
-
-          // SPATIAL GATE: Don't drop ink unless we actually moved 2+ meters.
-          // This kills the dense orphan squiggles that generate when standing still!
-          if (jumpDist < 2) {
-            return prev;
-          }
-        }
-
-        const nextTrail = [...prev, finalLocation];
-        if (nextTrail.length > 25) return nextTrail.slice(nextTrail.length - 25);
-        return nextTrail;
-      });
     }
 
     // ── "I'M ON BOARD" AVAILABILITY ──
@@ -860,7 +836,6 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
       alightNotifIdRef.current      = null;
       wrongDirNotifIdRef.current    = null;
 
-      setBreadcrumbs([]);
       glideTargetRef.current  = meSmoothRef.current;
       glideDisplayRef.current = meSmoothRef.current;
 
@@ -937,7 +912,6 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
   const stopNavigation = useCallback(() => {
     navSession.clear();
     setWrongDirection(false);
-    setBreadcrumbs([]); // Clear trailing line
     setTripStatus("IDLE");
     setNavState(null);
     setCanBoardTransit(false);
@@ -1006,7 +980,6 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
 
   return {
     location,
-    breadcrumbs,
     navState,
     locationPermissionDenied,
     openLocationSettings,

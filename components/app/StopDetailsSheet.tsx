@@ -687,6 +687,7 @@ function Chip({
   color,
   bg,
   disabled,
+  loading,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
@@ -694,19 +695,22 @@ function Chip({
   color?: string;
   bg?: string;
   disabled?: boolean;
+  loading?: boolean;
 }) {
   const c = color ?? ORANGE;
   return (
     <Pressable
       onPress={onPress}
-      disabled={disabled}
+      disabled={disabled || loading}
       style={({ pressed }) => [
         chip.root,
         { backgroundColor: bg ?? (c + "14"), opacity: pressed || disabled ? 0.6 : 1 },
       ]}
     >
-      <Ionicons name={icon} size={16} color={c} />
-      <Text style={[chip.label, { color: c }]}>{label}</Text>
+      {loading
+        ? <ActivityIndicator size="small" color={c} style={{ width: 16, height: 16 }} />
+        : <Ionicons name={icon} size={16} color={c} />}
+      <Text style={[chip.label, { color: c }]}>{loading ? "Loading…" : label}</Text>
     </Pressable>
   );
 }
@@ -967,9 +971,11 @@ const LIST_LABEL: Record<string, string> = {
 export default function StopDetailsSheet({
   stop,
   onClose,
+  onGoToStop,
 }: {
   stop: Stop;
   onClose: () => void;
+  onGoToStop?: () => Promise<void>;
 }): React.JSX.Element | null {
   const translateY = useRef(new Animated.Value(SCREEN_H)).current;
   const lastY      = useRef(MIN_Y);
@@ -982,7 +988,8 @@ export default function StopDetailsSheet({
   const { user } = useAuthStore();
   const { places, addPlace, removePlace, customLists } = useSavedStore();
   const savedEntry = places.find((p) => p.place_id === stop.id && p.pin === null);
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving]                   = useState(false);
+  const [directionsLoading, setDirectionsLoading] = useState(false);
 
   const [routes, setRoutes]               = useState<StopRoute[]>([]);
   const [routesLoading, setRoutesLoading] = useState(true);
@@ -1170,7 +1177,17 @@ export default function StopDetailsSheet({
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={s.chipsRow}
           >
-            <Chip icon="navigate-outline" label="Directions" color={ORANGE} onPress={() => {}} />
+            <Chip
+              icon="navigate-outline"
+              label="Directions"
+              color={ORANGE}
+              loading={directionsLoading}
+              onPress={async () => {
+                if (!onGoToStop || directionsLoading) return;
+                setDirectionsLoading(true);
+                try { await onGoToStop(); } finally { setDirectionsLoading(false); }
+              }}
+            />
             {savedEntry ? (
               <>
                 <Chip icon="bookmark"         label={savedListLabel}        color={GREEN} onPress={handleChangeList} />

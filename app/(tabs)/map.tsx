@@ -61,7 +61,6 @@ import {
   ShapeSource,
   Models,
   ModelLayer,
-  LocationPuck,
   CustomLocationProvider,
 } from "@rnmapbox/maps";
 
@@ -78,7 +77,7 @@ function headingArcGeoJson(
   lng: number,
   headingDeg: number,
   zoom: number,
-  isNavigationMode: boolean // 🛠️ On injecte le statut de navigation
+  isNavigationMode: boolean // On injecte le statut de navigation
 ): GeoJSON.Feature<GeoJSON.Polygon> {
   const metersPerPixel = (156543.03392 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, zoom);
   const targetScreenPixels = 22; 
@@ -139,7 +138,7 @@ export default function MapScreen() {
   const dark = useColorScheme() === "dark";
   const BG = dark ? "#0F0F0F" : "#F6F7F8";
 
-  const { location: me, breadcrumbs, navState, locationPermissionDenied, openLocationSettings, gpsLost, wrongDirection, startNavigation, stopNavigation, pauseNavigation, resumeNavigation, isIndoor, canBoardTransit, boardTransit } = useNavigation();
+  const { location: me, navState, locationPermissionDenied, openLocationSettings, gpsLost, wrongDirection, startNavigation, stopNavigation, pauseNavigation, resumeNavigation, isIndoor, canBoardTransit, boardTransit } = useNavigation();
   const { visible: rateVisible, onJourneyComplete, onRate, onLater } = useRatePrompt();
   const [showPostJourney, setShowPostJourney] = useState(false);
   // Snapshot of the finished journey — PostJourneySheet must not read
@@ -291,21 +290,18 @@ export default function MapScreen() {
   const nativeFollowPref   = prefs.nativeFollow;
   const nativeFollowActive = nativeFollowPref && isNavigationMode && followMe;
 
-  // Puck heading: route bearing while snapped (stable in a matatu), GPS course otherwise.
-  const puckHeading = useMemo(() => {
-    if (navState && navState.distanceFromRouteM < 25) return navState.routeBearing;
-    return me?.heading ?? 0;
-  }, [navState, me?.heading]);
-
-  // Camera follow targets (native side animates transitions between values).
+  // Flat overview pulls back to zoom 15.5 automatically
   const followZoom = useMemo(() => {
+    if (!headingUp) return 15.5; 
     const kph = (me?.speed ?? 0) * 3.6;
     if (isVehicleMode) {
       return kph < 5 ? 17.2 : kph < 30 ? 17.2 - ((kph - 5) / 25) * 0.8 : kph < 80 ? 16.4 - ((kph - 30) / 50) * 0.9 : 15.5;
     }
     return kph < 5 ? 19.2 : kph < 30 ? 19.2 - ((kph - 5) / 25) * 1.2 : 18.0;
-  }, [me?.speed, isVehicleMode]);
-  const followPitch = isVehicleMode ? 65 : 45;
+  }, [headingUp, me?.speed, isVehicleMode]);
+
+  // Flat overview drops pitch to 0 automatically
+  const followPitch = headingUp ? (isVehicleMode ? 65 : 55) : 0;
 
   // Keep the screen on for the whole navigation session.
   useEffect(() => {
@@ -325,15 +321,24 @@ export default function MapScreen() {
 
   useHeadingTracker();
 
-  const [beamHeading, setBeamHeading] = useState(0);
+  const [beamHeading, setBeamHeading] = useState(() => useHeadingStore.getState().heading);
   useEffect(() => {
     return useHeadingStore.subscribe((s) => {
       setBeamHeading((prev) => {
         const delta = Math.abs(((s.heading - prev + 540) % 360) - 180);
-        return delta >= 1.2 ? s.heading : prev;
+        // Drop threshold to 0.5 for real-time 60fps tracking
+        return delta >= 0.5 ? s.heading : prev;
       });
     });
   }, []);
+
+  // Puck heading: Route bearing ONLY when snapped AND in a fast-moving vehicle.
+  // Walking must use the realtime device compass for true FPV.
+  const puckHeading = useMemo(() => {
+    if (isVehicleMode && navState && navState.distanceFromRouteM < 25 && navState.routeBearing > 0)
+      return navState.routeBearing;
+    return beamHeading; 
+  }, [isVehicleMode, navState, beamHeading]);
 
   const meRef = useRef(me);
   useEffect(() => { meRef.current = me; }, [me]);
@@ -345,9 +350,18 @@ export default function MapScreen() {
   const isUserGesturingRef  = useRef(false);
   const isProgrammaticFlightRef = useRef(false);
   const isFlatOverviewRef = useRef(false);
-  
+  // Timestamps exactly when the camera was locked
+  const lockEngagedAtRef = useRef<number>(0);
+
   const followMeRef = useRef(followMe);
   useEffect(() => { followMeRef.current = followMe; }, [followMe]);
+
+  // Ref so that handleRegionChange and Mapbox callbacks can read nativeFollowActive
+  // without a re-render cycle. Updated inline (synchronous with every render) AND
+  // immediately in any handler that changes follow state — this closes the race window
+  // where Mapbox fires onRegionIsChanging between setState and the next render.
+  const nativeFollowActiveRef = useRef(nativeFollowActive);
+  nativeFollowActiveRef.current = nativeFollowActive; // Always in sync with current render
 
   const prevRegionRef = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
   useEffect(() => { prevRegionRef.current = null; }, [navigating]);
@@ -405,6 +419,7 @@ export default function MapScreen() {
           pitch:   45,
           heading: f.heading,
           duration: stepMs,
+          mode: "linearTo", // Crucial for chaining! Prevents easing to a dead stop at every waypoint.
         });
       }, i * stepMs));
     });
@@ -482,8 +497,13 @@ export default function MapScreen() {
 
 
   const handleRecenter = useCallback(() => {
+    lockEngagedAtRef.current = Date.now(); // Stamp lock
     setFollowMe(true);
     followMeRef.current = true;
+    if (nativeFollowPref && isNavigationMode) {
+      nativeFollowActiveRef.current = true;
+      return;
+    }
     if (meRef.current) {
       isProgrammaticFlightRef.current = true;
       isUserGesturingRef.current = false;
@@ -496,7 +516,7 @@ export default function MapScreen() {
       });
       setTimeout(() => { isProgrammaticFlightRef.current = false; }, 1050);
     }
-  }, [camera]);
+  }, [camera, nativeFollowPref, isNavigationMode]);
 
 
   // ── CAMERA LOOP (JS fallback — native followUserLocation owns the camera
@@ -566,21 +586,19 @@ export default function MapScreen() {
         rawHeading = speed < 0.8
           ? smooth // at rest: hold current heading
           : (routeBearing ?? gpsHeading ?? compass);
-      } else if (gpsWeight > 0 && gpsHeading != null) {
-        const compassDelta = ((compass - anchorCmp + 540) % 360) - 180;
-        const fused        = (anchorGps + compassDelta + 360) % 360;
-        rawHeading         = fused * gpsWeight + compass * (1 - gpsWeight);
       } else {
+        // For walking FPV, bypass GPS fusion entirely so it exactly mirrors the beam.
         rawHeading = compass;
       }
-
       const diff = ((rawHeading - smooth + 540) % 360) - 180;
-      smooth     = (smooth + (vehicleMode ? 0.75 : 0.88) * diff + 360) % 360;
+      // Instant tracking (1.0) for walking, smooth (0.75) for vehicles
+      smooth     = (smooth + (vehicleMode ? 0.75 : 1.0) * diff + 360) % 360;
 
       const delta = Math.abs(((smooth - committed + 540) % 360) - 180);
-      if (delta >= 1.0) committed = smooth;
+      // Lower threshold so the camera responds to micro-movements instantly
+      if (delta >= 0.5) committed = smooth;
 
-      const isFlat = isFlatOverviewRef.current || navViewRef.current === "flat";
+      const isFlat = !headingUpRef.current || navViewRef.current === "flat";
 
       const speedKphCam = speed * 3.6;
       // Separate zoom curves: walking hugs the street; transit sits further
@@ -646,7 +664,7 @@ export default function MapScreen() {
         if (sendHdg) lastSentHdgRef.current = targetHeading;
         lastCamRef.current = { lat: centerLat, lng: centerLng, zoom: finalZoom, pitch };
         
-        // 🛠️ PERFECT SYNC
+        // PERFECT SYNC
         camera.animateTo({
           center:   { latitude: centerLat, longitude: centerLng },
           zoom:     finalZoom,
@@ -706,7 +724,6 @@ export default function MapScreen() {
 
   const handleGoToStop = useCallback(async () => {
     if (!me || !selected) return;
-    setStopDetailsOpen(false);
 
     const fromLoc: UnifiedLocation = {
       id: "current_location", name: "Current Location", _type: "location",
@@ -733,6 +750,7 @@ export default function MapScreen() {
   const handleToggleNav = useCallback((nextState: boolean) => {
     cancelFlyThrough();
     if (nextState) {
+      lockEngagedAtRef.current = Date.now();
       isFlatOverviewRef.current = false;
       startNavigation();
       setFollowMe(true);
@@ -740,6 +758,9 @@ export default function MapScreen() {
       setNavStarted(true);
       setHeadingUp(true);
       headingUpRef.current = true;
+      // Stamp immediately — Mapbox fires onRegionIsChanging before the next render,
+      // and the guard in handleRegionChange reads this ref.
+      nativeFollowActiveRef.current = nativeFollowPref;
 
       // Native follow engages via Camera props — no manual intro flight
       // (setCamera would fight followUserLocation).
@@ -772,6 +793,7 @@ export default function MapScreen() {
       stopNavigation();
       setFollowMe(false);
       followMeRef.current = false;
+      nativeFollowActiveRef.current = false; // stamp immediately on nav stop
       setNavStarted(false);
       setHeadingUp(false);
       headingUpRef.current = false;
@@ -780,15 +802,16 @@ export default function MapScreen() {
       camera.animateTo({ pitch: 0, heading: 0, zoom: 15, duration: 600 });
       setTimeout(() => { isProgrammaticFlightRef.current = false; }, 650);
     }
-  }, [startNavigation, stopNavigation, camera, prefs.nativeFollow]);
+  }, [startNavigation, stopNavigation, camera, prefs.nativeFollow, nativeFollowPref, cancelFlyThrough]);
 
   const handleCompassPress = useCallback(() => {
-    // Native follow: the compass toggles course-up ↔ north-up (and restores
-    // follow after a gesture) purely via Camera props — no manual flights.
+    // 1. Native Follow Handling
     if (prefs.nativeFollow && isNavigationMode) {
       if (!followMe) {
+        lockEngagedAtRef.current = Date.now(); // 🛠️ Stamp lock
         setFollowMe(true);
         followMeRef.current = true;
+        nativeFollowActiveRef.current = true;
         return;
       }
       setHeadingUp((h) => {
@@ -798,16 +821,19 @@ export default function MapScreen() {
       return;
     }
 
+    // 2. Free-roam Mode (Not Navigating)
     if (!isNavigationMode) {
       isProgrammaticFlightRef.current = true;
       isUserGesturingRef.current = false;
-      camera.animateTo({ heading: 0, pitch: 0, duration: 800 });
+      camera.animateTo({ heading: 0, pitch: 0, duration: 800, mode: "easeTo" });
       setCameraHeading(0);
       setTimeout(() => { isProgrammaticFlightRef.current = false; }, 850);
       return;
     }
 
+    // 3. JS Nav Loop: Recenter if currently unlocked
     if (!followMe) {
+      lockEngagedAtRef.current = Date.now(); // 🛠️ Stamp lock
       setFollowMe(true);
       followMeRef.current = true;
 
@@ -815,11 +841,10 @@ export default function MapScreen() {
         isProgrammaticFlightRef.current = true;
         isUserGesturingRef.current = false;
 
-        const targetPitch = isFlatOverviewRef.current ? 0 : (isVehicleModeRef.current ? 65 : 45);
-        const targetZoom  = isFlatOverviewRef.current ? 15.5 : (isVehicleModeRef.current ? 17.2 : 19.2);
-        const targetHdg   = (!isFlatOverviewRef.current && headingUpRef.current)
-          ? (useHeadingStore.getState().heading || 0)
-          : 0;
+        const targetPitch = !headingUpRef.current ? 0 : (isVehicleModeRef.current ? 65 : 45);
+        const targetZoom  = !headingUpRef.current ? 15.5 : (isVehicleModeRef.current ? 17.2 : 19.2);
+        const targetHdg   = headingUpRef.current ? (useHeadingStore.getState().heading || 0) : 0;
+        
         flightCamRef.current = { zoom: targetZoom, pitch: targetPitch, at: Date.now() };
 
         camera.animateTo({
@@ -828,61 +853,40 @@ export default function MapScreen() {
           pitch: targetPitch,
           heading: targetHdg,
           duration: 1200, 
-        });
+          mode: "easeTo", // 🛠️ Forces a smooth glide
+        } as any);
 
-        setTimeout(() => {
-          isProgrammaticFlightRef.current = false;
-        }, 1250);
+        setTimeout(() => { isProgrammaticFlightRef.current = false; }, 1250);
       }
       return;
     }
 
-    if (!isFlatOverviewRef.current) {
-      isFlatOverviewRef.current = true;
-      setHeadingUp(false);
-      headingUpRef.current = false;
-
-      isProgrammaticFlightRef.current = true;
-      isUserGesturingRef.current = false;
-      flightCamRef.current = { zoom: 15.5, pitch: 0, at: Date.now() };
-
-      camera.animateTo({
-        pitch: 0,
-        heading: 0,
-        zoom: 15.5,
-        duration: 1000,
-      });
-
-      setTimeout(() => {
-        isProgrammaticFlightRef.current = false;
-      }, 1050);
-      return;
-    }
-
-    if (isFlatOverviewRef.current) {
-      isFlatOverviewRef.current = false;
-      setHeadingUp(true);
-      headingUpRef.current = true;
+    // 4. JS Nav Loop: Toggle FPV / Flat Overview
+    setHeadingUp((h) => {
+      const next = !h;
+      headingUpRef.current = next;
 
       isProgrammaticFlightRef.current = true;
       isUserGesturingRef.current = false;
 
-      const targetPitch = isVehicleModeRef.current ? 65 : 45;
-      const targetZoom  = isVehicleModeRef.current ? 17.2 : 19.2;
-      const targetHdg   = useHeadingStore.getState().heading || 0;
+      const targetPitch = next ? (isVehicleModeRef.current ? 65 : 45) : 0;
+      const targetZoom  = next ? (isVehicleModeRef.current ? 17.2 : 19.2) : 15.5;
+      const targetHdg   = next ? (useHeadingStore.getState().heading || 0) : 0;
+
       flightCamRef.current = { zoom: targetZoom, pitch: targetPitch, at: Date.now() };
 
       camera.animateTo({
         pitch: targetPitch,
         heading: targetHdg,
         zoom: targetZoom,
-        duration: 1000,
-      });
+        duration: 1200, // 🛠️ Lengthened for elegance
+        mode: "easeTo", // 🛠️ Forces a smooth glide
+      } as any);
 
-      setTimeout(() => {
-        isProgrammaticFlightRef.current = false;
-      }, 1050);
-    }
+      setTimeout(() => { isProgrammaticFlightRef.current = false; }, 1250);
+
+      return next;
+    });
 
     compassBusyRef.current = true;
     setTimeout(() => { compassBusyRef.current = false; }, 500);
@@ -924,19 +928,25 @@ export default function MapScreen() {
   }, [activeJourney, handleToggleNav]);
 
   const handleRegionChange = useCallback((feature: any) => {
-    // A user gesture during the fly-through hands control back immediately.
+    if (isProgrammaticFlightRef.current) return;
+
     if (flyThroughActiveRef.current && feature?.properties?.isUserInteraction) {
       cancelFlyThrough();
     }
-    if (isProgrammaticFlightRef.current) return;
 
     const isGesture = feature?.properties?.isUserInteraction;
+    const timeSinceLock = Date.now() - lockEngagedAtRef.current;
 
     if (isGesture) {
       isUserGesturingRef.current = true;
-      if (followMeRef.current) {
+      
+      // INSTANT RECENTER DETECTION
+      // Shield the lock for 500ms from Mapbox's fake native snap gesture.
+      // After 500ms, ANY swipe instantly drops the camera lock and shows the recenter button.
+      if (followMeRef.current && timeSinceLock > 500) {
         followMeRef.current = false;
         setFollowMe(false);
+        nativeFollowActiveRef.current = false; // Stamp immediately
       }
       setFollowingBus(false);
     }
@@ -958,23 +968,13 @@ export default function MapScreen() {
     if (isProgrammaticFlightRef.current) return;
 
     const [lng, lat] = (feature?.geometry?.coordinates as [number, number]) ?? [DEFAULT_REGION.longitude, DEFAULT_REGION.latitude];
-    const newZoom   = feature?.properties?.zoomLevel   ?? 13;
+    const newZoom   = feature?.properties?.zoomLevel    ?? 13;
     const isGesture = feature?.properties?.isUserInteraction ?? false;
 
     if (isGesture) {
       isUserGesturingRef.current = false;
-      const prev = prevRegionRef.current;
-
-      if (navigating && prev) {
-        const isPinch = Math.abs(newZoom - prev.zoom) > 0.15
-          && Math.abs(lat - prev.lat) < 0.0003
-          && Math.abs(lng - prev.lng) < 0.0003;
-
-        if (isPinch) {
-          followMeRef.current = true;
-          setFollowMe(true);
-        }
-      }
+      // The buggy 'isPinch' logic has been completely removed. 
+      // Once unlocked, it stays unlocked until the user taps Recenter.
     }
 
     prevRegionRef.current = { lat, lng, zoom: newZoom };
@@ -1082,10 +1082,12 @@ export default function MapScreen() {
   const unifiedUserLocationGeoJson = useMemo(() => {
     if (meLat == null || meLng == null) return null;
 
-    // 🛠️ FIX : On affiche toujours le faisceau pour les piétons, même en navigation !
     const showBeam = !isVehicleMode;
+    // The beam visual must ALWAYS use the device compass (beamHeading),
+    // even when the map camera tracking is snapped to the route.
+    const effectiveHeading = beamHeading;
     const beamFeature = showBeam
-      ? headingArcGeoJson(meLat, meLng, beamHeading, viewZoom, isNavigationMode)
+      ? headingArcGeoJson(meLat, meLng, effectiveHeading, viewZoom, isNavigationMode)
       : null;
 
     const dotFeature: GeoJSON.Feature<GeoJSON.Point> = {
@@ -1100,7 +1102,7 @@ export default function MapScreen() {
       type: "FeatureCollection",
       features: beamFeature ? [beamFeature, dotFeature] : [dotFeature],
     };
-  }, [meLat, meLng, beamHeading, isVehicleMode, isNavigationMode, viewZoom]);
+  }, [meLat, meLng, beamHeading, viewZoom, isVehicleMode, isNavigationMode]); // Ensure dependencies are accurate
 
   const navModelsGeoJson = useMemo(() => {
     if (!isNavigationMode || meLat == null || meLng == null) return null;
@@ -1124,17 +1126,6 @@ export default function MapScreen() {
     } as GeoJSON.FeatureCollection;
   }, [meLat, meLng, me?.heading, isNavigationMode]);
 
-
-  const breadcrumbGeoJson = useMemo(() => {
-    if (!breadcrumbs || breadcrumbs.length < 2) return null;
-    return {
-      type: "Feature",
-      geometry: {
-        type: "LineString",
-        coordinates: breadcrumbs.map(b => [b.longitude, b.latitude])
-      }
-    } as GeoJSON.Feature<GeoJSON.LineString>;
-  }, [breadcrumbs]);
 
   return (
     <View style={{ flex: 1, backgroundColor: BG }}>
@@ -1161,30 +1152,29 @@ export default function MapScreen() {
             centerCoordinate: [DEFAULT_REGION.longitude, DEFAULT_REGION.latitude],
             zoomLevel: 13,
           }}
-          // Native follow (#18): centering + rotation run on the UI thread.
           followUserLocation={nativeFollowActive}
           {...(nativeFollowActive
             ? {
-                followUserMode: (headingUp ? "course" : "normal") as any,
+                // 'course' freezes at 0 speed. 'compass' perfectly tracks device hardware rotation when walking.
+                followUserMode: (headingUp ? (isVehicleMode ? "course" : "compass") : "normal") as any,
                 followZoomLevel: followZoom,
                 followPitch,
                 followPadding: { paddingBottom: 200 },
               }
             : {})}
+          onUserTrackingModeChange={(e: any) => {
+            if (nativeFollowActiveRef.current && e?.nativeEvent?.payload?.followUserMode == null) {
+              followMeRef.current = false;
+              setFollowMe(false);
+              nativeFollowActiveRef.current = false;
+            }
+          }}
         />
 
-        {/* Native puck fed by the engine's snapped 1 Hz fixes; Mapbox
-            interpolates at 60 fps. Hidden in vehicle mode (3D bus instead). */}
-        {nativeFollowActive && meLat != null && meLng != null && (
-          <>
-            <CustomLocationProvider coordinate={[meLng, meLat]} heading={puckHeading} />
-            <LocationPuck
-              visible={!isVehicleMode}
-              puckBearingEnabled
-              puckBearing="course"
-              pulsing={{ isEnabled: true, color: "#FF6F00", radius: 16 }}
-            />
-          </>
+        {/* CustomLocationProvider tells the Camera where to follow — no visual. */}
+        {/* Decoupled from `nativeFollowActive`. It must stay mounted during the whole nav session so Mapbox always has coordinates ready the instant you hit Recenter. */}
+        {prefs.nativeFollow && isNavigationMode && meLat != null && meLng != null && (
+          <CustomLocationProvider coordinate={[meLng, meLat]} heading={puckHeading} />
         )}
 
         {styleLoaded && (
@@ -1198,33 +1188,15 @@ export default function MapScreen() {
 
         {styleLoaded && (
           <>
-            {breadcrumbGeoJson && (
-              <NativeShapeSource id="breadcrumbs-src" shape={breadcrumbGeoJson}>
-                <NativeLineLayer
-                  id="breadcrumbs-line"
-                  style={{
-                    lineColor: "#A1A1AA", 
-                    lineWidth: 5,
-                    lineDasharray: [1, 1.5],
-                    lineCap: "round",
-                    lineJoin: "round"
-                  }}
-                />
-              </NativeShapeSource>
-            )}
 
             {unifiedUserLocationGeoJson && (
               <NativeShapeSource id="user-bundle-src" shape={unifiedUserLocationGeoJson}>
                 
                 <NativeFillLayer id="user-beam-fill" filter={["==", ["get", "layer"], "beam"]} style={{ fillColor: "#FF6F00", fillOpacity: 0.18 }} />
-                
-                {/* 🛠️ FIX : viewport alignment pour qu'ils fassent face à la caméra et dessinent PAR DESSUS les bâtiments 3D ! */}
-                {/* JSON dot/pulse hidden while the native LocationPuck renders (#18). */}
-                {!nativeFollowActive && (
-                  <NativeCircleLayer id="user-dot-pulse" filter={["==", ["get", "layer"], "dot"]} style={{ circleRadius: 18, circleColor: "#FF6F00", circleOpacity: 0.15, circlePitchAlignment: "viewport" }} />
-                )}
 
-                {!isVehicleMode && !nativeFollowActive && (
+                <NativeCircleLayer id="user-dot-pulse" filter={["==", ["get", "layer"], "dot"]} style={{ circleRadius: 18, circleColor: "#FF6F00", circleOpacity: 0.15, circlePitchAlignment: "viewport" }} />
+
+                {!isVehicleMode && (
                   <NativeCircleLayer
                     id="user-dot-core"
                     filter={["==", ["get", "layer"], "dot"]}
@@ -1233,7 +1205,7 @@ export default function MapScreen() {
                       circleColor: "#FF6F00",
                       circleStrokeColor: "#FFFFFF",
                       circleStrokeWidth: 3,
-                      circlePitchAlignment: "viewport", // draws above 3D buildings
+                      circlePitchAlignment: "viewport",
                     }}
                   />
                 )}
@@ -1481,6 +1453,7 @@ export default function MapScreen() {
         <StopDetailsSheet
           stop={selected}
           onClose={() => { setStopDetailsOpen(false); setSelected(null); }}
+          onGoToStop={handleGoToStop}
         />
       )}
 

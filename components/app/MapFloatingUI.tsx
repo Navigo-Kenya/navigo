@@ -373,11 +373,13 @@ export default function MapFloatingUI({
 
   if (navigating) {
     if (cameraUnlocked) {
+      // Camera has been unlocked by a user gesture — tap to re-engage follow.
       actionIcon = "locate";
       actionColor = WHITE;
       actionBg = BLUE;
-      actionHandler = onResetNorth;
+      actionHandler = onRecenter;
     } else {
+      // Following — tap to toggle course-up (FPV) ↔ north-up.
       actionIcon = headingUp ? "compass" : "navigate";
       actionColor = BLUE;
       actionBg = cardBg;

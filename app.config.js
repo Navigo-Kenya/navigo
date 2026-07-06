@@ -125,18 +125,16 @@ module.exports = {
       "expo-audio",
       "expo-quick-actions",
       [
-        "expo-camera",
+        "@sentry/react-native/expo",
         {
-          cameraPermission: "Navigo uses the camera for AR walking guidance, a live view with a direction arrow to your stage.",
+          organization: "navigo-k5",
+          project: "react-native",
         },
       ],
       [
-        "@sentry/react-native/expo",
+        "expo-camera",
         {
-          // Fill in once the Sentry org exists; builds succeed without it
-          // (source-map upload is skipped when unset).
-          organization: process.env.SENTRY_ORG ?? "",
-          project: process.env.SENTRY_PROJECT ?? "navigo-app",
+          cameraPermission: "Navigo uses the camera for AR walking guidance, a live view with a direction arrow to your stage.",
         },
       ],
       [

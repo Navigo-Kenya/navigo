@@ -12,7 +12,7 @@ export function useMapCamera(
   cameraRef: RefObject<Mapbox.Camera | null>,
 ) {
   const animateTo = useCallback(
-    (opts: CameraOptions) => {
+    (opts: any) => { // Assumes opts supports your new mode property
       if (!cameraRef.current) return;
       cameraRef.current.setCamera({
         centerCoordinate: opts.center
@@ -22,9 +22,8 @@ export function useMapCamera(
         ...(opts.heading !== undefined ? { heading: opts.heading } : {}),
         pitch:              opts.pitch ?? 0,
         animationDuration:  opts.duration ?? 400,
-        // Short-duration calls (nav loop at 80 ms) use linearTo so updates queue
-        // cleanly without snap-back. Longer transitions use easeTo for smoothness.
-        animationMode: (opts.duration ?? 400) <= 100 ? "linearTo" : "easeTo",
+        // Default to flyTo for flights, linearTo for tight loop tracking, allow manual override.
+        animationMode:      opts.mode ?? ((opts.duration ?? 400) <= 250 ? "linearTo" : "flyTo"),
       });
     },
     [cameraRef],

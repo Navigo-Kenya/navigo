@@ -83,6 +83,8 @@ const WALK_LABEL: Record<number, string> = {
   1000: "1 km",
   1500: "1.5 km",
   2000: "2 km",
+  2500: "2.5 km",
+  3000: "3 km",
 };
 
 const RANKING_LABEL: Record<string, string> = {
@@ -219,6 +221,8 @@ export default function Profile() {
             { label: "1 km",   value: 1000 },
             { label: "1.5 km", value: 1500 },
             { label: "2 km",   value: 2000 },
+            { label: "2.5 km", value: 2500 },
+            { label: "3 km",   value: 3000 },
           ])}
         />
         <View style={[s.sep, { backgroundColor: C.hairline }]} />
