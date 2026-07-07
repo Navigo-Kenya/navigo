@@ -117,6 +117,7 @@ module.exports = {
       "@bacons/apple-targets",
       require("./plugins/withLiveActivity"),
       require("./plugins/withAndroidWidget"),
+      require("./plugins/withWorkManagerFix"),
       "expo-asset",
       "expo-router",
       "expo-secure-store",
