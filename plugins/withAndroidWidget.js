@@ -1,10 +1,14 @@
 // plugins/withAndroidWidget.js
-// Adds the Navigo Glance widget receiver to AndroidManifest.xml and
-// injects the Glance gradle dependency into app/build.gradle.
+// Adds the Navigo Glance widget receiver to AndroidManifest.xml,
+// injects the Glance gradle dependency, and writes the appwidget-provider
+// XML so AAPT can always find it in the app's own res/xml/ directory.
 const {
   withAndroidManifest,
   withAppBuildGradle,
+  withDangerousMod,
 } = require("expo/config-plugins");
+const fs   = require("fs");
+const path = require("path");
 
 const RECEIVER = {
   $: {
@@ -27,6 +31,22 @@ const RECEIVER = {
     },
   ],
 };
+
+// Mirrors modules/navigo-widget-data/android/src/main/res/xml/navigo_widget_info.xml
+// Written here so AAPT finds it in the app's own res even before library merging occurs.
+const WIDGET_INFO_XML = `<?xml version="1.0" encoding="utf-8"?>
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="160dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:widgetCategory="home_screen"
+    android:description="@string/app_name"
+    android:resizeMode="horizontal|vertical"
+    android:previewImage="@mipmap/ic_launcher" />
+`;
 
 module.exports = function withAndroidWidget(config) {
   // 1. Add receiver to AndroidManifest
@@ -51,6 +71,25 @@ module.exports = function withAndroidWidget(config) {
     }
     return cfg;
   });
+
+  // 3. Write navigo_widget_info.xml into the app's own res/xml/ directory so
+  //    AAPT can resolve @xml/navigo_widget_info during resource linking.
+  config = withDangerousMod(config, [
+    "android",
+    async (cfg) => {
+      const xmlDir = path.join(
+        cfg.modRequest.platformProjectRoot,
+        "app", "src", "main", "res", "xml"
+      );
+      await fs.promises.mkdir(xmlDir, { recursive: true });
+      await fs.promises.writeFile(
+        path.join(xmlDir, "navigo_widget_info.xml"),
+        WIDGET_INFO_XML,
+        "utf8"
+      );
+      return cfg;
+    },
+  ]);
 
   return config;
 };
