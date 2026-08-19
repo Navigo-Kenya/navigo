@@ -9,7 +9,7 @@ public class NavigoLiveActivityModule: Module {
     public func definition() -> ModuleDefinition {
         Name("NavigoLiveActivity")
 
-        // Synchronous check — no async needed.
+        // Synchronous check, no async needed.
         Function("isSupported") { () -> Bool in
             if #available(iOS 16.2, *) {
                 return ActivityAuthorizationInfo().areActivitiesEnabled

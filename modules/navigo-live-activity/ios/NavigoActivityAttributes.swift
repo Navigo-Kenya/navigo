@@ -1,5 +1,5 @@
 // NavigoActivityAttributes.swift
-// Shared ActivityAttributes type — must be identical in the widget extension target.
+// Shared ActivityAttributes type, must be identical in the widget extension target.
 import ActivityKit
 import Foundation
 
