@@ -1,4 +1,4 @@
-// NavigoWidgetBundle.swift — entry point for the widget extension bundle.
+// NavigoWidgetBundle.swift: entry point for the widget extension bundle.
 import SwiftUI
 import WidgetKit
 

@@ -1,4 +1,4 @@
-// NavigoWidget.swift — WidgetKit home-screen widget
+// NavigoWidget.swift: WidgetKit home-screen widget
 import SwiftUI
 import WidgetKit
 
@@ -124,8 +124,12 @@ struct NavigoWidget: Widget {
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: NavigoWidgetProvider()) { entry in
-            NavigoWidgetView(entry: entry)
-                .containerBackground(.fill.tertiary, for: .widget)
+            if #available(iOS 17.0, *) {
+                NavigoWidgetView(entry: entry)
+                    .containerBackground(.fill.tertiary, for: .widget)
+            } else {
+                NavigoWidgetView(entry: entry)
+            }
         }
         .configurationDisplayName("Navigo")
         .description("Quick access to your home, work, and last destination.")

@@ -2,7 +2,7 @@
   "type": "widget",
   "name": "NavigoWidgets",
   "bundleId": "com.navigo.ke.widgets",
-  "deploymentTarget": "16.0",
+  "deploymentTarget": "16.1",
   "frameworks": ["WidgetKit", "SwiftUI", "ActivityKit"],
   "entitlements": {
     "com.apple.security.application-groups": ["group.com.navigo.ke"]

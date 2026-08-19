@@ -21,7 +21,7 @@ if (Platform.OS === "ios") {
   try {
     mod = requireNativeModule("NavigoLiveActivity");
   } catch {
-    // Module not linked — Phase 3 build not yet done.
+    // Module not linked, Phase 3 build not yet done.
   }
 }
 
