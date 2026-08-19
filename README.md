@@ -22,15 +22,13 @@
 
 <div align="center">
 
-| Search & Plan | Route Results | Live Navigation |
-|:---:|:---:|:---:|
-| <img src="assets/screenshots/search.png" width="200" alt="Search screen"/> | <img src="assets/screenshots/journey.png" width="200" alt="Route alternatives"/> | <img src="assets/screenshots/navigation.png" width="200" alt="Live navigation"/> |
-| **Map & Stops** | **Kwame AI** | **Community** |
-| <img src="assets/screenshots/map.png" width="200" alt="Map screen"/> | <img src="assets/screenshots/kwame.png" width="200" alt="Kwame AI assistant"/> | <img src="assets/screenshots/contribution.png" width="200" alt="Contributions"/> |
+| Route Preview | Plan a Trip |
+|:---:|:---:|
+| <img src="assets/images/screenshots/1.PNG" width="200" alt="Route preview on the map with ETA, fare, and walk/transit breakdown"/> | <img src="assets/images/screenshots/2.PNG" width="200" alt="Route search with ranked alternatives: cheapest, least walking, fewest transfers"/> |
+| **Live Navigation** | **Profile & Preferences** |
+| <img src="assets/images/screenshots/3.PNG" width="200" alt="Turn-by-turn live navigation with Kwame AI boarding guidance"/> | <img src="assets/images/screenshots/4.PNG" width="200" alt="Profile screen with travel preferences, voice guidance, and saved places"/> |
 
 </div>
-
-> Add screenshots to `assets/screenshots/`, recommended: iPhone 15 Pro, 393 × 852 pt, light + dark variants.
 
 ---
 
