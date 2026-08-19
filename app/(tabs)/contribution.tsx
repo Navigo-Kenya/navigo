@@ -1,6 +1,7 @@
 import BadgeUnlockModal from "@/components/contribution/BadgeUnlockModal";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
 import * as Notifications from "expo-notifications";
 import { useRouter } from "expo-router";
@@ -9,7 +10,6 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
-  Dimensions,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -24,9 +24,7 @@ import {
 } from "react-native";
 import MapView, { PROVIDER_GOOGLE, Region } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useAuthStore } from "@/store/authStore";
 import { useContributionStore } from "@/store/contributionStore";
-import { Contribution } from "@/services/contribution";
 import { StopService } from "@/services/stop";
 import { UnifiedLocation } from "@/store/journeyStore";
 
@@ -34,8 +32,6 @@ const ORANGE = "#FF6F00";
 const GREEN  = "#10B981";
 const RED    = "#EF4444";
 const GREY   = "#8E8E93";
-
-const { width: SCREEN_W } = Dimensions.get("window");
 
 // ── Mapbox static thumbnail ──────────────────────────────────────────────────
 function mapboxThumb(lng: number, lat: number, w = 600, h = 180): string {
@@ -1036,59 +1032,6 @@ function NewStopSheet({
   );
 }
 
-// ── Contribution type helpers ────────────────────────────────────────────────
-function typeIcon(type: string): keyof typeof Ionicons.glyphMap {
-  switch (type) {
-    case "delay_report":     return "time-outline";
-    case "stop_review":      return "chatbubbles-outline";
-    case "stop_photo":       return "camera-outline";
-    case "stop_edit":        return "create-outline";
-    case "route_correction": return "git-merge-outline";
-    case "new_stop":         return "location-outline";
-    default:                 return "ellipse-outline";
-  }
-}
-
-function typeColor(type: string): string {
-  switch (type) {
-    case "delay_report":     return RED;
-    case "stop_review":      return ORANGE;
-    case "stop_photo":       return ORANGE;
-    case "stop_edit":        return ORANGE;
-    case "route_correction": return ORANGE;
-    case "new_stop":         return GREEN;
-    default:                 return GREY;
-  }
-}
-
-function statusColor(status: string): string {
-  switch (status) {
-    case "approved":      return GREEN;
-    case "auto_approved": return GREEN;
-    case "rejected":      return RED;
-    default:              return "#F59E0B";
-  }
-}
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case "approved":      return "Approved";
-    case "auto_approved": return "Approved";
-    case "rejected":      return "Rejected";
-    default:              return "Pending";
-  }
-}
-
-function relativeTime(dateStr: string): string {
-  const diff  = Date.now() - new Date(dateStr).getTime();
-  const mins  = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days  = Math.floor(diff / 86400000);
-  if (mins  < 60) return `${mins}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  return `${days}d ago`;
-}
-
 // ── Schedule a 19:00 streak-preservation local notification (opt-in, one/day)
 async function scheduleStreakReminder() {
   try {
@@ -1109,86 +1052,67 @@ async function scheduleStreakReminder() {
       trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: fire },
     });
   } catch {
-    // Notifications not available — streak feature still works without reminder.
+    // Notifications not available, streak feature still works without reminder.
   }
 }
 
-// ── ContributionRow ──────────────────────────────────────────────────────────
-function ContributionRow({
-  item,
-  C,
-  onLongPress,
-}: {
-  item: Contribution;
-  C: ReturnType<typeof makeC>;
-  onLongPress?: () => void;
-}) {
-  const color = typeColor(item.type);
-  const sc    = statusColor(item.status);
+// ── MAIN SCREEN ──────────────────────────────────────────────────────────────
+// Picker UI replicates mobile/src/features/contribution/components/ContributionSheet.tsx's
+// design (title+subtitle header, a stats pill, a 4-card type grid, a leaderboard link)
+// instead of the previous level-track/recent-submissions/badges-preview dashboard.
+// "Add a new stop" is a 5th card in the same visual style, not part of the mobile
+// design being replicated, kept because it's real, working functionality
+// (NewStopSheet below) that shouldn't quietly disappear just because the reference
+// screen doesn't have an equivalent action.
+type ActiveSheet = "delay" | "review" | "edit" | "new_stop" | null;
 
+interface ContributionType {
+  id: ActiveSheet | "photo";
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  subtitle: string;
+  points: number;
+}
+
+const TYPES: ContributionType[] = [
+  { id: "edit",     icon: "pencil-outline",     label: "Edit a stop",     subtitle: "Fix a name or location",   points: 10 },
+  { id: "photo",    icon: "camera-outline",     label: "Add a photo",     subtitle: "Help others recognize it", points: 5  },
+  { id: "delay",    icon: "megaphone-outline",  label: "Report an issue", subtitle: "Delays, hazards, closures", points: 8 },
+  { id: "review",   icon: "star-outline",       label: "Write a review",  subtitle: "Rate a route or stop",     points: 5  },
+  { id: "new_stop", icon: "location-outline",   label: "Add a new stop",  subtitle: "Missing from the map",     points: 12 },
+];
+
+function TypeCard({
+  type,
+  C,
+  onPress,
+}: {
+  type: ContributionType;
+  C: ReturnType<typeof makeC>;
+  onPress: () => void;
+}) {
   return (
-    <Pressable
-      onLongPress={onLongPress}
-      style={({ pressed }) => [
-        s.contribRow,
-        { borderBottomColor: C.hairline, backgroundColor: pressed ? C.pressed : "transparent" },
-      ]}
-    >
-      <View style={[s.contribIcon, { backgroundColor: color + "18" }]}>
-        <Ionicons name={typeIcon(item.type)} size={18} color={color} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={[s.contribTitle, { color: C.text }]} numberOfLines={1}>
-          {item.title ?? item.type.replace(/_/g, " ")}
-        </Text>
-        <View style={s.contribMeta}>
-          <View style={[s.statusDot, { backgroundColor: sc }]} />
-          <Text style={[s.contribSub, { color: C.sub }]}>
-            {statusLabel(item.status)}
-            {item.points_awarded > 0 ? ` · +${item.points_awarded} pts` : ""}
-            {" · "}{relativeTime(item.created_at)}
-          </Text>
+    <Pressable onPress={onPress} style={{ width: "48%" }}>
+      <View style={[s.typeCard, { backgroundColor: C.card, borderColor: C.border }]}>
+        <View style={[s.typeIconCircle, { backgroundColor: ORANGE + "18" }]}>
+          <Ionicons name={type.icon} size={19} color={ORANGE} />
         </View>
+        <Text style={[s.typeLabel, { color: C.text }]}>{type.label}</Text>
+        <Text style={[s.typeSub, { color: C.sub }]}>{type.subtitle}</Text>
+        <Text style={s.typePoints}>+{type.points} pts</Text>
       </View>
     </Pressable>
   );
 }
 
-// ── MAIN SCREEN ──────────────────────────────────────────────────────────────
-type ActiveSheet = "delay" | "review" | "edit" | "new_stop" | null;
-
-const QUICK_ACTIONS: {
-  id: ActiveSheet | "photo";
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  color: string;
-}[] = [
-  { id: "photo",    label: "Add Photo",    icon: "camera-outline",  color: ORANGE },
-  { id: "delay",    label: "Report Delay", icon: "time-outline",    color: RED    },
-  { id: "review",   label: "Review Stop",  icon: "star-outline",    color: ORANGE },
-  { id: "edit",     label: "Edit Info",    icon: "create-outline",  color: ORANGE },
-  { id: "new_stop", label: "New Stop",     icon: "location-outline", color: GREEN },
-];
-
 export default function ContributionScreen() {
-  const insets = useRef(useSafeAreaInsets()).current;
   const dark   = useColorScheme() === "dark";
   const C      = makeC(dark);
   const router = useRouter();
-  const { user, avatarTs } = useAuthStore();
 
-  const {
-    contributions,
-    stats,
-    badges,
-    loaded,
-    fetch: fetchStore,
-    refresh: refreshStore,
-    removeContribution,
-  } = useContributionStore();
+  const { stats, fetch: fetchStore } = useContributionStore();
 
   const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null);
-  const [refreshing, setRefreshing]   = useState(false);
   const [badgeModal, setBadgeModal]   = useState<{
     visible: boolean; pointsAwarded: number; badges: string[]; streakDays?: number;
   }>({ visible: false, pointsAwarded: 0, badges: [] });
@@ -1198,20 +1122,15 @@ export default function ContributionScreen() {
   }, [fetchStore]);
 
   // Schedule 19:00 reminder only when the user has an active streak and hasn't
-  // contributed today — purely advisory, dismissed if they contribute before then.
+  // contributed today, purely advisory, dismissed if they contribute before then.
   useEffect(() => {
     if (stats && stats.streak_days > 0 && !stats.contributed_today) {
       scheduleStreakReminder();
     }
   }, [stats?.streak_days, stats?.contributed_today]);
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await refreshStore().catch(() => {});
-    setRefreshing(false);
-  };
-
-  const handleActionPress = (id: ActiveSheet | "photo") => {
+  const handleTypePress = (id: ActiveSheet | "photo") => {
+    Haptics.selectionAsync();
     if (id === "photo") {
       router.push("/(account)/add-photo" as any);
       return;
@@ -1219,223 +1138,49 @@ export default function ContributionScreen() {
     setActiveSheet(id as ActiveSheet);
   };
 
-  const handleLongPress = (item: Contribution) => {
-    if (item.status !== "pending") return;
-    Alert.alert("Delete submission", "Remove this pending submission?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: () => removeContribution(item.id).catch(() => Alert.alert("Error", "Could not delete.")),
-      },
-    ]);
-  };
-
-  const levelPoints = stats?.points ?? 0;
-  const toNext      = stats?.points_to_next_level ?? 1;
-  const level       = stats?.level ?? 1;
-
-  const initials = user?.name
-    ? user.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()
-    : "?";
-
-  const recentContribs = contributions.slice(0, 5);
-  const earnedBadges   = badges.earned.slice(0, 4);
-
   return (
     <View style={[s.root, { backgroundColor: C.bg }]}>
-      {/* ── Header ── */}
-      <View style={[s.header, { paddingTop: 0, backgroundColor: C.bg }]}>
-        <Text style={[s.headerTitle, { color: C.text }]}>Contribute</Text>
-        <Pressable onPress={handleRefresh} hitSlop={12}>
-          <Ionicons name="refresh-outline" size={22} color={C.sub} />
-        </Pressable>
-      </View>
-
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 50 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 50, gap: 24 }}
       >
-        {/* ── Level Card ── */}
-        <View style={[s.levelCard, { backgroundColor: C.card, borderColor: C.border }]}>
-          <View style={s.levelCardTop}>
-            {user?.avatar ? (
-              <Image source={{ uri: `${user.avatar}?_v=${avatarTs}` }} style={s.avatar} contentFit="cover" />
-            ) : (
-              <View style={[s.avatar, { backgroundColor: ORANGE, justifyContent: "center", alignItems: "center" }]}>
-                <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 18 }}>{initials}</Text>
-              </View>
-            )}
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Text style={[s.levelLabel, { color: C.text }]}>{stats?.level_label ?? "Commuter"}</Text>
-                {(stats?.streak_days ?? 0) > 0 && (
-                  <View style={[s.streakPill, { backgroundColor: ORANGE + "18" }]}>
-                    <Text style={s.streakFlame}>🔥</Text>
-                    <Text style={[s.streakCount, { color: ORANGE }]}>{stats!.streak_days}</Text>
-                  </View>
-                )}
-              </View>
-              <Text style={[s.levelSub, { color: C.sub }]}>
-                Level {stats?.level ?? 1} · {levelPoints} pts
-              </Text>
-            </View>
-            <Pressable
-              onPress={() => router.push("/(account)/badges" as any)}
-              style={[s.badgesBtn, { backgroundColor: ORANGE + "18" }]}
-            >
-              <Text style={s.badgesBtnText}>Badges</Text>
-              <Ionicons name="chevron-forward" size={14} color={ORANGE} />
-            </Pressable>
-          </View>
-
-          {/* Level track */}
-          <View style={s.levelTrack}>
-            {[1, 2, 3, 4, 5, 6, 7].map((lvl, i) => {
-              const isCurrent = level === lvl;
-              const isPast    = lvl < level;
-              const dotSize   = isCurrent ? 20 : 12;
-              const dotColor  = isPast || isCurrent ? ORANGE : C.input;
-              return (
-                <React.Fragment key={lvl}>
-                  {i > 0 && (
-                    <View style={[s.levelLine, { backgroundColor: lvl <= level ? ORANGE : C.input }]} />
-                  )}
-                  <View
-                    style={[
-                      s.levelDot,
-                      {
-                        width: dotSize, height: dotSize, borderRadius: dotSize / 2,
-                        backgroundColor: dotColor,
-                        borderWidth: isCurrent ? 3 : 0,
-                        borderColor: ORANGE + "40",
-                      },
-                    ]}
-                  />
-                </React.Fragment>
-              );
-            })}
-          </View>
-          {toNext > 0 ? (
-            <Text style={[s.progressHint, { color: C.sub }]}>
-              {toNext} pts to {stats?.next_level_label ?? "next level"}
-            </Text>
-          ) : (
-            <Text style={[s.progressHint, { color: GREEN }]}>Max level, Community Elder!</Text>
-          )}
+        <View>
+          <Text style={[s.headerTitle, { color: C.text }]}>Contribute</Text>
+          <Text style={[s.headerSub, { color: C.sub }]}>Help improve Navigo for everyone in Nairobi.</Text>
         </View>
 
-        {/* ── Quick Actions ── */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={s.actionsRow}
-        >
-          {QUICK_ACTIONS.map((action) => (
-            <Pressable
-              key={action.id}
-              style={s.actionItem}
-              onPress={() => handleActionPress(action.id as any)}
-            >
-              <View style={[s.actionCircle, { backgroundColor: action.color + "18", borderColor: action.color + "30" }]}>
-                <Ionicons name={action.icon} size={24} color={action.color} />
+        {stats ? (
+          <Pressable onPress={() => router.push("/(account)/badges" as any)}>
+            <View style={[s.statsPill, { backgroundColor: C.card }]}>
+              <View>
+                <Text style={[s.statsPillPoints, { color: C.text }]}>{stats.points.toLocaleString()} pts</Text>
+                <Text style={[s.statsPillLevel, { color: C.sub }]}>{stats.level_label}</Text>
               </View>
-              <Text style={[s.actionLabel, { color: C.sub }]}>{action.label}</Text>
-            </Pressable>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                {stats.streak_days > 0 ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                    <Text style={{ fontSize: 16 }}>🔥</Text>
+                    <Text style={[s.statsPillStreak, { color: C.text }]}>{stats.streak_days}d</Text>
+                  </View>
+                ) : null}
+                <Ionicons name="chevron-forward" size={18} color={C.sub} />
+              </View>
+            </View>
+          </Pressable>
+        ) : null}
+
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12, justifyContent: "space-between" }}>
+          {TYPES.map((type) => (
+            <TypeCard key={type.id} type={type} C={C} onPress={() => handleTypePress(type.id)} />
           ))}
-        </ScrollView>
-
-        {/* ── Recent Submissions ── */}
-        <View style={s.section}>
-          <View style={s.sectionHeader}>
-            <Text style={[s.sectionTitle, { color: C.text }]}>Your Submissions</Text>
-            {contributions.length > 5 && (
-              <Pressable onPress={() => router.push("/(account)/submissions" as any)}>
-                <Text style={s.seeAll}>See all</Text>
-              </Pressable>
-            )}
-          </View>
-          <View style={[s.card, { backgroundColor: C.card, borderColor: C.border }]}>
-            {!loaded ? (
-              <ActivityIndicator color={ORANGE} style={{ padding: 24 }} />
-            ) : recentContribs.length === 0 ? (
-              <View style={s.emptyState}>
-                <Ionicons name="leaf-outline" size={36} color={C.sub} />
-                <Text style={[s.emptyText, { color: C.sub }]}>No submissions yet</Text>
-                <Text style={[s.emptySub, { color: C.sub }]}>
-                  Use the quick actions above to start contributing.
-                </Text>
-              </View>
-            ) : (
-              recentContribs.map((item) => (
-                <ContributionRow
-                  key={item.id}
-                  item={item}
-                  C={C}
-                  onLongPress={() => handleLongPress(item)}
-                />
-              ))
-            )}
-          </View>
         </View>
 
-        {/* ── Stats row ── */}
-        {stats && (
-          <View style={s.statsRow}>
-            <View style={[s.statCard, { backgroundColor: C.card, borderColor: C.border }]}>
-              <Text style={[s.statNum, { color: C.text }]}>{stats.submissions_count}</Text>
-              <Text style={[s.statLbl, { color: C.sub }]}>Submissions</Text>
-            </View>
-            <View style={[s.statCard, { backgroundColor: C.card, borderColor: C.border }]}>
-              <Text style={[s.statNum, { color: C.text }]}>{stats.points}</Text>
-              <Text style={[s.statLbl, { color: C.sub }]}>Safiri Points</Text>
-            </View>
-            <View style={[s.statCard, { backgroundColor: C.card, borderColor: C.border }]}>
-              <Text style={[s.statNum, { color: C.text }]}>{stats.badges_count}</Text>
-              <Text style={[s.statLbl, { color: C.sub }]}>Badges</Text>
-            </View>
-          </View>
-        )}
-
-        {/* ── Badges preview ── */}
-        {earnedBadges.length > 0 && (
-          <View style={s.section}>
-            <View style={s.sectionHeader}>
-              <Text style={[s.sectionTitle, { color: C.text }]}>Your Badges</Text>
-              <Pressable onPress={() => router.push("/(account)/badges" as any)}>
-                <Text style={s.seeAll}>View all</Text>
-              </Pressable>
-            </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.badgesRow}>
-              {earnedBadges.map((b) => (
-                <View key={b.slug} style={[s.badgeItem, { backgroundColor: C.card, borderColor: C.border }]}>
-                  <View style={[s.badgeCircle, { backgroundColor: b.color + "22" }]}>
-                    <Ionicons name={b.icon as any} size={22} color={b.color} />
-                  </View>
-                  <Text style={[s.badgeName, { color: C.text }]} numberOfLines={2}>{b.name}</Text>
-                </View>
-              ))}
-              {badges.locked.length > 0 && (
-                <Pressable
-                  style={[s.badgeItem, s.badgeMore, { backgroundColor: C.input, borderColor: C.border }]}
-                  onPress={() => router.push("/(account)/badges" as any)}
-                >
-                  <Text style={[s.badgeMoreText, { color: C.sub }]}>+{badges.locked.length}</Text>
-                  <Text style={[s.badgeMoreSub, { color: C.sub }]}>locked</Text>
-                </Pressable>
-              )}
-            </ScrollView>
-          </View>
-        )}
-
-        {/* ── Leaderboard CTA ── */}
         <Pressable
-          style={[s.leaderboardCta, { backgroundColor: ORANGE }]}
           onPress={() => router.push("/(account)/leaderboard" as any)}
+          style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 8 }}
         >
-          <Ionicons name="trophy-outline" size={20} color="#FFF" />
-          <Text style={s.leaderboardCtaText}>Community Leaderboard</Text>
-          <Ionicons name="chevron-forward" size={18} color="#FFF" />
+          <Ionicons name="trophy-outline" size={16} color={ORANGE} />
+          <Text style={{ color: ORANGE, fontWeight: "600" }}>View leaderboard</Text>
         </Pressable>
       </ScrollView>
 
@@ -1618,150 +1363,34 @@ const sh = StyleSheet.create({
 const s = StyleSheet.create({
   root: { flex: 1 },
 
-  header: {
+  headerTitle: { fontSize: 26, fontWeight: "800", letterSpacing: -0.4 },
+  headerSub:   { fontSize: 14, marginTop: 2 },
+
+  statsPill: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-  },
-  headerTitle: { fontSize: 22, fontWeight: "700", letterSpacing: -0.5 },
-
-  levelCard: {
-    marginHorizontal: 16,
-    marginBottom: 8,
-    borderRadius: 16,
     padding: 16,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 20,
   },
-  levelCardTop: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 14 },
-  avatar:       { width: 46, height: 46, borderRadius: 23 },
-  levelLabel:   { fontSize: 17, fontWeight: "700" },
-  levelSub:     { fontSize: 13, marginTop: 2 },
-  badgesBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-  },
-  badgesBtnText: { color: ORANGE, fontWeight: "600", fontSize: 13 },
-  levelTrack:  { flexDirection: "row", alignItems: "center", marginTop: 14, marginBottom: 6 },
-  levelLine:   { flex: 1, height: 2, marginHorizontal: 3 },
-  levelDot:    { alignItems: "center", justifyContent: "center" },
-  progressHint: { fontSize: 12 },
+  statsPillPoints: { fontSize: 22, fontWeight: "800" },
+  statsPillLevel:  { fontSize: 13, marginTop: 2 },
+  statsPillStreak: { fontSize: 13, fontWeight: "700" },
 
-  actionsRow: { paddingHorizontal: 16, paddingVertical: 18, gap: 18 },
-  actionItem: { alignItems: "center", width: 70 },
-  actionCircle: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+  typeCard: {
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 16,
+  },
+  typeIconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 6,
-    borderWidth: 1,
+    marginBottom: 12,
   },
-  actionLabel: { fontSize: 11, fontWeight: "500", textAlign: "center" },
-
-  section: { paddingHorizontal: 16, marginBottom: 16 },
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 10,
-  },
-  sectionTitle: { fontSize: 16, fontWeight: "700" },
-  seeAll:       { color: ORANGE, fontWeight: "600", fontSize: 14 },
-
-  card: {
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: "hidden",
-  },
-
-  contribRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  contribIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  contribTitle: { fontSize: 14, fontWeight: "500", marginBottom: 3 },
-  contribMeta:  { flexDirection: "row", alignItems: "center", gap: 5 },
-  contribSub:   { fontSize: 12 },
-  statusDot:    { width: 6, height: 6, borderRadius: 3 },
-
-  statsRow: {
-    flexDirection: "row",
-    paddingHorizontal: 16,
-    gap: 10,
-    marginBottom: 16,
-  },
-  statCard: {
-    flex: 1,
-    borderRadius: 12,
-    padding: 14,
-    alignItems: "center",
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  statNum: { fontSize: 22, fontWeight: "800" },
-  statLbl: { fontSize: 11, marginTop: 2 },
-
-  badgesRow: { paddingLeft: 16, paddingRight: 8, gap: 10 },
-  badgeItem: {
-    width: 80,
-    borderRadius: 12,
-    padding: 10,
-    alignItems: "center",
-    borderWidth: StyleSheet.hairlineWidth,
-    gap: 6,
-  },
-  badgeCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  badgeName:     { fontSize: 11, fontWeight: "500", textAlign: "center" },
-  badgeMore:     { justifyContent: "center" },
-  badgeMoreText: { fontSize: 20, fontWeight: "800", color: GREY, textAlign: "center" },
-  badgeMoreSub:  { fontSize: 11, textAlign: "center" },
-
-  streakPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-    borderRadius: 999,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-  },
-  streakFlame: { fontSize: 12 },
-  streakCount: { fontSize: 12, fontWeight: "700" },
-
-  leaderboardCta: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    marginHorizontal: 16,
-    marginBottom: 8,
-    height: 50,
-    borderRadius: 14,
-  },
-  leaderboardCtaText: { color: "#FFF", fontWeight: "700", fontSize: 16, flex: 1, textAlign: "center" },
-
-  emptyState: { alignItems: "center", padding: 32, gap: 8 },
-  emptyText:  { fontSize: 15, fontWeight: "600" },
-  emptySub:   { fontSize: 13, textAlign: "center", opacity: 0.7 },
+  typeLabel: { fontSize: 15, fontWeight: "600" },
+  typeSub:   { fontSize: 13, marginTop: 2, marginBottom: 8 },
+  typePoints: { fontSize: 13, fontWeight: "700", color: ORANGE },
 });

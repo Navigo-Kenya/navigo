@@ -13,6 +13,11 @@ import {
   View,
   useColorScheme,
 } from "react-native";
+// Aliased: this file already uses react-native's own legacy `Animated` for the
+// draggable sheet's spring/timing, so Reanimated's default export (also named
+// `Animated`) needs a different local name.
+import Reanimated, { LinearTransition } from "react-native-reanimated";
+import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNotificationStore } from "@/store/notificationStore";
 import { useAuthStore } from "@/store/authStore";
@@ -228,13 +233,19 @@ function CustomTabBar({
         return (
           <Pressable
             key={tab.id}
-            onPress={() => onTabPress(tab.id)}
+            onPress={() => {
+              Haptics.selectionAsync();
+              onTabPress(tab.id);
+            }}
             style={styles.tabItem}
             accessibilityRole="tab"
             accessibilityLabel={tab.label}
             accessibilityState={{ selected: isActive }}
           >
-            <View style={[styles.tabPill, isActive && styles.tabPillActive]}>
+            <Reanimated.View
+              layout={LinearTransition.springify().damping(18).stiffness(220)}
+              style={[styles.tabPill, isActive && styles.tabPillActive]}
+            >
               <View>
                 <Ionicons
                   name={isActive ? tab.iconActive : tab.icon}
@@ -248,8 +259,8 @@ function CustomTabBar({
                   ]} />
                 )}
               </View>
-            </View>
-              {isActive && <Text style={[styles.tabLabel, { color: labelColor }]}>{tab.label}</Text>}
+              {isActive && <Text style={styles.tabLabel}>{tab.label}</Text>}
+            </Reanimated.View>
             {!isActive && (
               <Text style={[styles.tabInactiveLabel, { color: labelColor }]} numberOfLines={1}>
                 {tab.label}
@@ -450,7 +461,7 @@ const styles = StyleSheet.create({
     backgroundColor: ORANGE,
   },
   tabLabel: {
-    color:      INACTIVE_BLACK,
+    color:      WHITE,
     fontSize:   11,
     fontWeight: "600",
     letterSpacing: 0.1,

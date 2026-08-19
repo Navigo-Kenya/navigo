@@ -1,4 +1,4 @@
-// NavigoLiveActivityWidget.swift — ActivityKit lock-screen + Dynamic Island views
+// NavigoLiveActivityWidget.swift: ActivityKit lock-screen + Dynamic Island views
 import SwiftUI
 import WidgetKit
 import ActivityKit
@@ -38,7 +38,7 @@ struct NavigoLockScreenView: View {
 
 // ── Dynamic Island views ──────────────────────────────────────────────────────
 
-@available(iOS 16.2, *)
+@available(iOS 16.1, *)
 struct NavigoCompactLeading: View {
     let context: ActivityViewContext<NavigoActivityAttributes>
     var body: some View {
@@ -46,7 +46,7 @@ struct NavigoCompactLeading: View {
     }
 }
 
-@available(iOS 16.2, *)
+@available(iOS 16.1, *)
 struct NavigoCompactTrailing: View {
     let context: ActivityViewContext<NavigoActivityAttributes>
     var body: some View {
@@ -56,7 +56,7 @@ struct NavigoCompactTrailing: View {
     }
 }
 
-@available(iOS 16.2, *)
+@available(iOS 16.1, *)
 struct NavigoMinimal: View {
     let context: ActivityViewContext<NavigoActivityAttributes>
     var body: some View {
@@ -64,7 +64,7 @@ struct NavigoMinimal: View {
     }
 }
 
-@available(iOS 16.2, *)
+@available(iOS 16.1, *)
 struct NavigoExpanded: View {
     let context: ActivityViewContext<NavigoActivityAttributes>
     var body: some View {
