@@ -6,8 +6,10 @@ import { Platform } from "react-native";
 import { useAuthStore } from "@/store/authStore";
 
 const getBaseUrl = () => {
+
   if (process.env.EXPO_PUBLIC_API_URL) {
-    return process.env.EXPO_PUBLIC_API_URL;
+    // return process.env.EXPO_PUBLIC_API_URL;
+    return "https://ccc8-196-98-214-130.ngrok-free.app/api/v1";
   }
 
   // Strictly prevent local IPs from leaking into production builds
@@ -15,7 +17,7 @@ const getBaseUrl = () => {
     console.warn("CRITICAL: EXPO_PUBLIC_API_URL is missing in production build!");
     // You can hardcode your production production URL here as a final safety net, 
     // e.g., return "https://api.navigo.ke/api/v1";
-    return "https://api.navigo.ke/api/v1"; 
+    return "https://api.navigo.ke/api/v1";
   }
 
   if (!Platform.isTV && !Constants.isDevice) {
@@ -29,7 +31,7 @@ const getBaseUrl = () => {
 export const BASE_URL = getBaseUrl();
 
 if (__DEV__) {
-  console.log("🚀 API Configured with URL:", BASE_URL);
+  console.log("API Configured with URL:", BASE_URL);
 }
 
 const api = axios.create({
@@ -38,24 +40,31 @@ const api = axios.create({
     "Content-Type": "application/json",
     Accept: "application/json",
   },
-  timeout: 15000, // 15s default for standard CRUD ops,
-  // Example of how you would call your AI endpoint elsewhere:
-  // await api.post('/journeys/ai-plan', formData, { timeout: 120000 });
-
-  // timeout: 120000, // 120s, AI pipeline (Whisper + GPT + OTP + TTS) can take up to 90s
+  timeout: 15000,
 });
 
-// --- REQUEST: attach Bearer token + logger ---
+// --- REQUEST: attach Bearer token + logger + clean GET headers ---
 api.interceptors.request.use(
   async (config) => {
     const token = useAuthStore.getState().token;
     if (token && !config.headers["Authorization"]) {
       config.headers["Authorization"] = `Bearer ${token}`;
     }
+
+    // GET/HEAD should not advertise a JSON body
+    const method = (config.method || "get").toLowerCase();
+    if (method === "get" || method === "head") {
+      // axios may keep the default header; remove it so the server only sees the query string
+      if (config.headers) {
+        delete (config.headers as any)["Content-Type"];
+        delete (config.headers as any)["content-type"];
+      }
+    }
+
     if (__DEV__) {
       console.log(
         `[REQ: ${config.method?.toUpperCase()}] ${config.url}`,
-        config.data || "",
+        config.params || config.data || "",
       );
     }
     return config;
@@ -121,7 +130,12 @@ export async function fetchApi<T>(
     const response = await api.request<T>({
       url: endpoint,
       method: options.method || "GET",
-      data: options.body ? JSON.parse(options.body) : undefined,
+      data: options.body
+        ? typeof options.body === "string"
+          ? JSON.parse(options.body)
+          : options.body
+        : undefined,
+      params: options.params,          // ← important
       headers: options.headers,
       timeout: options.timeout || 15000,
     });

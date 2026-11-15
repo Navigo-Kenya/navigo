@@ -271,7 +271,7 @@ export default function PostJourneySheet({
               </View>
               <Text style={[s.successTitle, { color: C.text }]}>Thanks for the feedback!</Text>
               <Text style={[s.successSub,   { color: C.sub  }]}>
-                Your report makes Hopln more accurate for everyone.
+                Your report makes Navigo more accurate for everyone.
               </Text>
             </View>
           ) : (

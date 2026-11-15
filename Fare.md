@@ -1,7 +1,7 @@
-# Hopln Fare System
+# Navigo Fare System
 
 Complete reference for how fares are determined, resolved, modified, and displayed
-across the Hopln stack.
+across the Navigo stack.
 
 ---
 
@@ -41,7 +41,7 @@ Mobile app: extractFares(segments) → FareResult
 
 ## 2. Database Schema
 
-All fare tables live in `hopln-api`. Migrations are in `database/migrations/`.
+All fare tables live in `navigo-api`. Migrations are in `database/migrations/`.
 
 ### `fare_zones`
 Drawn in the console's Zone Designer (Mapbox polygon draw tool).
@@ -105,7 +105,7 @@ Dynamic adjustments layered on top of the base fare.
 
 ## 3. Resolution Algorithm
 
-**File:** `hopln-api/app/Services/FareService.php`
+**File:** `navigo-api/app/Services/FareService.php`
 
 For each transit segment, `resolveSegmentFare()` runs these checks in order and
 stops at the first match:
@@ -175,7 +175,7 @@ is still enforced.
 
 ## 5. OTP Integration Point
 
-**File:** `hopln-api/app/Services/TransitEngineService.php`
+**File:** `navigo-api/app/Services/TransitEngineService.php`
 
 During `parseItinerary()`, each OTP transit leg now captures two internal fields:
 
@@ -219,7 +219,7 @@ WALK segments do not include a `fare` key.
 
 ## 7. Mobile Consumption
 
-**Files:** `hopln/services/route.ts`, `hopln/utils/mapHelpers.ts`
+**Files:** `navigo/services/route.ts`, `navigo/utils/mapHelpers.ts`
 
 ```ts
 // Type on RouteSegment
@@ -244,7 +244,7 @@ extractFares(segments: RouteSegment[]): FareResult
 | `found: true`, zone | `~KES 70` | `Est. fare ~KES 70` + ⓘ disclaimer |
 | `found: false` | *(hidden, duration shown instead)* | `No fare info for this route` (grey) |
 
-The `showFares` user preference (`hopln/store/prefsStore.ts`) gates all fare
+The `showFares` user preference (`navigo/store/prefsStore.ts`) gates all fare
 rendering. When off, `extractFares` is never called and no fare UI is shown.
 
 ---
@@ -330,13 +330,13 @@ a flat weight file (PMML or PHP-native decision tree array) consumed by
 As confirmation volume grows, switch to weekly retrain via a Laravel background
 job (`php artisan fare:retrain`). Use the previous model as a warm start.
 
-### Why Hopln can win this market
+### Why navigo can win this market
 
 Uber and Google Maps get accurate ETAs from billions of trips, not fancy models.
 At Nairobi scale, 500 confirmed fares will beat any formula. The **congestion
 crowd-report signal** (Phase C of the accuracy roadmap) is unique — no other
 Nairobi transit app has per-route real-time congestion data from its own users.
-That one feature alone will make Hopln's ML model structurally more accurate
+That one feature alone will make navigo's ML model structurally more accurate
 than anything trained on static GTFS data.
 
 ---
@@ -367,4 +367,4 @@ operating agency on a shared corridor and prefer that agency's fare rule.
 ### Phase E — Public fare API
 `GET /v1/fares/route/{route_id}` — read-only endpoint with confidence score (0–100)
 derived from confirmation count, recency, and modifier coverage.
-Positions Hopln's fare DB as the community-maintained source for Nairobi pricing.
+Positions navigo's fare DB as the community-maintained source for Nairobi pricing.

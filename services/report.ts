@@ -31,9 +31,17 @@ export const ReportService = {
     east: number,
     west: number
   ): Promise<TransitReport[]> {
-    const { data } = await api.get<{ data: TransitReport[] }>("/reports/viewport", {
-      params: { north, south, east, west },
-    });
+    const bounds = { north, south, east, west };
+    if (Object.values(bounds).some((value) => !Number.isFinite(value))) {
+      throw new Error("Cannot fetch reports without finite viewport bounds");
+    }
+
+    // Put the bounds directly in the URL. This keeps them in the query string
+    // across React Native Axios adapters, where params may otherwise be lost.
+    const query = new URLSearchParams(
+      Object.entries(bounds).map(([key, value]) => [key, String(value)]),
+    ).toString();
+    const { data } = await api.get<{ data: TransitReport[] }>(`/reports/viewport?${query}`);
     console.info(`Fetched ${data.data.length} reports in viewport`);
     return data.data;
   },

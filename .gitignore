@@ -35,7 +35,7 @@ yarn-error.*
 .env
 
 # Google Play service account key — contains private credentials, never commit
-# google-services.json
+google-services.json
 google-service-account.json
 
 # typescript
@@ -46,3 +46,6 @@ app-example
 # generated native folders
 /ios
 /android
+
+# Gradle build cache (machine-specific)
+**/.gradle/

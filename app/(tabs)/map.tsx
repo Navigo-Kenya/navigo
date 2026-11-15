@@ -64,6 +64,14 @@ import {
   CustomLocationProvider,
 } from "@rnmapbox/maps";
 
+import MapSearchContextSheet from "@/components/app/MapSearchContextSheet";
+import {
+  RouteCorridorMapLayers,
+  RouteCorridorSheet,
+} from "@/components/map/RouteCorridorOverlay";
+import type { RouteCorridorResponse } from "@/services/stop";
+import { MapService } from "@/services/map";
+
 const NativeUserLocation  = UserLocation  as unknown as React.ComponentType<any>;
 const NativeCircleLayer   = CircleLayer   as unknown as React.ComponentType<any>;
 const NativeLineLayer     = LineLayer     as unknown as React.ComponentType<any>;
@@ -107,7 +115,6 @@ function headingArcGeoJson(
   };
 }
 
-import { MapService } from "@/services/map";
 
 const { height: SH } = Dimensions.get("window");
 
@@ -149,6 +156,10 @@ export default function MapScreen() {
     summary?: string;
     fare: { amount: number; currency: string } | null;
   } | null>(null);
+
+  const [corridorData, setCorridorData] = useState<RouteCorridorResponse | null>(null);
+  const [corridorLoading, setCorridorLoading] = useState(false);
+  const [corridorDir, setCorridorDir] = useState<"0" | "1">("0");
 
   const activeJourney = useJourneyStore((s) => s.activeJourney);
   const setJourney    = useJourneyStore((s) => s.setJourney);
@@ -904,6 +915,7 @@ export default function MapScreen() {
   const fetchReportsForBounds = useCallback(
     (north: number, south: number, east: number, west: number) => {
       if (!useMapLayersStore.getState().layers.reports) return; 
+      if (![north, south, east, west].every(Number.isFinite)) return;
       const reqId = ++reportReqId.current;
       ReportService.getReportsInViewport(north, south, east, west)
         .then((reports) => {
@@ -996,6 +1008,30 @@ export default function MapScreen() {
       }
     } catch { }
   }, [navigating, fetchReportsForBounds]);
+
+  const handleSelectCorridorRoute = useCallback(
+    async (routeId: string) => {
+      setCorridorLoading(true);
+      setCorridorDir("0");
+      setSelected(null);
+      try {
+        const data = await StopService.getRouteCorridor(routeId);
+        setCorridorData(data);
+        const pts = data.directions["0"]?.points ?? [];
+        if (pts.length >= 2) {
+          camera.fitCoordinates(
+            pts.map(([lng, lat]) => ({ latitude: lat, longitude: lng })),
+            { top: 120, right: 40, bottom: 320, left: 40 }
+          );
+        }
+      } catch {
+        Alert.alert("Error", "Could not load route corridor.");
+      } finally {
+        setCorridorLoading(false);
+      }
+    },
+    [camera]
+  );
 
   useEffect(() => {
     if (!layers.reports) return;
@@ -1251,6 +1287,14 @@ export default function MapScreen() {
               userLng={overlayUserLng}
             />
 
+            {corridorData && !activeJourney && (
+              <RouteCorridorMapLayers
+                corridor={corridorData}
+                direction={corridorDir}
+                onSelectStop={handleSelectStop}
+              />
+            )}
+
             {longPressCoord && !activeJourney && (
               <DroppedPin
                 key={`pin-${Math.round(longPressCoord.latitude * 1e5)},${Math.round(longPressCoord.longitude * 1e5)}`}
@@ -1439,6 +1483,20 @@ export default function MapScreen() {
         <NearestStopsSheet nearestOpen={nearestOpen} setNearestOpen={setNearestOpen} nearest={nearestStops} me={me} onSelect={handleSelectStop} />
       )}
 
+      {!activeJourney && !corridorData && (
+        <MapSearchContextSheet
+          onSelectStopOnMap={handleSelectStop}
+          onFocusCoords={(lat, lng) =>
+            camera.animateTo({
+              center: { latitude: lat, longitude: lng },
+              zoom: 16.5,
+              duration: 500,
+            })
+          }
+          onSelectCorridorRoute={handleSelectCorridorRoute}
+        />
+      )}
+
       {selected && !activeJourney && !stopDetailsOpen && (
         <StopQuickCard
           stop={selected}
@@ -1449,11 +1507,51 @@ export default function MapScreen() {
         />
       )}
 
-      {selected && !activeJourney && stopDetailsOpen && (
+      {/* Tapping any stop on the map opens the unified KakaoMap StopDetailsSheet directly */}
+      {selected && !activeJourney && (
         <StopDetailsSheet
           stop={selected}
-          onClose={() => { setStopDetailsOpen(false); setSelected(null); }}
+          allStops={allStops}
+          onSelectStop={handleSelectStop}
+          onSelectRouteCorridor={(routeId) => {
+            setSelected(null);
+            handleSelectCorridorRoute(routeId);
+          }}
+          onClose={() => {
+            setStopDetailsOpen(false);
+            setSelected(null);
+          }}
           onGoToStop={handleGoToStop}
+        />
+      )}
+
+      {!activeJourney && (corridorData || corridorLoading) && (
+        <RouteCorridorSheet
+          corridor={corridorData}
+          loading={corridorLoading}
+          direction={corridorDir}
+          onChangeDirection={(d) => {
+            setCorridorDir(d);
+            const pts = corridorData?.directions[d]?.points ?? [];
+            if (pts.length >= 2) {
+              camera.fitCoordinates(
+                pts.map(([lng, lat]) => ({ latitude: lat, longitude: lng })),
+                { top: 120, right: 40, bottom: 320, left: 40 }
+              );
+            }
+          }}
+          onFocusStop={(lat, lng) =>
+            camera.animateTo({
+              center: { latitude: lat, longitude: lng },
+              zoom: 16.5,
+              duration: 450,
+            })
+          }
+          onOpenStopDetails={(st) => {
+            setCorridorData(null);
+            handleSelectStop(st);
+          }}
+          onClose={() => setCorridorData(null)}
         />
       )}
 
@@ -1461,13 +1559,58 @@ export default function MapScreen() {
         <IntermStopInfoCard
           stop={selectedIntermStop}
           onClose={() => setSelectedIntermStop(null)}
+          onInspectStop={(st) => {
+            setSelectedIntermStop(null);
+            handleSelectStop(st);
+          }}
           dark={dark}
         />
       )}
 
       {activeJourney && (
-        <JourneyDetailsSheet activeJourney={activeJourney} routeLoading={routeLoading} routeInfo={routeInfo} navigating={isNavigationMode} paused={tripPaused} onPauseToggle={tripPaused ? resumeNavigation : pauseNavigation} onPreview={!isNavigationMode ? runFlyThrough : undefined} onToggleNav={handleToggleNav} onClose={handleClearJourney} mToNice={mToNice} sToMin={sToMin} isSaved={isSaved} onSave={handleSaveJourney} onUnsave={handleUnsaveJourney} scrollRef={stepsScrollRef} eta={navState?.eta ?? null} remainingDistanceM={navState?.remainingDistanceM ?? null}>
-          <RouteStepsList steps={steps} nextStepIdx={navState?.stepIndex ?? 0} navigating={isNavigationMode} selectedName={activeJourney.toLoc.name} stopsRemaining={navState?.stopsRemaining ?? null} stepETAs={navState?.stepETAs} scrollRef={stepsScrollRef} />
+        <JourneyDetailsSheet
+          activeJourney={activeJourney}
+          routeLoading={routeLoading}
+          routeInfo={routeInfo}
+          navigating={isNavigationMode}
+          paused={tripPaused}
+          onPauseToggle={tripPaused ? resumeNavigation : pauseNavigation}
+          onPreview={!isNavigationMode ? runFlyThrough : undefined}
+          onToggleNav={handleToggleNav}
+          onClose={handleClearJourney}
+          mToNice={mToNice}
+          sToMin={sToMin}
+          isSaved={isSaved}
+          onSave={handleSaveJourney}
+          onUnsave={handleUnsaveJourney}
+          scrollRef={stepsScrollRef}
+          eta={navState?.eta ?? null}
+          remainingDistanceM={navState?.remainingDistanceM ?? null}
+        >
+          <RouteStepsList
+            steps={steps}
+            nextStepIdx={navState?.stepIndex ?? 0}
+            navigating={isNavigationMode}
+            selectedName={activeJourney.toLoc.name}
+            stopsRemaining={navState?.stopsRemaining ?? null}
+            stepETAs={navState?.stepETAs}
+            scrollRef={stepsScrollRef}
+            onSelectIntermStop={(stop, routeName, routeColor) => {
+              camera.animateTo({
+                center: { latitude: stop.lat, longitude: stop.lng },
+                zoom: 16.5,
+                duration: 450,
+              });
+              setSelectedIntermStop({
+                id: stop.stop_id || stop.name,
+                stop_id: stop.stop_id,
+                coord: { latitude: stop.lat, longitude: stop.lng },
+                color: routeColor,
+                name: stop.name,
+                routeName,
+              } as any);
+            }}
+          />
         </JourneyDetailsSheet>
       )}
 

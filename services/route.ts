@@ -1,61 +1,99 @@
+// services/route.ts
 import type { UnifiedLocation } from "@/store/journeyStore";
 import { fetchApi } from "./apiClient";
 
 export interface WalkStep {
   instruction: string;
+  note?: string | null;
   distance: number;
+  duration?: number;
   lat: number;
   lng: number;
 }
 
 export interface RouteStop {
+  stop_id?: string | null;
+  stop_code?: string | null;
+  platform_code?: string | null;
   name: string;
-  lat:  number;
-  lng:  number;
+  lat: number;
+  lng: number;
 }
 
 export interface SegmentFare {
-  amount:     number;
-  currency:   string;
+  amount: number;
+  currency: string;
   confidence: "exact" | "zone";
 }
 
+export interface NextDepartureItem {
+  departure_time: string;
+  eta_seconds: number;
+  eta_label: string;
+  stops_away: number;
+  crowding: "Empty" | "Comfy" | "Busy";
+  headsign?: string | null;
+}
+
 export interface RouteSegment {
-  mode: "WALK" | "BUS" | "TRAM" | "SUBWAY" | "RAIL" | "FERRY";
+  mode: "WALK" | "BUS" | "BRT" | "TRAM" | "SUBWAY" | "RAIL" | "FERRY" | "BICYCLE" | "CAR";
+  route_type?: number | null;
+  mode_badge?: string;
   duration: number;
   distance: number;
+  route_id?: string | null;
   route_name?: string;
+  route_long_name?: string | null;
+  headsign?: string | null;
+  agency_name?: string | null;
   route_color?: string | null;
-  /** Google Polyline5-encoded geometry. Kept for backward compat; prefer `coordinates`. */
-  polyline: string;
-  /** Decoded [[lat, lng], ...] pairs, use these directly with Google Maps or any renderer. */
+  route_text_color?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  polyline?: string;
   coordinates: [number, number][];
   walk_steps: WalkStep[];
-  /** Ordered stops for transit legs: [boarding, ...intermediate, alighting]. */
   stops?: RouteStop[];
-  from: { name: string; lat: number; lng: number };
-  to: { name: string; lat: number; lng: number };
-  /** Server-resolved fare for this transit leg. null = no fare data in DB for this route. */
+  stop_count?: number;
+  next_departures?: NextDepartureItem[];
+  from: {
+    stop_id?: string | null;
+    stop_code?: string | null;
+    platform_code?: string | null;
+    name: string;
+    lat: number;
+    lng: number;
+    landmark?: string | null;
+  };
+  to: {
+    stop_id?: string | null;
+    stop_code?: string | null;
+    platform_code?: string | null;
+    name: string;
+    lat: number;
+    lng: number;
+  };
   fare?: SegmentFare | null;
 }
 
 export interface Route {
   polyline_encoding: "google";
-  /** Set to true when the route was derived from the AI assistant, not a manual search. */
   is_ai_derived?: boolean;
   type: "direct" | "transfer";
+  category?: "bus" | "rail" | "mixed" | "walk" | "bicycle" | "car";
+  primary_modes?: string[];
+  transfer_count?: number;
+  departure_time?: string | null;
+  arrival_time?: string | null;
+  schedule_notice?: string | null;
   summary: string;
   total_duration: number;
   total_walk_distance: number;
   total_distance: number;
   segments: RouteSegment[];
+  safety?: { score: number; safer: boolean };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Returns today's date in YYYY-MM-DD format in the user's local timezone. */
 function getLocalDate(): string {
   const d = new Date();
   const y = d.getFullYear();
@@ -64,10 +102,6 @@ function getLocalDate(): string {
   return `${y}-${m}-${day}`;
 }
 
-/**
- * Returns the current time in OTP's expected format: `hh:mmam` / `hh:mmpm`.
- * Uses Intl for correctness across locales and DST transitions.
- */
 function getLocalTime(): string {
   const parts = new Intl.DateTimeFormat("en-US", {
     hour: "2-digit",
@@ -76,29 +110,33 @@ function getLocalTime(): string {
     timeZone: "Africa/Nairobi",
   }).formatToParts(new Date());
 
-  const hour   = parts.find((p) => p.type === "hour")?.value   ?? "12";
+  const hour = parts.find((p) => p.type === "hour")?.value ?? "12";
   const minute = parts.find((p) => p.type === "minute")?.value ?? "00";
-  const ampm = ( parts.find((p) => p.type === "dayPeriod")?.value ?? "AM" ).toLowerCase();
+  const ampm = (
+    parts.find((p) => p.type === "dayPeriod")?.value ?? "AM"
+  ).toLowerCase();
 
-  return `${hour}:${minute}${ampm}`; // e.g. "02:30pm"
+  return `${hour}:${minute}${ampm}`;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Service
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const RouteService = {
   async calculateJourney(
     fromLoc: UnifiedLocation,
     toLoc: UnifiedLocation,
     maxWalkMeters?: number,
+    mode: "transit" | "bus" | "rail" | "walk" | "bicycle" | "car" = "transit",
+    customTime?: { date?: string; time?: string; arriveBy?: boolean }
   ): Promise<Route[]> {
     const payload: Record<string, unknown> = {
       from: { lat: fromLoc.lat, lng: fromLoc.lng },
-      to:   { lat: toLoc.lat,   lng: toLoc.lng   },
-      date: getLocalDate(),
-      time: getLocalTime(),
+      to: { lat: toLoc.lat, lng: toLoc.lng },
+      date: customTime?.date ?? getLocalDate(),
+      time: customTime?.time ?? getLocalTime(),
+      mode,
     };
+    if (customTime?.arriveBy !== undefined) {
+      payload.arrive_by = customTime.arriveBy;
+    }
     if (maxWalkMeters !== undefined) payload.max_walk_distance = maxWalkMeters;
 
     try {
@@ -109,7 +147,10 @@ export const RouteService = {
       return data.data ?? [];
     } catch (error: any) {
       if (error?.status === 503) {
-        throw new Error(error.message ?? "Route planning is temporarily unavailable. Please try again in a moment.");
+        throw new Error(
+          error.message ??
+            "Route planning is temporarily unavailable. Please try again in a moment."
+        );
       }
       throw error;
     }

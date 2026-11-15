@@ -1,15 +1,30 @@
 // components/app/RouteStepsList.tsx
-import { RouteStop, Step, WalkSubStep, getRouteColor, maneuverIcon, mToNice, sToMin } from "@/utils/mapHelpers";
+import {
+  RouteStop,
+  Step,
+  WalkSubStep,
+  getRouteColor,
+  maneuverIcon,
+  mToNice,
+  sToMin,
+} from "@/utils/mapHelpers";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View, useColorScheme } from "react-native";
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useColorScheme,
+} from "react-native";
 
-const ORANGE     = "#FF6F00";
-const BLACK      = "#1C1C1E";
-const GREY       = "#8E8E93";
-const LIGHT_GREY = "#F2F2F7";
-const BORDER     = "#E5E5EA";
-const BG         = "#FFFFFF";
+const ORANGE = "#FF6F00";
+const BLACK = "#111827";
+const GREY = "#6B7280";
+const BORDER = "#E5E7EB";
+const BG = "#FFFFFF";
 
 function formatStepEta(d: Date): string {
   if (!d || d.getTime() === 0) return "";
@@ -18,11 +33,20 @@ function formatStepEta(d: Date): string {
 
 const RAIL_W = 46;
 
-// ─── Seamless Walk Connector ──────────────────────────────────────────────────
+function resolveTransitIcon(
+  mode?: string
+): keyof typeof MaterialIcons.glyphMap {
+  const m = String(mode ?? "BUS").toUpperCase();
+  if (m === "RAIL" || m === "SUBWAY" || m === "TRAM") return "train";
+  if (m === "FERRY") return "directions-boat";
+  if (m === "BICYCLE") return "directions-bike";
+  if (m === "CAR") return "directions-car";
+  return "directions-bus";
+}
 
 function WalkDots() {
   const dark = useColorScheme() === "dark";
-  const dotColor = dark ? "#555555" : "#C7C7CC";
+  const dotColor = dark ? "#52525B" : "#CBD5E1";
   return (
     <View style={wd.railContainer}>
       <View style={[wd.dottedLine, { borderColor: dotColor }]} />
@@ -31,17 +55,24 @@ function WalkDots() {
 }
 const wd = StyleSheet.create({
   railContainer: { width: RAIL_W, alignItems: "center", height: 24 },
-  dottedLine:    { width: 0, flex: 1, borderWidth: 1.5, borderStyle: "dotted", borderRadius: 1 },
+  dottedLine: {
+    width: 0,
+    flex: 1,
+    borderWidth: 1.5,
+    borderStyle: "dotted",
+    borderRadius: 1,
+  },
 });
-
-// ─── 1. ORIGIN NODE ───────────────────────────────────────────────────────────
 
 function OriginNode() {
   const dark = useColorScheme() === "dark";
   const ringBg = dark ? "rgba(255,111,0,0.22)" : "#FFE2C2";
-  const textColor = dark ? "#FFFFFF" : BLACK;
-  const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  
+  const textColor = dark ? "#F9FAFB" : BLACK;
+  const time = new Date().toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
   return (
     <View style={orig.row}>
       <View style={orig.rail}>
@@ -55,26 +86,53 @@ function OriginNode() {
   );
 }
 const orig = StyleSheet.create({
-  row:       { flexDirection: "row", alignItems: "center", paddingVertical: 8, marginBottom: 4 },
-  rail:      { width: RAIL_W, alignItems: "center" },
-  outerRing: { width: 18, height: 18, borderRadius: 9, alignItems: "center", justifyContent: "center" },
-  innerDot:  { width: 10, height: 10, borderRadius: 5, backgroundColor: "#FF6F00" },
-  label:     { flex: 1, fontSize: 16, fontWeight: "600" },
-  time:      { fontSize: 13, color: GREY, fontWeight: "500" },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    marginBottom: 4,
+  },
+  rail: { width: RAIL_W, alignItems: "center" },
+  outerRing: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  innerDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: ORANGE,
+  },
+  label: { flex: 1, fontSize: 16, fontWeight: "700" },
+  time: { fontSize: 13, color: GREY, fontWeight: "500" },
 });
-
-// ─── 2. WALK SUB-STEP ─────────────────────────────────────────────────────────
 
 function SubStep({ sub, isLast }: { sub: WalkSubStep; isLast: boolean }) {
   const dark = useColorScheme() === "dark";
-  const textColor = dark ? "#FFFFFF" : BLACK;
-  const borderColor = dark ? "#2C2C2E" : BORDER;
+  const textColor = dark ? "#F9FAFB" : BLACK;
+  const borderColor = dark ? "#27272A" : BORDER;
 
   return (
-    <View style={[ss.row, !isLast && ss.divided, !isLast && { borderBottomColor: borderColor }]}>
-      <MaterialIcons name={maneuverIcon(sub.maneuver) as any} size={22} color={textColor} style={ss.icon} />
+    <View
+      style={[
+        ss.row,
+        !isLast && ss.divided,
+        !isLast && { borderBottomColor: borderColor },
+      ]}
+    >
+      <MaterialIcons
+        name={maneuverIcon(sub.maneuver) as any}
+        size={20}
+        color={textColor}
+        style={ss.icon}
+      />
       <View style={ss.textCol}>
-        <Text style={[ss.instruction, { color: textColor }]}>{sub.instruction}</Text>
+        <Text style={[ss.instruction, { color: textColor }]}>
+          {sub.instruction}
+        </Text>
         {sub.note && <Text style={ss.note}>{sub.note}</Text>}
       </View>
       {sub.distance > 0 && <Text style={ss.dist}>{mToNice(sub.distance)}</Text>}
@@ -82,55 +140,95 @@ function SubStep({ sub, isLast }: { sub: WalkSubStep; isLast: boolean }) {
   );
 }
 const ss = StyleSheet.create({
-  row:         { flexDirection: "row", alignItems: "center", paddingVertical: 14, paddingRight: 4 },
-  divided:     { borderBottomWidth: StyleSheet.hairlineWidth },
-  icon:        { marginRight: 14, opacity: 0.8 },
-  textCol:     { flex: 1, paddingRight: 10 },
-  instruction: { fontSize: 15, fontWeight: "500", lineHeight: 20 },
-  note:        { fontSize: 13, color: GREY, marginTop: 2, lineHeight: 18 },
-  dist:        { fontSize: 13, color: GREY, fontWeight: "600", flexShrink: 0 },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingRight: 4,
+  },
+  divided: { borderBottomWidth: StyleSheet.hairlineWidth },
+  icon: { marginRight: 12, opacity: 0.8 },
+  textCol: { flex: 1, paddingRight: 10 },
+  instruction: { fontSize: 14.5, fontWeight: "500", lineHeight: 20 },
+  note: { fontSize: 12.5, color: GREY, marginTop: 2, lineHeight: 17 },
+  dist: { fontSize: 12.5, color: GREY, fontWeight: "600", flexShrink: 0 },
 });
 
-// ─── 3. WALK SECTION ──────────────────────────────────────────────────────────
-
-function WalkSection({ step, isActive, isPassed, stepEta, navigating }: { step: Step; isActive: boolean; isPassed: boolean; stepEta?: Date; navigating: boolean }) {
+function WalkSection({
+  step,
+  isActive,
+  isPassed,
+  stepEta,
+  navigating,
+}: {
+  step: Step;
+  isActive: boolean;
+  isPassed: boolean;
+  stepEta?: Date;
+  navigating: boolean;
+}) {
   const [open, setOpen] = useState<boolean>(isActive || true);
   const hasSubs = (step.subSteps?.length ?? 0) > 0;
   const dark = useColorScheme() === "dark";
-  const C = { bg: dark ? "#1C1C1E" : BG, text: dark ? "#FFFFFF" : BLACK };
-  const dotColor = dark ? "#555555" : "#C7C7CC";
+  const C = { bg: dark ? "#18181B" : BG, text: dark ? "#F9FAFB" : BLACK };
+  const dotColor = dark ? "#52525B" : "#CBD5E1";
 
   return (
     <View style={[ws.container, { opacity: isPassed ? 0.4 : 1 }]}>
       <View style={ws.railContainer}>
-         <View style={[StyleSheet.absoluteFill, { alignItems: "center" }]}>
-            <View style={[ws.dottedLine, { borderColor: dotColor }]} />
-         </View>
-         <View style={[ws.iconBg, { backgroundColor: C.bg }]}>
-            <MaterialIcons name="directions-walk" size={22} color={isActive ? ORANGE : GREY} />
-         </View>
+        <View style={[StyleSheet.absoluteFill, { alignItems: "center" }]}>
+          <View style={[ws.dottedLine, { borderColor: dotColor }]} />
+        </View>
+        <View style={[ws.iconBg, { backgroundColor: C.bg }]}>
+          <MaterialIcons
+            name="directions-walk"
+            size={21}
+            color={isActive ? ORANGE : GREY}
+          />
+        </View>
       </View>
 
       <View style={ws.content}>
-        <Pressable style={ws.headerRow} onPress={() => hasSubs && setOpen(!open)} disabled={!hasSubs}>
+        <Pressable
+          style={ws.headerRow}
+          onPress={() => hasSubs && setOpen(!open)}
+          disabled={!hasSubs}
+        >
           <View style={{ flex: 1 }}>
-            <Text style={[ws.walkText, { color: C.text }, isActive && { color: ORANGE }]}>
+            <Text
+              style={[
+                ws.walkText,
+                { color: C.text },
+                isActive && { color: ORANGE },
+              ]}
+            >
               {step.instruction || "Walk"}
             </Text>
             <Text style={ws.metaText}>
-              {sToMin(step.duration).replace("~", "")} ({mToNice(step.distance)})
-              {navigating && stepEta && stepEta.getTime() !== 0 ? `  ·  Arrive at ${formatStepEta(stepEta)}` : ""}
+              {sToMin(step.duration).replace("~", "")} ({mToNice(step.distance)}
+              )
+              {navigating && stepEta && stepEta.getTime() !== 0
+                ? `  ·  Arrive at ${formatStepEta(stepEta)}`
+                : ""}
             </Text>
           </View>
           {hasSubs && (
-            <MaterialIcons name={open ? "expand-less" : "expand-more"} size={22} color={GREY} />
+            <MaterialIcons
+              name={open ? "expand-less" : "expand-more"}
+              size={22}
+              color={GREY}
+            />
           )}
         </Pressable>
 
         {open && hasSubs && (
           <View style={ws.subContainer}>
             {step.subSteps!.map((sub, j) => (
-              <SubStep key={j} sub={sub} isLast={j === step.subSteps!.length - 1} />
+              <SubStep
+                key={j}
+                sub={sub}
+                isLast={j === step.subSteps!.length - 1}
+              />
             ))}
           </View>
         )}
@@ -139,145 +237,273 @@ function WalkSection({ step, isActive, isPassed, stepEta, navigating }: { step: 
   );
 }
 const ws = StyleSheet.create({
-  container:    { flexDirection: "row", minHeight: 40 },
-  railContainer:{ width: RAIL_W, alignItems: "center" },
-  dottedLine:   { width: 0, flex: 1, borderWidth: 1.5, borderStyle: "dotted", borderRadius: 1 },
-  iconBg:       { position: "absolute", top: 12, paddingVertical: 4, paddingHorizontal: 4 }, 
-  content:      { flex: 1, paddingBottom: 8 },
-  headerRow:    { flexDirection: "row", alignItems: "center", paddingVertical: 12, minHeight: 48 },
-  walkText:     { fontSize: 16, fontWeight: "600" },
-  metaText:     { fontSize: 13, color: GREY, marginTop: 2 },
-  subContainer: { marginLeft: 0, marginBottom: 8 }, 
+  container: { flexDirection: "row", minHeight: 40 },
+  railContainer: { width: RAIL_W, alignItems: "center" },
+  dottedLine: {
+    width: 0,
+    flex: 1,
+    borderWidth: 1.5,
+    borderStyle: "dotted",
+    borderRadius: 1,
+  },
+  iconBg: {
+    position: "absolute",
+    top: 12,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+  },
+  content: { flex: 1, paddingBottom: 8 },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    minHeight: 48,
+  },
+  walkText: { fontSize: 15.5, fontWeight: "700" },
+  metaText: { fontSize: 13, color: GREY, marginTop: 2 },
+  subContainer: { marginLeft: 0, marginBottom: 8 },
 });
 
-// ─── 4. ELEGANT STOPS LIST (Cinematic Accordion) ──────────────────────────────
-
-function StopsList({ stops, routeColor }: { stops: RouteStop[]; routeColor: string }) {
+function StopsList({
+  stops,
+  routeColor,
+  routeName,
+  mode,
+  onSelectIntermStop,
+}: {
+  stops: RouteStop[];
+  routeColor: string;
+  routeName: string;
+  mode?: string;
+  onSelectIntermStop?: (
+    stop: RouteStop,
+    routeName: string,
+    routeColor: string
+  ) => void;
+}) {
   const dark = useColorScheme() === "dark";
-  const nameColor = dark ? "#CCCCCC" : "#555555";
-  const pressedColor = dark ? "#2C2C2E" : "#E5E5EA";
+  const nameColor = dark ? "#D4D4D8" : "#374151";
+  const pressedColor = dark ? "#27272A" : "#F3F4F6";
   const intermediate = stops.slice(1, -1);
-  
+
   if (intermediate.length === 0) return null;
+  const iconName = resolveTransitIcon(mode);
 
   return (
     <View style={[sl.container, { borderLeftColor: routeColor + "40" }]}>
-      {intermediate.map((stop, idx) => (
-        <Pressable 
-          key={idx} 
-          style={({ pressed }) => [sl.row, pressed && { backgroundColor: pressedColor }]}
-          onPress={() => {/* Ready for future modal/action */}}
+      {intermediate.map((stop: any, idx) => (
+        <Pressable
+          key={idx}
+          style={({ pressed }) => [
+            sl.row,
+            pressed && { backgroundColor: pressedColor },
+          ]}
+          onPress={() => {
+            Haptics.selectionAsync();
+            onSelectIntermStop?.(stop, routeName, routeColor);
+          }}
         >
-          {/* 🛠️ FIX: Replaced simple dot with a miniature bus/transit icon */}
-          <MaterialIcons name="directions-bus" size={14} color={routeColor} style={sl.icon} />
-          <Text style={[sl.name, { color: nameColor }]} numberOfLines={1}>{stop.name}</Text>
+          <MaterialIcons
+            name={iconName}
+            size={14}
+            color={routeColor}
+            style={sl.icon}
+          />
+          <Text style={[sl.name, { color: nameColor }]} numberOfLines={1}>
+            {stop.name}
+          </Text>
+          {stop.stop_code && (
+            <Text style={sl.codeText}>{stop.stop_code}</Text>
+          )}
+          <Ionicons name="locate-outline" size={13} color={GREY} />
         </Pressable>
       ))}
     </View>
   );
 }
 const sl = StyleSheet.create({
-  container: { 
-    marginTop: 4, 
-    marginBottom: 12, 
-    marginLeft: 6,       
-    paddingLeft: 12,     
-    borderLeftWidth: 2,  
+  container: {
+    marginTop: 4,
+    marginBottom: 12,
+    marginLeft: 6,
+    paddingLeft: 12,
+    borderLeftWidth: 2,
   },
-  row: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    minHeight: 32, 
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 34,
     paddingHorizontal: 8,
     borderRadius: 8,
-    marginBottom: 2
+    marginBottom: 2,
+    gap: 8,
   },
-  icon: { 
-    marginRight: 10,
-    opacity: 0.75 // Softens the icon so it doesn't fight the main bus node
-  },
-  name: { 
-    flex: 1, 
-    fontSize: 14, 
-    fontWeight: "500",
-    paddingVertical: 2 
-  },
+  icon: { opacity: 0.8 },
+  name: { flex: 1, fontSize: 13.5, fontWeight: "600", paddingVertical: 2 },
+  codeText: { fontSize: 11, color: GREY, fontFamily: "monospace" },
 });
 
-// ─── 5. TRANSIT SECTION (Thick Unified Rail) ──────────────────────────────────
-
 function TransitSection({
-  depart, arrive, routeColor, stopName, alightName, isActive, isPassed, stopsRemaining, boardEta,
+  depart,
+  arrive,
+  routeColor,
+  stopName,
+  alightName,
+  isActive,
+  isPassed,
+  stopsRemaining,
+  boardEta,
+  onSelectIntermStop,
 }: {
-  depart: Step; arrive: Step; routeColor: string; stopName: string; alightName: string; isActive: boolean; isPassed: boolean; stopsRemaining?: number | null; boardEta?: Date;
+  depart: Step;
+  arrive: Step;
+  routeColor: string;
+  stopName: string;
+  alightName: string;
+  isActive: boolean;
+  isPassed: boolean;
+  stopsRemaining?: number | null;
+  boardEta?: Date;
+  onSelectIntermStop?: (
+    stop: RouteStop,
+    routeName: string,
+    routeColor: string
+  ) => void;
 }) {
   const [rideExpanded, setRideExpanded] = useState(false);
   const dark = useColorScheme() === "dark";
-  const C = { bg: dark ? "#1C1C1E" : BG, text: dark ? "#FFFFFF" : BLACK, border: dark ? "#2C2C2E" : BORDER };
+  const C = {
+    bg: dark ? "#18181B" : BG,
+    text: dark ? "#F9FAFB" : BLACK,
+    border: dark ? "#27272A" : BORDER,
+  };
 
-  const routeNameMatch = depart.instruction?.match(/^Board Line (.+) at /);
+  const routeNameMatch = depart.instruction?.match(/^Board (?:Line )?(.+) at /);
   const routeName = routeNameMatch?.[1] ?? (depart as any).routeName ?? "";
-  const stops     = depart.stops ?? [];
+  const mode = (depart as any).mode ?? "BUS";
+  const modeBadge = (depart as any).modeBadge ?? "Bus";
+  const platformCode = (depart as any).platformCode;
+  const stopCode = (depart as any).stopCode;
+  const nextDep = (depart as any).nextDeparture;
+
+  const stops = depart.stops ?? [];
   const stopCount = stops.length > 1 ? stops.length - 1 : 1;
-  const hasSubs   = stops.length > 2;
-  const rideDur   = arrive ? sToMin(arrive.duration).replace("~", "") : "";
-  const rideDist  = arrive ? mToNice(arrive.distance) : "";
+  const hasSubs = stops.length > 2;
+  const rideDur = arrive ? sToMin(arrive.duration).replace("~", "") : "";
+  const rideDist = arrive ? mToNice(arrive.distance) : "";
+  const iconName = resolveTransitIcon(mode);
 
   return (
     <View style={[ts.wrapper, isPassed && { opacity: 0.35 }]}>
-      
       <View style={ts.railContainer}>
-         <View style={[StyleSheet.absoluteFill, { alignItems: "center" }]}>
-            <View style={[ts.solidLine, { backgroundColor: routeColor }]} />
-         </View>
-         <View style={[ts.busCircle, { backgroundColor: routeColor }]}>
-            <MaterialIcons name="directions-bus" size={18} color="#FFFFFF" />
-         </View>
-         <View style={[ts.alightCircle, { borderColor: routeColor, backgroundColor: C.bg }]} />
+        <View style={[StyleSheet.absoluteFill, { alignItems: "center" }]}>
+          <View style={[ts.solidLine, { backgroundColor: routeColor }]} />
+        </View>
+        <View style={[ts.busCircle, { backgroundColor: routeColor }]}>
+          <MaterialIcons name={iconName} size={17} color="#FFFFFF" />
+        </View>
+        <View
+          style={[
+            ts.alightCircle,
+            { borderColor: routeColor, backgroundColor: C.bg },
+          ]}
+        />
       </View>
 
       <View style={ts.content}>
         <View style={ts.boardingRow}>
           <View style={{ flex: 1 }}>
-            <Text style={[ts.nodeTitle, { color: C.text }]}>{stopName}</Text>
-            {(depart as any).from?.landmark ? (
+            <View style={ts.stopTitleLine}>
+              <Text style={[ts.nodeTitle, { color: C.text }]}>{stopName}</Text>
+              {stopCode && <Text style={ts.stopCode}>{stopCode}</Text>}
+              {platformCode && (
+                <View style={ts.platPill}>
+                  <Text style={ts.platPillText}>Plat. {platformCode}</Text>
+                </View>
+              )}
+            </View>
+            {(depart as any).landmark ? (
               <Text style={[ts.landmarkSub, { color: routeColor }]}>
-                in front of {(depart as any).from.landmark}
+                Near {(depart as any).landmark}
               </Text>
             ) : null}
           </View>
           {isActive && boardEta && boardEta.getTime() !== 0 && (
-            <Text style={[ts.etaText, { color: routeColor }]}>{formatStepEta(boardEta)}</Text>
+            <Text style={[ts.etaText, { color: routeColor }]}>
+              {formatStepEta(boardEta)}
+            </Text>
           )}
         </View>
 
         <View style={ts.rideContent}>
           <View style={ts.routeInfoRow}>
-            <View style={[ts.badge, { backgroundColor: routeColor }]}>
-              <Text style={ts.badgeText}>{routeName}</Text>
+            <View style={[ts.modeTag, { backgroundColor: routeColor }]}>
+              <Text style={ts.modeTagText}>{modeBadge}</Text>
             </View>
-            <Text style={[ts.destinationText, { color: C.text }]} numberOfLines={1}>Towards {alightName}</Text>
+            <Text style={[ts.routeNumText, { color: C.text }]}>
+              {routeName}
+            </Text>
+            <Text
+              style={[ts.destinationText, { color: GREY }]}
+              numberOfLines={1}
+            >
+              → {alightName}
+            </Text>
           </View>
 
+          {nextDep && (
+            <View style={ts.liveNextRow}>
+              <Text style={ts.liveNextRed}>{nextDep.eta_label}</Text>
+              <Text style={ts.liveNextMeta}>
+                ({nextDep.stops_away} stops away · {nextDep.crowding})
+              </Text>
+            </View>
+          )}
+
           <Pressable
-            style={ts.rideSummary}
-            onPress={() => hasSubs && setRideExpanded(v => !v)}
+            style={[ts.rideSummary, { borderTopColor: C.border }]}
+            onPress={() => hasSubs && setRideExpanded((v) => !v)}
             disabled={!hasSubs}
           >
-            <Text style={[ts.rideSummaryText, { color: C.text }, isActive && { color: ORANGE, fontWeight: "600" }]}>
+            <Text
+              style={[
+                ts.rideSummaryText,
+                { color: C.text },
+                isActive && { color: ORANGE, fontWeight: "700" },
+              ]}
+            >
               {isActive && stopsRemaining != null
-                ? `${stopsRemaining} stop${stopsRemaining !== 1 ? "s" : ""} remaining`
+                ? `${stopsRemaining} stop${
+                    stopsRemaining !== 1 ? "s" : ""
+                  } remaining`
                 : `Ride ${stopCount} stop${stopCount !== 1 ? "s" : ""}`}
-              {(rideDur || rideDist) ? (
-                <Text style={ts.rideDuration}>{"  ·  "}{rideDur}{rideDur && rideDist ? "  ·  " : ""}{rideDist}</Text>
+              {rideDur || rideDist ? (
+                <Text style={ts.rideDuration}>
+                  {"  ·  "}
+                  {rideDur}
+                  {rideDur && rideDist ? "  ·  " : ""}
+                  {rideDist}
+                </Text>
               ) : null}
             </Text>
             {hasSubs && (
-              <MaterialIcons name={rideExpanded ? "expand-less" : "expand-more"} size={22} color={GREY} />
+              <MaterialIcons
+                name={rideExpanded ? "expand-less" : "expand-more"}
+                size={22}
+                color={GREY}
+              />
             )}
           </Pressable>
 
-          {rideExpanded && hasSubs && <StopsList stops={stops} routeColor={routeColor} />}
+          {rideExpanded && hasSubs && (
+            <StopsList
+              stops={stops}
+              routeColor={routeColor}
+              routeName={routeName}
+              mode={mode}
+              onSelectIntermStop={onSelectIntermStop}
+            />
+          )}
         </View>
 
         <View style={ts.alightingRow}>
@@ -289,31 +515,97 @@ function TransitSection({
 }
 
 const ts = StyleSheet.create({
-  wrapper:       { flexDirection: "row", minHeight: 80, marginBottom: 8 },
+  wrapper: { flexDirection: "row", minHeight: 80, marginBottom: 8 },
   railContainer: { width: RAIL_W, alignItems: "center" },
-  solidLine:     { width: 6, flex: 1, borderRadius: 3 },
-  busCircle:     { position: "absolute", top: 12, width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", zIndex: 2 },
-  alightCircle:  { position: "absolute", bottom: 16, width: 16, height: 16, borderRadius: 8, borderWidth: 4, zIndex: 2 },
-  content:       { flex: 1, paddingBottom: 0 },
-  boardingRow:   { flexDirection: "row", alignItems: "center", paddingVertical: 14, minHeight: 48, justifyContent: "space-between" },
-  nodeTitle:     { fontSize: 16, fontWeight: "600" },
-  etaText:       { fontSize: 14, fontWeight: "700" },
-  rideContent:   { paddingVertical: 8 },
-  routeInfoRow:  { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
-  badge:         { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  badgeText:     { fontSize: 14, fontWeight: "700", color: "#FFF" },
-  destinationText: { fontSize: 16, fontWeight: "500", flex: 1 },
-  rideSummary:   { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: BORDER },
-  rideSummaryText:{ fontSize: 15 },
-  rideDuration:  { fontSize: 13, fontWeight: "400", color: GREY },
-  alightingRow:  { flexDirection: "row", alignItems: "center", paddingVertical: 12, minHeight: 44 },
-  landmarkSub:   { fontSize: 12, fontWeight: "500", marginTop: 2, fontStyle: "italic" },
+  solidLine: { width: 6, flex: 1, borderRadius: 3 },
+  busCircle: {
+    position: "absolute",
+    top: 12,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 2,
+  },
+  alightCircle: {
+    position: "absolute",
+    bottom: 16,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 4,
+    zIndex: 2,
+  },
+  content: { flex: 1, paddingBottom: 0 },
+  boardingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    minHeight: 46,
+    justifyContent: "space-between",
+  },
+  stopTitleLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+  },
+  nodeTitle: { fontSize: 16, fontWeight: "700" },
+  stopCode: { fontSize: 12, color: GREY, fontWeight: "500" },
+  platPill: {
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 5,
+  },
+  platPillText: { color: "#15803D", fontSize: 10.5, fontWeight: "700" },
+  etaText: { fontSize: 14, fontWeight: "700" },
+  rideContent: { paddingVertical: 6 },
+  routeInfoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    marginBottom: 6,
+  },
+  modeTag: { paddingHorizontal: 6, paddingVertical: 2.5, borderRadius: 5 },
+  modeTagText: { fontSize: 10.5, fontWeight: "800", color: "#FFF" },
+  routeNumText: { fontSize: 15, fontWeight: "800" },
+  destinationText: { fontSize: 13.5, fontWeight: "500", flex: 1 },
+  liveNextRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 8,
+  },
+  liveNextRed: { color: "#DC2626", fontSize: 12.5, fontWeight: "700" },
+  liveNextMeta: { color: GREY, fontSize: 12 },
+  rideSummary: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  rideSummaryText: { fontSize: 14.5, fontWeight: "600" },
+  rideDuration: { fontSize: 13, fontWeight: "400", color: GREY },
+  alightingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    minHeight: 44,
+  },
+  landmarkSub: {
+    fontSize: 12,
+    fontWeight: "500",
+    marginTop: 2,
+    fontStyle: "italic",
+  },
 });
 
-// ─── 6. DESTINATION NODE ──────────────────────────────────────────────────────
 function DestNode({ name }: { name: string }) {
   const dark = useColorScheme() === "dark";
-  const textColor = dark ? "#FFFFFF" : BLACK;
+  const textColor = dark ? "#F9FAFB" : BLACK;
 
   return (
     <View style={dn.row}>
@@ -325,36 +617,70 @@ function DestNode({ name }: { name: string }) {
   );
 }
 const dn = StyleSheet.create({
-  row:   { flexDirection: "row", alignItems: "center", paddingTop: 4, paddingBottom: 24 },
-  rail:  { width: RAIL_W, alignItems: "center" },
-  label: { flex: 1, fontSize: 18, fontWeight: "700" },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingTop: 4,
+    paddingBottom: 24,
+  },
+  rail: { width: RAIL_W, alignItems: "center" },
+  label: { flex: 1, fontSize: 17, fontWeight: "800" },
 });
 
-// ─── MAIN LIST ────────────────────────────────────────────────────────────────
 interface RouteStepsListProps {
-  steps: Step[]; nextStepIdx: number; navigating: boolean; selectedName: string;
-  stopsRemaining?: number | null; scrollRef?: React.RefObject<ScrollView | null>; stepETAs?: Date[];
+  steps: Step[];
+  nextStepIdx: number;
+  navigating: boolean;
+  selectedName: string;
+  stopsRemaining?: number | null;
+  scrollRef?: React.RefObject<ScrollView | null>;
+  stepETAs?: Date[];
+  onSelectIntermStop?: (
+    stop: RouteStop,
+    routeName: string,
+    routeColor: string
+  ) => void;
 }
 
-export default function RouteStepsList({ steps, nextStepIdx, navigating, selectedName, stopsRemaining, scrollRef, stepETAs }: RouteStepsListProps) {
-  const groupOffsets = useRef<Map<number, number>>(new Map());
+export default function RouteStepsList({
+  steps,
+  nextStepIdx,
+  navigating,
+  selectedName,
+  stopsRemaining,
+  scrollRef,
+  stepETAs,
+  onSelectIntermStop,
+}: RouteStepsListProps) {
+  const groupOffsets = useRef<Record<number, number>>({});
 
   useEffect(() => {
     if (!navigating || !scrollRef?.current) return;
-    const y = groupOffsets.current.get(nextStepIdx);
-    if (y != null) scrollRef.current.scrollTo({ y: Math.max(0, y - 20), animated: true });
+    const y = groupOffsets.current[nextStepIdx];
+    if (y != null)
+      scrollRef.current.scrollTo({ y: Math.max(0, y - 20), animated: true });
   }, [nextStepIdx, navigating, scrollRef]);
 
   if (steps.length === 0) return null;
 
-  type WalkGroup    = { kind: "walk";    step: Step;                 flatIdx: number };
-  type TransitGroup = { kind: "transit"; depart: Step; arrive: Step; flatIdx: number };
+  type WalkGroup = { kind: "walk"; step: Step; flatIdx: number };
+  type TransitGroup = {
+    kind: "transit";
+    depart: Step;
+    arrive: Step;
+    flatIdx: number;
+  };
   const groups: Array<WalkGroup | TransitGroup> = [];
 
   let i = 0;
   while (i < steps.length) {
     if (steps[i].type === "depart" && steps[i + 1]?.type === "arrive") {
-      groups.push({ kind: "transit", depart: steps[i], arrive: steps[i + 1], flatIdx: i });
+      groups.push({
+        kind: "transit",
+        depart: steps[i],
+        arrive: steps[i + 1],
+        flatIdx: i,
+      });
       i += 2;
     } else {
       groups.push({ kind: "walk", step: steps[i], flatIdx: i });
@@ -375,26 +701,55 @@ export default function RouteStepsList({ steps, nextStepIdx, navigating, selecte
           if (g.kind === "walk") {
             const isActive = navigating && nextStepIdx === g.flatIdx;
             const isPassed = navigating && nextStepIdx > g.flatIdx;
-            const stepEta  = stepETAs?.[myEngineIdx];
+            const stepEta = stepETAs?.[myEngineIdx];
             return (
-              <View key={gi} onLayout={(e) => groupOffsets.current.set(g.flatIdx, e.nativeEvent.layout.y)}>
-                <WalkSection step={g.step} isActive={isActive} isPassed={isPassed} stepEta={stepEta} navigating={navigating} />
+              <View
+                key={gi}
+                onLayout={(e) => {
+                  const y = e?.nativeEvent?.layout?.y;
+                  if (y != null && groupOffsets.current) {
+                    groupOffsets.current[g.flatIdx] = y;
+                  }
+                }}
+              >
+                <WalkSection
+                  step={g.step}
+                  isActive={isActive}
+                  isPassed={isPassed}
+                  stepEta={stepEta}
+                  navigating={navigating}
+                />
               </View>
             );
           }
 
           const { depart, arrive } = g;
-          const routeNameMatch = depart.instruction?.match(/^Board Line (.+) at /);
-          const routeName  = routeNameMatch?.[1] ?? (depart as any).routeName ?? "";
-          const routeColor = (depart as any).routeColor ?? getRouteColor(routeName);
-          const stopName   = depart.instruction?.replace(/^Board Line .+ at /, "") ?? "";
-          const alightName = arrive.instruction?.replace(/^Alight at /, "") ?? "";
-          const isActive   = navigating && (nextStepIdx === g.flatIdx || nextStepIdx === g.flatIdx + 1);
-          const isPassed   = navigating && nextStepIdx > g.flatIdx + 1;
-          const boardEta   = stepETAs?.[myEngineIdx];
+          const routeNameMatch =
+            depart.instruction?.match(/^Board (?:Line )?(.+) at /);
+          const routeName =
+            routeNameMatch?.[1] ?? (depart as any).routeName ?? "";
+          const routeColor =
+            (depart as any).routeColor ?? getRouteColor(routeName);
+          const stopName =
+            depart.instruction?.replace(/^Board (?:Line )?.+ at /, "") ?? "";
+          const alightName =
+            arrive.instruction?.replace(/^Alight at /, "") ?? "";
+          const isActive =
+            navigating &&
+            (nextStepIdx === g.flatIdx || nextStepIdx === g.flatIdx + 1);
+          const isPassed = navigating && nextStepIdx > g.flatIdx + 1;
+          const boardEta = stepETAs?.[myEngineIdx];
 
           return (
-            <View key={gi} onLayout={(e) => groupOffsets.current.set(g.flatIdx, e.nativeEvent.layout.y)}>
+            <View
+              key={gi}
+              onLayout={(e) => {
+                const y = e?.nativeEvent?.layout?.y;
+                if (y != null && groupOffsets.current) {
+                  groupOffsets.current[g.flatIdx] = y;
+                }
+              }}
+            >
               <TransitSection
                 depart={depart}
                 arrive={arrive}
@@ -405,6 +760,7 @@ export default function RouteStepsList({ steps, nextStepIdx, navigating, selecte
                 isPassed={isPassed}
                 stopsRemaining={stopsRemaining}
                 boardEta={boardEta}
+                onSelectIntermStop={onSelectIntermStop}
               />
             </View>
           );
