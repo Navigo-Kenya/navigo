@@ -1,570 +1,1027 @@
 // components/app/MapFloatingUI.tsx
-import { Step, detectManeuver, maneuverIcon, mToNice, stepIcon } from "@/utils/mapHelpers";
-import { Ionicons, MaterialIcons } from "@expo/vector-icons";
-import React, { JSX, useEffect, useRef } from "react";
-import { Animated, Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
+import React, { useEffect, useState } from "react";
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useColorScheme,
+} from "react-native";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as Haptics from "expo-haptics";
+import { useRouter } from "expo-router";
+import type { Step } from "@/utils/mapHelpers";
+import { mToNice } from "@/utils/mapHelpers";
+import type { ApproachPhase, EngineStatus } from "@/services/navigationEngine";
+import {
+  useExploreSearchStore,
+  type SearchTabFilter,
+} from "@/store/exploreSearchStore";
+import { MapService } from "@/services/map";
+import { StopService } from "@/services/stop";
+import WeatherMeteoSheet, {
+  fetchLiveMeteo,
+  type LiveWeatherData,
+} from "./WeatherMeteoSheet";
 
 const ORANGE = "#FF6F00";
-const RED    = "#FF3B30";
-const BLACK  = "#1C1C1E";
-const GREY   = "#8E8E93";
-const WHITE  = "#FFFFFF";
-const BLUE   = "#007AFF";
-const GREEN  = "#34C759";
 
-/** Distance (m) at which the maneuver progress bar starts filling. */
-const PROGRESS_RANGE_M = 300;
-
-interface MapFloatingUIProps {
-  onRecenter:         () => void;
-  onOpenSearch:       () => void;
-  onOpenKwame:        () => void;
-  onOpenReport:       () => void;
-  onOpenLayers:       () => void;
-  navigating:         boolean;
-  followMe:           boolean;
-  waitingForBus:      boolean;
-  onToggleNav:        () => void;
-  nextPreview:        string | null;
-  nextStep?:          Step;
-  showNavSub?:        boolean;
-  eta:                Date | null;
-  remainingDistanceM: number | null;
-  distanceToNextStepM?: number | null;
-  navStatus?:         string | null;
-  stopsRemaining?:    number | null;
-  arrivalSoonShown:   boolean;
-  activeJourney:      any;
-  onClearJourney:     () => void;
-  bottomOffset?:      number;
-  gpsLost?:           boolean;
-  currentSpeedKph?:   number;
-  wrongDirection?:    boolean;
-  nextNextPreview?:   string | null;
-  approachPhase?:     string | null;
-  cameraHeading?:     number;
-  onResetNorth:       () => void;
-  headingUp?:         boolean;
-  stepEta?:           Date | null;
-  walkInstruction?:   string | null;
-  walkDestination?:   string | null;
-  /** User is near the boarding stop — offer the manual "I'm on board" trigger. */
-  canBoardTransit?:   boolean;
-  onBoardTransit?:    () => void;
-  /** User appears to be inside a building (GPS accuracy heuristic). */
-  isIndoor?:          boolean;
-  /** Trip is paused (duka stop) — guidance frozen, journey intact. */
-  paused?:            boolean;
-  onResume?:          () => void;
-  /** AR walking guidance available (walk legs during navigation). */
-  showAR?:            boolean;
-  onOpenAR?:          () => void;
-}
-
-function formatEta(date: Date): string {
-  let h = date.getHours();
-  const m = String(date.getMinutes()).padStart(2, "0");
-  const ampm = h >= 12 ? "PM" : "AM";
-  h = h % 12 || 12;
-  return `${h}:${m} ${ampm}`;
-}
-
-function navDist(m: number): string {
-  if (m < 1000) return `${Math.round(m / 10) * 10} m`;
-  return `${(m / 1000).toFixed(1)} km`;
-}
+export const QUICK_CATEGORIES = [
+  { key: "restaurant", label: "Restaurant", icon: "restaurant", color: "#EA580C" },
+  { key: "cafe",       label: "Cafe",       icon: "cafe",       color: "#B45309" },
+  { key: "gas",        label: "Gas Station",icon: "car",        color: "#2563EB" },
+  { key: "hospital",   label: "Hospital",   icon: "medkit",     color: "#DC2626" },
+  { key: "parking",    label: "Parking",    icon: "pricetag",   color: "#0284C7" },
+  { key: "store",      label: "24h Store",  icon: "storefront", color: "#7C3AED" },
+  { key: "pharmacy",   label: "Pharmacy",   icon: "bandage",    color: "#16A34A" },
+  { key: "atm",        label: "ATM / Bank", icon: "card",       color: "#0D9488" },
+] as const;
 
 /**
- * Slides + fades its content in whenever `bannerKey` changes, so switching
- * between banner states (search → journey → nav → arrival…) feels like one
- * surface morphing instead of components popping in and out.
+ * Custom Original Navigo Map Layer Icon:
+ * Isometric 3-deck diamond stack blending Navigo Orange (#FF6F00) with a warm highlight plate.
  */
-function AnimatedBanner({ bannerKey, children }: { bannerKey: string; children: React.ReactNode }) {
-  const anim = useRef(new Animated.Value(1)).current;
-  const prevKey = useRef(bannerKey);
-
-  useEffect(() => {
-    if (prevKey.current === bannerKey) return;
-    prevKey.current = bannerKey;
-    anim.setValue(0);
-    Animated.spring(anim, { toValue: 1, friction: 9, tension: 70, useNativeDriver: true }).start();
-  }, [bannerKey, anim]);
-
+function NavigoOriginalLayersIcon({ dark }: { dark: boolean }) {
   return (
-    <Animated.View
-      style={{
-        opacity: anim,
-        transform: [
-          { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [-16, 0] }) },
-          { scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) },
-        ],
-      }}
-    >
-      {children}
-    </Animated.View>
+    <View style={styles.customLayerIconWrap}>
+      {/* Bottom Deck (Muted Slate/Amber) */}
+      <View
+        style={[
+          styles.layerDiamond,
+          {
+            top: 15,
+            backgroundColor: dark ? "#3F3F46" : "#FED7AA",
+            borderColor: ORANGE,
+          },
+        ]}
+      />
+      {/* Middle Deck (Warm Orange) */}
+      <View
+        style={[
+          styles.layerDiamond,
+          {
+            top: 10,
+            backgroundColor: "#FB923C",
+            borderColor: "#FFFFFF",
+          },
+        ]}
+      />
+      {/* Top Primary Deck (Signature #FF6F00 Orange) */}
+      <View
+        style={[
+          styles.layerDiamond,
+          {
+            top: 5,
+            backgroundColor: ORANGE,
+            borderColor: "#FFFFFF",
+          },
+        ]}
+      />
+    </View>
   );
 }
 
-/** Round action button with press-down scale feedback. */
-function Fab({
-  onPress, bg, small = false, children,
-}: { onPress: () => void; bg: string; small?: boolean; children: React.ReactNode }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        s.fab,
-        small && s.layerFab,
-        { backgroundColor: bg, transform: [{ scale: pressed ? 0.9 : 1 }], opacity: pressed ? 0.85 : 1 },
-      ]}
-    >
-      {children}
-    </Pressable>
-  );
+export interface MapFloatingUIProps {
+  onRecenter: () => void;
+  onOpenSearch: () => void;
+  onOpenReport: () => void;
+  onOpenLayers: () => void;
+  onOpenKwame: () => void;
+  navigating: boolean;
+  followMe: boolean;
+  waitingForBus: boolean;
+  onToggleNav: () => void;
+  nextPreview: string | null;
+  nextStep?: Step;
+  showNavSub?: boolean;
+  eta: Date | null;
+  remainingDistanceM: number | null;
+  distanceToNextStepM: number | null;
+  navStatus: EngineStatus | null;
+  stopsRemaining: number | null;
+  arrivalSoonShown: boolean;
+  gpsLost: boolean;
+  wrongDirection: boolean;
+  currentSpeedKph?: number;
+  activeJourney: any;
+  onClearJourney: () => void;
+  nextNextPreview: string | null;
+  approachPhase: ApproachPhase;
+  cameraHeading: number;
+  onResetNorth: () => void;
+  headingUp: boolean;
+  stepEta: Date | null;
+  walkInstruction: string | null;
+  walkDestination: string | null;
+  canBoardTransit: boolean;
+  onBoardTransit: () => void;
+  isIndoor: boolean;
+  paused: boolean;
+  onResume: () => void;
+  showAR: boolean;
+  onOpenAR: () => void;
+  bottomOffset?: number;
+  userLat?: number | null;
+  userLng?: number | null;
 }
 
 export default function MapFloatingUI({
-  onRecenter, onOpenSearch, onOpenKwame,
-  navigating, followMe, waitingForBus, onToggleNav,
-  nextPreview, nextStep, showNavSub = true,
-  eta, remainingDistanceM, distanceToNextStepM, navStatus, stopsRemaining,
-  arrivalSoonShown, activeJourney, onClearJourney,
-  bottomOffset = 0, gpsLost = false, currentSpeedKph, wrongDirection = false,
-  onOpenReport, onOpenLayers,
-  nextNextPreview, approachPhase, cameraHeading, onResetNorth, headingUp = false,
-  stepEta, walkInstruction, walkDestination,
-  canBoardTransit = false, onBoardTransit, isIndoor = false,
-  paused = false, onResume,
-  showAR = false, onOpenAR,
-}: MapFloatingUIProps): JSX.Element {
+  onRecenter,
+  onOpenSearch,
+  onOpenReport,
+  onOpenLayers,
+  onOpenKwame,
+  navigating,
+  followMe,
+  waitingForBus,
+  nextPreview,
+  nextStep,
+  distanceToNextStepM,
+  navStatus,
+  stopsRemaining,
+  gpsLost,
+  wrongDirection,
+  currentSpeedKph,
+  activeJourney,
+  onClearJourney,
+  nextNextPreview,
+  cameraHeading,
+  onResetNorth,
+  headingUp,
+  walkInstruction,
+  walkDestination,
+  canBoardTransit,
+  onBoardTransit,
+  isIndoor,
+  paused,
+  onResume,
+  showAR,
+  onOpenAR,
+  bottomOffset = 0,
+  userLat,
+  userLng,
+}: MapFloatingUIProps) {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const dark = useColorScheme() === "dark";
 
-  const pulseAnim    = useRef(new Animated.Value(1)).current;
-  const bottomAnim   = useRef(new Animated.Value(0)).current;
-  const progressAnim = useRef(new Animated.Value(0)).current;
+  const [weatherOpen, setWeatherOpen] = useState(false);
+  const [liveMeteo, setLiveMeteo] = useState<LiveWeatherData | null>(null);
+
+  const {
+    active: searchContextActive,
+    query: searchContextQuery,
+    activeTab: searchContextTab,
+    setActiveTab: setSearchContextTab,
+    startSearch,
+    setResults,
+    setLoading,
+    clearSearch,
+  } = useExploreSearchStore();
 
   useEffect(() => {
-    if (approachPhase !== "imminent") { pulseAnim.setValue(1); return; }
-    const loop = Animated.loop(Animated.sequence([
-      Animated.timing(pulseAnim, { toValue: 1.18, duration: 380, useNativeDriver: true }),
-      Animated.timing(pulseAnim, { toValue: 1.0,  duration: 380, useNativeDriver: true }),
-    ]));
-    loop.start();
-    return () => loop.stop();
-  }, [approachPhase, pulseAnim]);
+    fetchLiveMeteo(userLat ?? -1.2864, userLng ?? 36.8172)
+      .then(setLiveMeteo)
+      .catch(() => {});
+  }, [userLat, userLng]);
 
-  useEffect(() => {
-    Animated.spring(bottomAnim, {
-      toValue: -bottomOffset,
-      friction: 8,
-      tension: 65,
-      useNativeDriver: true,
-    }).start();
-  }, [bottomOffset, bottomAnim]);
+  const handleCategoryPress = async (label: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    startSearch({ query: label, activeTab: "all" });
+    setLoading(true);
 
-  // Maneuver progress: fills as the user closes the last PROGRESS_RANGE_M
-  // toward the next maneuver (Waze-style anticipation cue).
-  useEffect(() => {
-    if (!navigating || distanceToNextStepM == null) { progressAnim.setValue(0); return; }
-    const p = 1 - Math.min(PROGRESS_RANGE_M, Math.max(0, distanceToNextStepM)) / PROGRESS_RANGE_M;
-    Animated.timing(progressAnim, { toValue: p, duration: 350, useNativeDriver: false }).start();
-  }, [navigating, distanceToNextStepM, progressAnim]);
+    try {
+      const [preds, mobility] = await Promise.all([
+        MapService.placesAutocomplete(
+          label,
+          userLat ?? -1.2864,
+          userLng ?? 36.8172
+        ),
+        StopService.searchMobility(
+          label,
+          userLat ?? -1.2864,
+          userLng ?? 36.8172
+        ),
+      ]);
 
-  const dark       = useColorScheme() === "dark";
-  const cardBg     = dark ? "#1C1C1E" : WHITE;
-  const textColor  = dark ? "#FFFFFF" : BLACK;
-  const lightBg    = dark ? "#2C2C2E" : "#F2F2F7";
+      const resolvedPlaces = await Promise.all(
+        preds.slice(0, 4).map(async (p) => {
+          const det = await MapService.getPlaceDetails(p.place_id);
+          if (!det) return null;
+          return {
+            id: p.place_id,
+            name: p.main_text,
+            address: p.secondary_text || p.description,
+            category: label,
+            lat: det.lat,
+            lng: det.lng,
+            rating: 4.3,
+            reviewCount: 19,
+          };
+        })
+      );
 
-  // Current leg is a transit ride (not a walk): color the banner blue, Waze-style.
-  const transitLeg = !walkInstruction && nextStep?.type != null && nextStep.type !== "WALK";
-  const bannerBg   = transitLeg ? BLUE : ORANGE;
+      setResults({
+        places: resolvedPlaces.filter(Boolean) as any[],
+        stops: mobility.stops,
+        routes: mobility.routes,
+      });
+    } catch {
+      setLoading(false);
+    }
+  };
 
-  const subText = (() => {
-    if (stopsRemaining != null && stopsRemaining > 0) return `${stopsRemaining} stop${stopsRemaining === 1 ? "" : "s"} remaining`;
-    if (showNavSub && remainingDistanceM != null) return `${mToNice(remainingDistanceM)} remaining`;
-    return null;
-  })();
+  const cardBg = dark ? "rgba(24, 24, 27, 0.96)" : "rgba(255, 255, 255, 0.97)";
+  const textPrimary = dark ? "#F9FAFB" : "#111827";
+  const textMuted = dark ? "#9CA3AF" : "#6B7280";
+  const borderCol = dark ? "rgba(63, 63, 70, 0.7)" : "rgba(229, 231, 235, 0.9)";
 
-  let bannerKey: string;
-  let topContent: React.ReactNode;
+  const effectiveBottom =
+    bottomOffset > 0
+      ? bottomOffset + Math.max(insets.bottom, 12)
+      : searchContextActive
+      ? 310 + Math.max(insets.bottom, 12)
+      : Math.max(insets.bottom, 12) + 74;
 
-  if (paused) {
-    bannerKey = "paused";
-    topContent = (
-      <Pressable onPress={onResume} style={s.pausedBanner}>
-        <View style={s.navIconBox}>
-          <Ionicons name="pause" size={22} color={WHITE} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={s.navInstruction}>Trip paused</Text>
-          <Text style={s.navSub}>Progress is frozen — tap to resume</Text>
-        </View>
-        <View style={s.resumePill}>
-          <Ionicons name="play" size={14} color="#B45309" />
-          <Text style={s.resumePillText}>Resume</Text>
-        </View>
-      </Pressable>
-    );
-  } else if (arrivalSoonShown) {
-    bannerKey = "arrival";
-    topContent = (
-      <View style={[s.arrivalBanner, { backgroundColor: cardBg }]}>
-        <Ionicons name="checkmark-circle" size={20} color={GREEN} />
-        <Text style={s.arrivalText}>{"You've arrived!"}</Text>
-      </View>
-    );
-  } else if (navigating && (navStatus === "off_route" || navStatus === "rerouting")) {
-    const rerouting = navStatus === "rerouting";
-    bannerKey = "offroute";
-    topContent = (
-      <View style={s.offRouteBanner}>
-        <View style={s.navIconBox}>
-          <MaterialIcons name={rerouting ? "autorenew" : "warning-amber"} size={24} color={WHITE} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={s.navInstruction} numberOfLines={1}>
-            {rerouting ? "Recalculating…" : "Off route"}
-          </Text>
-          <Text style={s.navSub}>
-            {rerouting ? "Finding a new route" : "Move back toward the route"}
-          </Text>
-        </View>
-      </View>
-    );
-  } else if (wrongDirection && navigating) {
-    bannerKey = "wrongdir";
-    topContent = (
-      <View style={s.offRouteBanner}>
-        <View style={s.navIconBox}>
-          <MaterialIcons name="u-turn-left" size={24} color={WHITE} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={s.navInstruction}>Wrong direction</Text>
-          <Text style={s.navSub}>Turn around to get back on route</Text>
-        </View>
-      </View>
-    );
-  } else if (navigating && (walkInstruction || nextPreview)) {
-    const isWalkSub = !!walkInstruction;
-    const mainText  = isWalkSub ? walkInstruction! : nextPreview!;
-    const iconName  = isWalkSub
-      ? maneuverIcon(detectManeuver(walkInstruction!))
-      : (nextStep ? stepIcon(nextStep.type) : "navigation");
-
-    // Distance lives under the maneuver icon (Waze layout), not in the sentence.
-    const showDistance = distanceToNextStepM != null && distanceToNextStepM > 15;
-
-    const navSubText = isWalkSub
-      ? (walkDestination ? `to ${walkDestination}` : subText)
-      : subText;
-
-    const displayEta = isWalkSub && stepEta ? stepEta : eta;
-
-    bannerKey = transitLeg ? "nav-transit" : "nav-walk";
-    topContent = (
-      <View style={[s.navBanner, { backgroundColor: bannerBg }]}>
-        <View style={s.navBannerRow}>
-          <Animated.View style={[s.navIconCol, { transform: [{ scale: pulseAnim }] }]}>
-            <View style={s.navIconBox}>
-              <MaterialIcons name={iconName as any} size={28} color={WHITE} />
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+      {/* ─── 1. TOP BAR ─── */}
+      {!activeJourney ? (
+        searchContextActive ? (
+          /* KakaoMap Active Search Context Header on Map (< query X + Place | Bus | Bus Stop tabs)[cite: 5, 12] */
+          <View
+            pointerEvents="box-none"
+            style={[
+              styles.activeSearchHeader,
+              { paddingTop: insets.top + 8, backgroundColor: cardBg },
+            ]}
+          >
+            <View
+              style={[
+                styles.activeSearchBox,
+                { borderColor: borderCol, backgroundColor: dark ? "#27272A" : "#F9FAFB" },
+              ]}
+            >
+              <Pressable
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  onOpenSearch();
+                }}
+                hitSlop={10}
+              >
+                <Ionicons name="chevron-back" size={22} color={textPrimary} />
+              </Pressable>
+              <Pressable
+                onPress={onOpenSearch}
+                style={{ flex: 1, paddingHorizontal: 8 }}
+              >
+                <Text
+                  style={[styles.activeSearchQueryText, { color: textPrimary }]}
+                  numberOfLines={1}
+                >
+                  {searchContextQuery}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  clearSearch();
+                }}
+                hitSlop={10}
+              >
+                <Ionicons name="close" size={22} color={textPrimary} />
+              </Pressable>
             </View>
-            {showDistance && (
-              <Text style={s.navIconDist}>{navDist(distanceToNextStepM!)}</Text>
-            )}
-          </Animated.View>
 
-          <View style={{ flex: 1 }}>
-            <Text style={s.navInstruction} numberOfLines={2}>{mainText}</Text>
-            {navSubText && <Text style={s.navSub} numberOfLines={1}>{navSubText}</Text>}
+            {/* Place | Bus | Bus Stop Sub-Tabs[cite: 5] */}
+            <View style={styles.contextTabsRow}>
+              {(
+                [
+                  { id: "all", label: "All", icon: "apps" },
+                  { id: "place", label: "Place", icon: "location" },
+                  { id: "bus", label: "Bus / Rail", icon: "bus" },
+                  { id: "stop", label: "Bus Stop", icon: "radio-button-on" },
+                ] as const
+              ).map((t) => {
+                const isSel = searchContextTab === t.id;
+                return (
+                  <Pressable
+                    key={t.id}
+                    onPress={() => {
+                      Haptics.selectionAsync();
+                      setSearchContextTab(t.id as SearchTabFilter);
+                    }}
+                    style={[
+                      styles.contextTabItem,
+                      isSel && styles.contextTabItemActive,
+                    ]}
+                  >
+                    <Ionicons
+                      name={t.icon as any}
+                      size={14}
+                      color={isSel ? "#2563EB" : textMuted}
+                    />
+                    <Text
+                      style={[
+                        styles.contextTabLabel,
+                        { color: isSel ? "#2563EB" : textMuted },
+                      ]}
+                    >
+                      {t.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : (
+          /* Default Explore Map Top Search + Square [↱ Route] Button + Category Badges[cite: 9] */
+          <View
+            pointerEvents="box-none"
+            style={[styles.topContainer, { paddingTop: insets.top + 8 }]}
+          >
+            <View style={styles.topSearchRow}>
+              <Pressable
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  onOpenSearch();
+                }}
+                style={[
+                  styles.searchBarPill,
+                  { backgroundColor: cardBg, borderColor: borderCol },
+                ]}
+              >
+                <Ionicons name="search" size={20} color={ORANGE} />
+                <Text
+                  style={[styles.searchPlaceholder, { color: textMuted }]}
+                  numberOfLines={1}
+                >
+                  Search places, buses, stations…
+                </Text>
+                <Pressable
+                  hitSlop={10}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    onOpenKwame();
+                  }}
+                  style={styles.kwameMicBtn}
+                >
+                  <Ionicons name="sparkles" size={16} color={ORANGE} />
+                </Pressable>
+              </Pressable>
+
+              {/* Dedicated [↱ Route] Button -> Opens `app/route.tsx`[cite: 9] */}
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  router.push("/route" as any);
+                }}
+                style={({ pressed }) => [
+                  styles.routeSquareBtn,
+                  pressed && { opacity: 0.9, transform: [{ scale: 0.97 }] },
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name="directions-fork"
+                  size={20}
+                  color="#FFFFFF"
+                />
+                <Text style={styles.routeSquareText}>Route</Text>
+              </Pressable>
+            </View>
+
+            {/* KakaoMap Category Badges Under Search Bar (Restaurant, Cafe, Gas Station, Hospital, Parking...)[cite: 9] */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipsScroll}
+            >
+              {QUICK_CATEGORIES.map((cat) => (
+                <Pressable
+                  key={cat.key}
+                  onPress={() => handleCategoryPress(cat.label)}
+                  style={[
+                    styles.modeChip,
+                    { backgroundColor: cardBg, borderColor: borderCol },
+                  ]}
+                >
+                  <Ionicons
+                    name={cat.icon as any}
+                    size={14}
+                    color={cat.color}
+                  />
+                  <Text style={[styles.modeChipText, { color: textPrimary }]}>
+                    {cat.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        )
+      ) : navigating ? (
+        /* Active Turn-by-Turn Navigation Top Guidance Banner */
+        <View
+          pointerEvents="box-none"
+          style={[styles.topContainer, { paddingTop: insets.top + 8 }]}
+        >
+          <View style={styles.navBanner}>
+            <View style={styles.navBannerMain}>
+              <View style={styles.navIconBox}>
+                <Ionicons
+                  name={
+                    nextStep?.type === "walk"
+                      ? "walk"
+                      : nextStep?.type === "arrive"
+                      ? "location"
+                      : "train"
+                  }
+                  size={24}
+                  color="#FFFFFF"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.navPrimaryText} numberOfLines={2}>
+                  {walkInstruction ?? nextPreview ?? "Follow highlighted route"}
+                </Text>
+                <View style={styles.navMetaRow}>
+                  {distanceToNextStepM != null && (
+                    <Text style={styles.navSubText}>
+                      In {mToNice(distanceToNextStepM)}
+                    </Text>
+                  )}
+                  {stopsRemaining != null && stopsRemaining > 0 && (
+                    <Text style={styles.navSubBadge}>
+                      {stopsRemaining} stop{stopsRemaining === 1 ? "" : "s"} left
+                    </Text>
+                  )}
+                  {walkDestination && (
+                    <Text style={styles.navSubText} numberOfLines={1}>
+                      · To {walkDestination}
+                    </Text>
+                  )}
+                </View>
+              </View>
+              <Pressable
+                onPress={onClearJourney}
+                hitSlop={10}
+                style={styles.navCloseBtn}
+              >
+                <Ionicons name="close" size={20} color="#FFFFFF" />
+              </Pressable>
+            </View>
 
             {nextNextPreview && (
-              <View style={s.thenChip}>
-                <MaterialIcons name="subdirectory-arrow-right" size={14} color="rgba(255,255,255,0.70)" />
-                <Text style={s.thenText} numberOfLines={1}>then {nextNextPreview}</Text>
+              <View style={styles.navThenStrip}>
+                <Text style={styles.navThenText} numberOfLines={1}>
+                  Then: {nextNextPreview}
+                </Text>
+              </View>
+            )}
+
+            {(wrongDirection ||
+              gpsLost ||
+              navStatus === "rerouting" ||
+              isIndoor ||
+              paused) && (
+              <View style={styles.statusAlertStrip}>
+                <Ionicons name="alert-circle" size={16} color="#FEF08A" />
+                <Text style={styles.statusAlertText}>
+                  {paused
+                    ? "Navigation paused"
+                    : wrongDirection
+                    ? "Wrong direction — turn around"
+                    : navStatus === "rerouting"
+                    ? "Recalculating best route…"
+                    : gpsLost
+                    ? "Weak GPS signal — dead-reckoning"
+                    : "Indoor signal — head outside for lock"}
+                </Text>
+                {paused && (
+                  <Pressable onPress={onResume} style={styles.resumePill}>
+                    <Text style={styles.resumePillText}>Resume</Text>
+                  </Pressable>
+                )}
               </View>
             )}
           </View>
-
-          <View style={s.navEtaContainer}>
-            <Pressable
-              onPress={onOpenKwame}
-              style={({ pressed }) => [s.navKwamePill, pressed && { opacity: 0.7 }]}
-            >
-              <Ionicons name="sparkles" size={12} color={bannerBg} />
-              <Text style={[s.navKwamePillText, { color: bannerBg }]}>AI</Text>
-            </Pressable>
-            {displayEta && <Text style={s.navEta}>{formatEta(displayEta)}</Text>}
-          </View>
         </View>
+      ) : null}
 
-        {/* Approach progress toward the next maneuver */}
-        <View style={s.progressTrack}>
-          <Animated.View
-            style={[
-              s.progressFill,
-              { width: progressAnim.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }) },
-            ]}
-          />
-        </View>
-      </View>
-    );
-  } else if (waitingForBus && activeJourney) {
-    const seg       = activeJourney.route?.segments?.find((s: any) => s.mode !== "WALK");
-    const routeName = seg?.route_name ?? "";
-    const boardStop = seg?.from?.name ?? "boarding stop";
-    bannerKey = "waiting";
-    topContent = (
-      <View style={[s.journeyBanner, { backgroundColor: cardBg }]}>
-        <MaterialIcons name="directions-bus" size={24} color={BLUE} />
-        <View style={{ flex: 1 }}>
-          <Text style={[s.journeyText, { color: textColor }]} numberOfLines={1}>
-            Waiting for Line {routeName}
-          </Text>
-          <Text style={[s.waitingSub, { color: GREY }]} numberOfLines={1}>At {boardStop}</Text>
-        </View>
-        <Pressable onPress={onClearJourney} hitSlop={12} style={[s.bannerClose, { backgroundColor: lightBg }]}>
-          <Ionicons name="close" size={15} color={GREY} />
-        </Pressable>
-      </View>
-    );
-  } else if (activeJourney) {
-    bannerKey = "journey";
-    topContent = (
-      <View style={[s.journeyBanner, { backgroundColor: cardBg }]}>
-        <MaterialIcons name="place" size={24} color={ORANGE} />
-        <Text style={[s.journeyText, { color: textColor }]} numberOfLines={1}>
-          To {activeJourney.toLoc.name}
-        </Text>
-        <Pressable onPress={onClearJourney} hitSlop={12} style={[s.bannerClose, { backgroundColor: lightBg }]}>
-          <Ionicons name="close" size={15} color={GREY} />
-        </Pressable>
-      </View>
-    );
-  } else {
-    bannerKey = "search";
-    topContent = (
-      <View style={[s.searchBar, { backgroundColor: cardBg }]}>
-        <Pressable style={s.searchTouchable} onPress={onOpenSearch}>
-          <Ionicons name="search" size={20} color={dark ? "#A0A0A5" : "#666"} />
-          <Text style={[s.searchPlaceholder, { color: dark ? "#A0A0A5" : "#666" }]}>Search destination...</Text>
-        </Pressable>
-
-        <View style={[s.searchDivider, { backgroundColor: dark ? "#333" : "#E5E5EA" }]} />
-
-        <Pressable
-          onPress={onOpenKwame}
-          hitSlop={10}
-          style={({ pressed }) => [s.searchKwameBtn, pressed && { transform: [{ scale: 0.88 }] }]}
-        >
-          <Ionicons name="sparkles" size={22} color={ORANGE} />
-        </Pressable>
-      </View>
-    );
-  }
-
-  const cameraUnlocked = navigating && !followMe;
-  const isRotated = Math.abs(cameraHeading ?? 0) > 5;
-
-  let actionIcon: keyof typeof Ionicons.glyphMap = "locate";
-  let actionColor = ORANGE;
-  let actionBg = cardBg;
-  let actionHandler = onRecenter;
-
-  if (navigating) {
-    if (cameraUnlocked) {
-      // Camera has been unlocked by a user gesture — tap to re-engage follow.
-      actionIcon = "locate";
-      actionColor = WHITE;
-      actionBg = BLUE;
-      actionHandler = onRecenter;
-    } else {
-      // Following — tap to toggle course-up (FPV) ↔ north-up.
-      actionIcon = headingUp ? "compass" : "navigate";
-      actionColor = BLUE;
-      actionBg = cardBg;
-      actionHandler = onResetNorth;
-    }
-  } else {
-    if (isRotated && !followMe) {
-      actionIcon = "compass-outline";
-      actionColor = ORANGE;
-      actionBg = cardBg;
-      actionHandler = onResetNorth;
-    } else {
-      actionIcon = followMe ? "locate" : "locate-outline";
-      actionColor = followMe ? BLUE : ORANGE;
-      actionBg = cardBg;
-      actionHandler = onRecenter;
-    }
-  }
-
-  return (
-    <>
-      <View style={[s.topArea, { paddingTop: (insets.top || 44) + 8 }]}>
-        <AnimatedBanner bannerKey={bannerKey}>
-          {topContent}
-        </AnimatedBanner>
-
-        {!navigating && (
-          <View style={s.layersContainer}>
-            <Fab onPress={onOpenLayers} bg={cardBg} small>
-              <Ionicons name="layers" size={20} color={ORANGE} />
-            </Fab>
-          </View>
-        )}
-      </View>
-
-      {/* Indoor mini-map card (left side, mirrors the FAB stack) — taps into
-          AR guidance, which is exactly what helps when GPS degrades indoors. */}
-      {isIndoor && (
-        <Animated.View
-          style={[
-            s.indoorCard,
-            {
-              backgroundColor: cardBg,
-              bottom: (insets.bottom || 0) + 36,
-              transform: [{ translateY: bottomAnim }],
-            },
-          ]}
-        >
-          <Pressable onPress={onOpenAR} disabled={!onOpenAR} style={{ alignItems: "center" }}>
-            <View style={s.indoorGrid}>
-              {Array.from({ length: 9 }).map((_, i) => (
-                <View key={i} style={[s.indoorCell, { borderColor: lightBg }]} />
-              ))}
-              <View style={s.indoorDot} />
-            </View>
-            <View style={s.indoorLabelRow}>
-              <Ionicons name="business-outline" size={11} color={GREY} />
-              <Text style={s.indoorLabel}>Indoor</Text>
-            </View>
-            <Text style={s.indoorSub}>{onOpenAR ? "Tap for AR view" : "AR view soon"}</Text>
-          </Pressable>
-        </Animated.View>
-      )}
-
-      <Animated.View
+      {/* ─── 2. RIGHT-SIDE FLOATING STACK (Report + Original Orange Map Layers + Compass)[cite: 9] ─── */}
+      <View
+        pointerEvents="box-none"
         style={[
-          s.bottomRightStack,
-          {
-            bottom: (insets.bottom || 0) + 36,
-            transform: [{ translateY: bottomAnim }],
-          },
+          styles.rightStack,
+          { top: insets.top + (activeJourney ? 135 : 118) },
         ]}
       >
-        {canBoardTransit && onBoardTransit && (
+        <Pressable
+          onPress={() => {
+            Haptics.selectionAsync();
+            onOpenReport();
+          }}
+          style={[
+            styles.circleFab,
+            { backgroundColor: cardBg, borderColor: borderCol },
+          ]}
+          accessibilityLabel="Report transit issue"
+        >
+          <Ionicons name="megaphone-outline" size={20} color={textPrimary} />
+        </Pressable>
+
+        {/* Original Navigo Orange Isometric Layer Button */}
+        <Pressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            onOpenLayers();
+          }}
+          style={[
+            styles.circleFab,
+            {
+              backgroundColor: cardBg,
+              borderColor: "rgba(255, 111, 0, 0.45)",
+            },
+          ]}
+          accessibilityLabel="Map layers"
+        >
+          <NavigoOriginalLayersIcon dark={dark} />
+        </Pressable>
+
+        {(Math.abs(cameraHeading) > 2 || navigating) && (
           <Pressable
-            onPress={onBoardTransit}
-            style={({ pressed }) => [s.boardPill, { transform: [{ scale: pressed ? 0.94 : 1 }] }]}
+            onPress={() => {
+              Haptics.selectionAsync();
+              onResetNorth();
+            }}
+            style={[
+              styles.circleFab,
+              { backgroundColor: cardBg, borderColor: borderCol },
+            ]}
+            accessibilityLabel="Compass / Toggle 3D heading"
           >
-            <MaterialIcons name="directions-bus" size={18} color={WHITE} />
-            <Text style={s.boardPillText}>{"I'm on board"}</Text>
+            <Ionicons
+              name={headingUp ? "navigate" : "compass-outline"}
+              size={20}
+              color={headingUp ? ORANGE : textPrimary}
+            />
           </Pressable>
         )}
 
-        {showAR && onOpenAR && (
-          <Fab onPress={onOpenAR} bg={cardBg}>
-            <MaterialIcons name="view-in-ar" size={22} color={ORANGE} />
-          </Fab>
+        {showAR && (
+          <Pressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              onOpenAR();
+            }}
+            style={[
+              styles.circleFab,
+              { backgroundColor: ORANGE, borderColor: ORANGE },
+            ]}
+            accessibilityLabel="Open AR Walk View"
+          >
+            <Ionicons name="camera-outline" size={20} color="#FFFFFF" />
+          </Pressable>
         )}
+      </View>
 
-        {gpsLost && navigating && (
-          <View style={s.gpsLostPill}>
-            <Ionicons name="warning-outline" size={12} color={WHITE} />
-            <Text style={s.gpsLostText}>GPS lost</Text>
+      {/* ─── 3. BOTTOM-LEFT: Interactive Meteo & PM10 Pill OR Speedometer[cite: 1, 9] ─── */}
+      <View
+        pointerEvents="box-none"
+        style={[styles.bottomLeftAnchor, { bottom: effectiveBottom }]}
+      >
+        {navigating && currentSpeedKph !== undefined ? (
+          <View
+            style={[
+              styles.speedPill,
+              { backgroundColor: cardBg, borderColor: borderCol },
+            ]}
+          >
+            <Text style={[styles.speedVal, { color: textPrimary }]}>
+              {currentSpeedKph}
+            </Text>
+            <Text style={[styles.speedUnit, { color: textMuted }]}>km/h</Text>
           </View>
-        )}
+        ) : !activeJourney ? (
+          <Pressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setWeatherOpen(true);
+            }}
+            style={({ pressed }) => [
+              styles.weatherPill,
+              { backgroundColor: cardBg, borderColor: borderCol },
+              pressed && { transform: [{ scale: 0.96 }] },
+            ]}
+          >
+            <Ionicons
+              name={liveMeteo?.iconName ?? "partly-sunny"}
+              size={18}
+              color="#F59E0B"
+            />
+            <Text style={[styles.weatherTemp, { color: textPrimary }]}>
+              {liveMeteo?.tempC ?? 23}°
+            </Text>
+            <View
+              style={[
+                styles.aqiBadge,
+                { backgroundColor: liveMeteo?.aqiBg ?? "#DCFCE7" },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.aqiText,
+                  { color: liveMeteo?.aqiColor ?? "#15803D" },
+                ]}
+              >
+                PM10
+              </Text>
+            </View>
+          </Pressable>
+        ) : null}
+      </View>
 
-        {navigating && currentSpeedKph != null && currentSpeedKph > 1 && (
-          <View style={[s.speedPill, { backgroundColor: cardBg }]}>
-            <Text style={[s.speedVal, { color: textColor }]}>{currentSpeedKph}</Text>
-            <Text style={s.speedUnit}>km/h</Text>
-          </View>
-        )}
+      {/* ─── 4. BOTTOM-CENTER: "I'm On Board" Quick Trigger ─── */}
+      {(canBoardTransit || waitingForBus) && (
+        <View
+          pointerEvents="box-none"
+          style={[styles.boardChipWrap, { bottom: effectiveBottom + 6 }]}
+        >
+          <Pressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              onBoardTransit();
+            }}
+            style={styles.boardChip}
+          >
+            <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
+            <Text style={styles.boardChipText}>I'm on board</Text>
+          </Pressable>
+        </View>
+      )}
 
-        <Fab onPress={onOpenReport} bg={cardBg}>
-          <Ionicons name="warning" size={22} color={ORANGE} />
-        </Fab>
+      {/* ─── 5. BOTTOM-RIGHT: Recenter Crosshair Button[cite: 1, 9] ─── */}
+      <View
+        pointerEvents="box-none"
+        style={[styles.bottomRightAnchor, { bottom: effectiveBottom }]}
+      >
+        <Pressable
+          onPress={() => {
+            Haptics.selectionAsync();
+            onRecenter();
+          }}
+          style={[
+            styles.circleFab,
+            {
+              backgroundColor: cardBg,
+              borderColor: followMe ? ORANGE : borderCol,
+            },
+          ]}
+          accessibilityLabel="Recenter on my location"
+        >
+          <Ionicons
+            name={followMe ? "locate" : "locate-outline"}
+            size={21}
+            color={followMe ? ORANGE : textPrimary}
+          />
+        </Pressable>
+      </View>
 
-        <Fab onPress={actionHandler} bg={actionBg}>
-          <Ionicons name={actionIcon} size={24} color={actionColor} />
-          {cameraUnlocked && <View style={s.unlockedDot} />}
-        </Fab>
-      </Animated.View>
-    </>
+      {/* Interactive Meteo & Air Quality Modal Sheet */}
+      <WeatherMeteoSheet
+        visible={weatherOpen}
+        onClose={() => setWeatherOpen(false)}
+        userLat={userLat}
+        userLng={userLng}
+        onWeatherLoaded={setLiveMeteo}
+      />
+    </View>
   );
 }
 
-const mapShadow = {
-  shadowColor: "#000",
-  shadowOpacity: 0.12,
-  shadowRadius: 12,
-  shadowOffset: { width: 0, height: 4 },
-  elevation: 8,
-} as const;
-
-const s = StyleSheet.create({
-  topArea:           { position: "absolute", top: 0, left: 0, right: 0, paddingHorizontal: 16, zIndex: 10 },
-
-  searchBar:         { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 999, paddingVertical: 10, paddingHorizontal: 16, minHeight: 52, ...mapShadow },
-  searchTouchable:   { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
-  searchPlaceholder: { fontSize: 16, fontWeight: "400" },
-  searchDivider:     { width: 1, height: 24, marginHorizontal: 10 },
-  searchKwameBtn:    { padding: 4 },
-
-  layersContainer:   { alignItems: "flex-end", marginTop: 12 },
-
-  journeyBanner:     { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 16, paddingVertical: 13, paddingHorizontal: 16, ...mapShadow },
-  journeyText:       { flex: 1, fontSize: 16, fontWeight: "600" },
-  bannerClose:       { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center" },
-
-  navBanner:         { borderRadius: 16, overflow: "hidden", ...mapShadow },
-  navBannerRow:      { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 13, paddingHorizontal: 14 },
-  offRouteBanner:    { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: RED, borderRadius: 16, paddingVertical: 13, paddingHorizontal: 14, ...mapShadow },
-  navIconCol:        { alignItems: "center", gap: 3 },
-  navIconBox:        { width: 40, height: 40, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
-  navIconDist:       { color: WHITE, fontSize: 12, fontWeight: "800", fontVariant: ["tabular-nums"] },
-  navInstruction:    { color: WHITE, fontSize: 16, fontWeight: "700" },
-  navSub:            { color: "rgba(255,255,255,0.85)", fontSize: 13, marginTop: 2, fontWeight: "500" },
-  navEta:            { color: WHITE, fontSize: 15, fontWeight: "700", flexShrink: 0 },
-
-  navEtaContainer:   { alignItems: "flex-end", justifyContent: "center", gap: 6 },
-  navKwamePill:      { flexDirection: "row", alignItems: "center", backgroundColor: WHITE, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, gap: 4 },
-  navKwamePillText:  { fontSize: 10, fontWeight: "800" },
-
-  progressTrack:     { height: 3, backgroundColor: "rgba(255,255,255,0.22)" },
-  progressFill:      { height: 3, backgroundColor: WHITE, borderTopRightRadius: 2, borderBottomRightRadius: 2 },
-
-  arrivalBanner:     { flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "center", borderRadius: 999, paddingVertical: 10, paddingHorizontal: 20, ...mapShadow },
-  arrivalText:       { fontSize: 16, fontWeight: "700", color: GREEN },
-  waitingSub:        { fontSize: 12, marginTop: 1 },
-
-  bottomRightStack:  { position: "absolute", right: 16, alignItems: "flex-end", gap: 12, zIndex: 15 },
-  fab:               { width: 48, height: 48, borderRadius: 14, alignItems: "center", justifyContent: "center", ...mapShadow },
-  layerFab:          { width: 44, height: 44, borderRadius: 12 },
-
-  boardPill:         { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: BLUE, borderRadius: 999, paddingVertical: 12, paddingHorizontal: 18, ...mapShadow },
-  boardPillText:     { color: WHITE, fontSize: 14, fontWeight: "800" },
-
-  pausedBanner:      { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#F59E0B", borderRadius: 16, paddingVertical: 13, paddingHorizontal: 14, ...mapShadow },
-  resumePill:        { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: WHITE, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
-  resumePillText:    { color: "#B45309", fontSize: 13, fontWeight: "800" },
-
-  indoorCard:        { position: "absolute", left: 16, width: 92, borderRadius: 18, padding: 8, alignItems: "center", zIndex: 15, ...mapShadow },
-  indoorGrid:        { width: 74, height: 56, flexDirection: "row", flexWrap: "wrap", borderRadius: 10, overflow: "hidden", backgroundColor: "rgba(142,142,147,0.10)" },
-  indoorCell:        { width: "33.33%", height: "33.33%", borderWidth: StyleSheet.hairlineWidth },
-  indoorDot:         { position: "absolute", top: 24, left: 34, width: 8, height: 8, borderRadius: 4, backgroundColor: ORANGE, borderWidth: 1.5, borderColor: WHITE },
-  indoorLabelRow:    { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 6 },
-  indoorLabel:       { fontSize: 11, fontWeight: "700", color: GREY },
-  indoorSub:         { fontSize: 9, color: GREY, marginTop: 1 },
-
-  unlockedDot:       { position: "absolute", top: 4, right: 4, width: 10, height: 10, borderRadius: 5, backgroundColor: ORANGE, borderWidth: 2, borderColor: WHITE },
-  gpsLostPill:       { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: RED, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10, ...mapShadow },
-  gpsLostText:       { color: WHITE, fontSize: 11, fontWeight: "600" },
-  speedPill:         { alignItems: "center", borderRadius: 12, paddingVertical: 6, paddingHorizontal: 10, ...mapShadow },
-  speedVal:          { fontSize: 15, fontWeight: "700", fontVariant: ["tabular-nums"] },
-  speedUnit:         { fontSize: 10, color: GREY, fontWeight: "500", marginTop: -1 },
-  thenChip:          { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
-  thenText:          { fontSize: 12, color: "rgba(255,255,255,0.85)", fontWeight: "600" },
+const styles = StyleSheet.create({
+  topContainer: {
+    paddingHorizontal: 14,
+    gap: 8,
+  },
+  topSearchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  searchBarPill: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  searchPlaceholder: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "500",
+  },
+  kwameMicBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: "rgba(255, 111, 0, 0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  routeSquareBtn: {
+    width: 52,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: ORANGE,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: ORANGE,
+    shadowOpacity: 0.32,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  routeSquareText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "700",
+    marginTop: 1,
+  },
+  chipsScroll: {
+    gap: 7,
+    paddingRight: 16,
+  },
+  modeChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1,
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  modeChipText: {
+    fontSize: 12.5,
+    fontWeight: "600",
+  },
+  activeSearchHeader: {
+    paddingHorizontal: 14,
+    paddingBottom: 2,
+    borderBottomLeftRadius: 18,
+    borderBottomRightRadius: 18,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+  activeSearchBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    height: 46,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+  },
+  activeSearchQueryText: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  contextTabsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-around",
+    paddingTop: 6,
+  },
+  contextTabItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+  },
+  contextTabItemActive: {
+    borderBottomColor: "#2563EB",
+  },
+  contextTabLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  customLayerIconWrap: {
+    width: 26,
+    height: 26,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  layerDiamond: {
+    position: "absolute",
+    width: 15,
+    height: 15,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    transform: [{ rotate: "45deg" }, { scaleY: 0.72 }],
+  },
+  navBanner: {
+    backgroundColor: "#111827",
+    borderRadius: 18,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOpacity: 0.28,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 14,
+  },
+  navBannerMain: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 14,
+    gap: 12,
+  },
+  navIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: ORANGE,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  navPrimaryText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  navMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 3,
+  },
+  navSubText: {
+    color: "#9CA3AF",
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  navSubBadge: {
+    backgroundColor: "rgba(255, 111, 0, 0.25)",
+    color: "#FDBA74",
+    fontSize: 11,
+    fontWeight: "700",
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  navCloseBtn: {
+    padding: 6,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.12)",
+  },
+  navThenStrip: {
+    backgroundColor: "#1F2937",
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  navThenText: {
+    color: "#D1D5DB",
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  statusAlertStrip: {
+    backgroundColor: "#991B1B",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  statusAlertText: {
+    color: "#FEF2F2",
+    fontSize: 12,
+    fontWeight: "600",
+    flex: 1,
+  },
+  resumePill: {
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  resumePillText: {
+    color: "#991B1B",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  rightStack: {
+    position: "absolute",
+    right: 14,
+    gap: 10,
+  },
+  circleFab: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  bottomLeftAnchor: {
+    position: "absolute",
+    left: 14,
+  },
+  weatherPill: {
+    borderRadius: 20,
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    alignItems: "center",
+    gap: 2,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
+  },
+  weatherTemp: {
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  aqiBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+  },
+  aqiText: {
+    fontSize: 9,
+    fontWeight: "800",
+  },
+  speedPill: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.14,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  speedVal: {
+    fontSize: 17,
+    fontWeight: "800",
+  },
+  speedUnit: {
+    fontSize: 9,
+    fontWeight: "600",
+  },
+  boardChipWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    alignItems: "center",
+  },
+  boardChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#16A34A",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 24,
+    shadowColor: "#16A34A",
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 10,
+  },
+  boardChipText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  bottomRightAnchor: {
+    position: "absolute",
+    right: 14,
+  },
 });

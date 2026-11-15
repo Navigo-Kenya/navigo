@@ -34,7 +34,7 @@ Map style	customMapStyle={googleStyleJson}	styleURL="mapbox://styles/..."
 Zoom extraction	zoomFromDelta(region.latitudeDelta)	feature.properties.zoomLevel (direct)
 Animation mode	implicit easing	explicit: 'linearTo' (rapid updates), 'easeTo' (smooth), 'moveTo' (instant)
 Phase 0 — Install & native setup
-Files: hopln/package.json, hopln/app.config.js, hopln/app/_layout.tsx
+Files: navigo/package.json, navigo/app.config.js, navigo/app/_layout.tsx
 
 npm install @rnmapbox/maps
 In app.config.js add the plugin block (replaces the commented-out react-native-maps plugin):
@@ -45,7 +45,7 @@ import MapboxGL from '@rnmapbox/maps';
 MapboxGL.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_TOKEN!);
 Run npx expo run:android / npx expo run:ios to rebuild native modules
 Phase 1 — Map styles
-Files: hopln/lib/map_style.json, hopln/lib/map_style_dark.json
+Files: navigo/lib/map_style.json, navigo/lib/map_style_dark.json
 
 Current files are Google Maps styles (featureType/elementType/stylers format) — not Mapbox GL. Replace with Mapbox style URL references:
 
@@ -54,7 +54,7 @@ Dark: "mapbox://styles/mapbox/dark-v11" or a paired custom hosted style
 These are the same styles used for offline tile downloads, so the offline map will visually match the online base layer — eliminating the current seam mismatch.
 
 Phase 2 — useMapCamera.ts rewrite
-File: hopln/hooks/useMapCamera.ts
+File: navigo/hooks/useMapCamera.ts
 
 Accept both mapRef (MapView) and cameraRef (Camera):
 
@@ -89,7 +89,7 @@ export function useMapCamera(
 Remove zoomFromDelta() from hook usage — Mapbox gives zoomLevel directly.
 
 Phase 3 — map.tsx: MapView swap & Camera ref
-File: hopln/app/(tabs)/map.tsx
+File: navigo/app/(tabs)/map.tsx
 
 3a. Import swap
 // Remove:
@@ -162,7 +162,7 @@ camera.animateTo({
 Mapbox's linearTo mode queues cleanly — eliminating the snap-back Google Maps produces when two animateCamera calls overlap.
 
 Phase 4 — RouteOverlay.tsx migration
-File: hopln/components/map/RouteOverlay.tsx
+File: navigo/components/map/RouteOverlay.tsx
 
 Walk legs: <Polyline> → <ShapeSource> + <LineLayer>
 <MapboxGL.ShapeSource
@@ -195,7 +195,7 @@ Node markers & intermediate stops: <Marker> → <PointAnnotation>
 Remove all tracksViewChanges props — Mapbox handles view invalidation automatically.
 
 Phase 5 — StopsLayer.tsx migration
-File: hopln/components/app/StopsLayer.tsx
+File: navigo/components/app/StopsLayer.tsx
 
 Replace manual JS grid-clustering + <Marker> with Mapbox native clustering:
 
@@ -241,7 +241,7 @@ Remove: viewZoom + viewCenter props, manual clustering logic, zoom debounce, bbo
 onPress receives a GeoJSON feature; extract feature.properties.id to find the stop.
 
 Phase 6 — Overlay projections: NavIndicator & ReportLayer
-Files: hopln/components/map/NavIndicator.tsx, hopln/components/map/ReportLayer.tsx
+Files: navigo/components/map/NavIndicator.tsx, navigo/components/map/ReportLayer.tsx
 
 // FROM:
 const pt = await mapRef.current.pointForCoordinate({ latitude, longitude });
@@ -256,7 +256,7 @@ Phase 7 — Offline tiles
 Already covered in Phase 3c. TILE_PATH_TEMPLATE_LIGHT / TILE_PATH_TEMPLATE_DARK from services/offlineTiles.ts are used unchanged — RasterSource accepts the same file:// URL template format as UrlTile.
 
 Phase 8 — LocationPicker in StopDetailsSheet
-File: hopln/components/app/StopDetailsSheet.tsx
+File: navigo/components/app/StopDetailsSheet.tsx
 
 The LocationPickerModal renders an embedded <MapView provider={PROVIDER_GOOGLE}> with a draggable <Marker>. Replace:
 
@@ -326,18 +326,18 @@ Isochrone zones	Mapbox Isochrone API → semi-transparent FillLayer, toggled via
 Native compass + scale	<MapboxGL.Compass /> + <MapboxGL.ScaleBar /> replace current heading display
 Files modified
 File	Change
-hopln/package.json	Add @rnmapbox/maps
-hopln/app.config.js	Add @rnmapbox/maps plugin, remove react-native-maps plugin reference
-hopln/app/_layout.tsx	MapboxGL.setAccessToken(...) at boot
-hopln/lib/map_style.json	Replace Google style JSON → Mapbox style URL
-hopln/lib/map_style_dark.json	Same
-hopln/hooks/useMapCamera.ts	Full rewrite: animateCamera → setCamera, fitToCoordinates → fitBounds
-hopln/app/(tabs)/map.tsx	MapView swap, add cameraRef, region handler updates, UrlTile → RasterSource, coord order fixes
-hopln/components/map/RouteOverlay.tsx	<Polyline> → ShapeSource+LineLayer, <Marker> → PointAnnotation, remove tracksViewChanges
-hopln/components/app/StopsLayer.tsx	Full rewrite: JS clustering removed, native ShapeSource clustering + SymbolLayer
-hopln/components/map/NavIndicator.tsx	pointForCoordinate → getPointInView, coord order fix (2 lines)
-hopln/components/map/ReportLayer.tsx	pointForCoordinate → getPointInView, coord order fix (2 lines)
-hopln/components/app/StopDetailsSheet.tsx	LocationPickerModal: MapView swap + draggable PointAnnotation
+navigo/package.json	Add @rnmapbox/maps
+navigo/app.config.js	Add @rnmapbox/maps plugin, remove react-native-maps plugin reference
+navigo/app/_layout.tsx	MapboxGL.setAccessToken(...) at boot
+navigo/lib/map_style.json	Replace Google style JSON → Mapbox style URL
+navigo/lib/map_style_dark.json	Same
+navigo/hooks/useMapCamera.ts	Full rewrite: animateCamera → setCamera, fitToCoordinates → fitBounds
+navigo/app/(tabs)/map.tsx	MapView swap, add cameraRef, region handler updates, UrlTile → RasterSource, coord order fixes
+navigo/components/map/RouteOverlay.tsx	<Polyline> → ShapeSource+LineLayer, <Marker> → PointAnnotation, remove tracksViewChanges
+navigo/components/app/StopsLayer.tsx	Full rewrite: JS clustering removed, native ShapeSource clustering + SymbolLayer
+navigo/components/map/NavIndicator.tsx	pointForCoordinate → getPointInView, coord order fix (2 lines)
+navigo/components/map/ReportLayer.tsx	pointForCoordinate → getPointInView, coord order fix (2 lines)
+navigo/components/app/StopDetailsSheet.tsx	LocationPickerModal: MapView swap + draggable PointAnnotation
 Unchanged: all hooks except useMapCamera, all stores, all services, all bottom sheets except StopDetailsSheet's picker, NavIndicator logic (only API swap), ReportLayer logic (only project() method), navigationEngine.ts.
 
 Execution order

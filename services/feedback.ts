@@ -2,7 +2,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import api from "./apiClient";
 
-const GUEST_TOKEN_KEY = "hopln:guest_token";
+const GUEST_TOKEN_KEY = "navigo:guest_token";
 
 function makeUUID(): string {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {

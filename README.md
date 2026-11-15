@@ -194,18 +194,18 @@ Key design decisions:
 | Android Studio | For Android emulator / `expo run:android` |
 | Xcode | For iOS simulator / `expo run:ios` |
 | Mapbox token | Map tiles + Directions API |
-| Running `hopln-api` | See [hopln-api/README.md](../hopln-api/README.md) |
+| Running `navigo-api` | See [navigo-api/README.md](../navigo-api/README.md) |
 
 ### Install
 
 ```bash
-cd hopln
+cd navigo
 npm install
 ```
 
 ### Environment
 
-Create `hopln/.env`:
+Create `navigo/.env`:
 
 ```env
 APP_ENV=development

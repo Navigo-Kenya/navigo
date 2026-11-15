@@ -6,7 +6,7 @@
 
 ## 1. System Overview
 
-The Hopln map system is built around three design philosophies:
+The Navigo map system is built around three design philosophies:
 
 ### 1.1 Projection-Based Navigation
 Rather than checking "is user close to waypoint N?", the `NavigationEngine` projects the user's GPS coordinate onto the full route polyline to get a single authoritative `distanceAlongRoute` scalar. All navigation metrics (step index, ETA, bearing, off-route) derive from this number. This makes the system robust against GPS noise (5–15 m typical drift) and eliminates false step-skipping.

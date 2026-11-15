@@ -40,7 +40,14 @@ export type WalkSubStep = {
   maneuver: Maneuver;
 };
 
-export type RouteStop = { name: string; lat: number; lng: number };
+export type RouteStop = {
+  stop_id?: string | null;
+  stop_code?: string | null;
+  platform_code?: string | null;
+  name: string;
+  lat: number;
+  lng: number;
+};
 
 export type Step = {
   instruction?: string;
@@ -49,6 +56,18 @@ export type Step = {
   duration: number;
   location: [number, number];
   type?: "walk" | "depart" | "arrive" | string;
+  mode?: string;
+  modeBadge?: string;
+  stopCode?: string | null;
+  platformCode?: string | null;
+  landmark?: string | null;
+  nextDeparture?: {
+    departure_time?: string;
+    eta_seconds?: number;
+    eta_label: string;
+    stops_away: number;
+    crowding: string;
+  } | null;
   subSteps?: WalkSubStep[];
   routeName?: string;
   routeColor?: string;
@@ -146,10 +165,36 @@ export function mToNice(m: number) {
   return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
 }
 
-export function sToMin(s: number) {
-  if (!s) return "";
-  const min = Math.round(s / 60);
-  return min <= 1 ? "~1 min" : `~${min} min`;
+/**
+ * Formats seconds into friendly "1hr 24min" or "26min" string.
+ */
+export function sToMin(s: number): string {
+  if (!s || s <= 0) return "1min";
+  const totalMin = Math.max(1, Math.round(s / 60));
+  const hrs = Math.floor(totalMin / 60);
+  const mins = totalMin % 60;
+  if (hrs > 0) {
+    return mins > 0 ? `${hrs}hr ${mins}min` : `${hrs}hr`;
+  }
+  return `${totalMin}min`;
+}
+
+/**
+ * Splits seconds into { hours, minutes } for KakaoMap mixed bold/regular typography ("1hr 24min").
+ */
+export function formatDurationParts(s: number): {
+  hours: number;
+  minutes: number;
+  text: string;
+} {
+  const totalMin = Math.max(1, Math.round((s || 0) / 60));
+  const hours = Math.floor(totalMin / 60);
+  const minutes = totalMin % 60;
+  return {
+    hours,
+    minutes,
+    text: sToMin(s),
+  };
 }
 
 export function humanizeStep(st: Step) {

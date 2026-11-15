@@ -3,7 +3,7 @@
 **Prepared:** 2026-08-16
 **Scope:** Full analysis of the current `app/` codebase (Expo/React Native client) and a detailed plan to rebuild it on the latest stable tooling, with a cleaner architecture, a real design system, and a maintainable structure.
 
-**Out of scope:** The backend (`hopln-api`, Laravel/PHP, referenced but not present in this directory). This plan treats the API contract as fixed unless called out explicitly.
+**Out of scope:** The backend (`navigo-api`, Laravel/PHP, referenced but not present in this directory). This plan treats the API contract as fixed unless called out explicitly.
 
 ---
 
@@ -332,7 +332,7 @@ These need a product/eng decision before or during Phase 0 — flagging rather t
 2. **Bottom-sheet primitive** — recommend consolidating on `@gorhom/bottom-sheet`; confirm it covers every current use case (`JourneyDetailsSheet`'s map-offset-aware drag, `(tabs)/_layout.tsx`'s custom `DraggableSheet`) before ripping out the bespoke implementations.
 3. **`data/stops.ts`'s actual purpose** — confirm with whoever owns `BusLayer.tsx` whether the 51k-line dataset is dead legacy or is quietly relied on for an offline/demo mode before deleting; the grep evidence says it's only used by one file, but worth a sign-off given the size.
 4. **Web target** — `app.config.js` has `web.output: "static"` and `react-native-web` is installed; confirm whether web is a real secondary platform (which would push the styling choice toward Tamagui/NativeWind's web story more heavily) or vestigial from the Expo template.
-5. **Backend coupling** — this plan assumes the `hopln-api` contract is stable. If a backend rebuild is also on the table, sequence it *before* Phase 2 so the client isn't built twice against two API shapes.
+5. **Backend coupling** — this plan assumes the `navigo-api` contract is stable. If a backend rebuild is also on the table, sequence it *before* Phase 2 so the client isn't built twice against two API shapes.
 
 ---
 

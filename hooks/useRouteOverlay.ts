@@ -148,17 +148,52 @@ export function useRouteOverlay(
               { id: `node-to-${i}`,   coord: { latitude: seg.to.lat,   longitude: seg.to.lng   }, name: toName,   color },
             );
 
-            (seg.stops ?? []).slice(1, -1).forEach((stop: any, j: number) => {
+(seg.stops ?? []).slice(1, -1).forEach((stop: any, j: number) => {
               if (stop.lat && stop.lng) {
-                const projected = projectOntoPolyline({ latitude: stop.lat, longitude: stop.lng }, coords);
-                newIntermStops.push({ id: `interm-${i}-${j}`, coord: projected, color, name: stop.name ?? "", routeName: seg.route_name ?? "" });
+                const projected = projectOntoPolyline(
+                  { latitude: stop.lat, longitude: stop.lng },
+                  coords
+                );
+                newIntermStops.push({
+                  id: `interm-${i}-${j}`,
+                  stop_id: stop.stop_id ?? undefined,
+                  coord: projected,
+                  color,
+                  name: stop.name ?? "",
+                  routeName: seg.route_name ?? "",
+                } as any);
               }
             });
 
             summarySteps.push(
-              { instruction: `Board Line ${seg.route_name} at ${fromName}`, distance: 0,            duration: 0,            location: [seg.from.lng, seg.from.lat], type: "depart", routeName: seg.route_name ?? undefined, routeColor: color, stops: seg.stops },
-              { instruction: `Alight at ${toName}`,                         distance: seg.distance, duration: seg.duration, location: [seg.to.lng,   seg.to.lat  ], type: "arrive", routeName: seg.route_name ?? undefined, routeColor: color },
+              {
+                instruction: `Board Line ${seg.route_name} at ${fromName}`,
+                distance: 0,
+                duration: 0,
+                location: [seg.from.lng, seg.from.lat],
+                type: "depart",
+                mode: seg.mode,
+                modeBadge: seg.mode_badge ?? "Bus",
+                stopCode: seg.from.stop_code ?? null,
+                platformCode: seg.from.platform_code ?? null,
+                landmark: seg.from.landmark ?? null,
+                nextDeparture: seg.next_departures?.[0] ?? null,
+                routeName: seg.route_name ?? undefined,
+                routeColor: color,
+                stops: seg.stops,
+              } as any,
+              {
+                instruction: `Alight at ${toName}`,
+                distance: seg.distance,
+                duration: seg.duration,
+                location: [seg.to.lng, seg.to.lat],
+                type: "arrive",
+                mode: seg.mode,
+                routeName: seg.route_name ?? undefined,
+                routeColor: color,
+              } as any
             );
+
           }
         }
 

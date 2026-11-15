@@ -1,100 +1,223 @@
-// services/stop.service.ts
-import type { UnifiedLocation } from "@/store/journeyStore";
-import { fetchApi, dedupedGet } from "./apiClient";
-import { CacheService, CACHE_KEYS, CACHE_TTL } from "./cache";
+// services/stop.ts
+import api from "./apiClient";
 
-// Module-level cache, stops are fetched once per app session
-let _allStopsCache: Stop[] | null = null;
+export type StopPoiCategory =
+  | "rail_station"
+  | "metro_station"
+  | "tram_stop"
+  | "brt_station"
+  | "ferry_terminal"
+  | "bus_terminal"
+  | "bus_stop";
+
+export interface StopRoute {
+  id: string;
+  short_name: string;
+  long_name?: string;
+  route_color?: string | null;
+  route_type?: number | null;
+}
 
 export interface Stop {
   id: string;
   name: string;
   lat: number;
   lng: number;
-  location_t: number; // This is location_type (0 for stop, 1 for station, etc.)
-  parent_sta: string | null;
-  trip_count: number;
-  trip_ids: string | null;
-  route_ids: string | null;
-  route_nams: string | null;
+  stop_code?: string | null;
+  stop_type?: StopPoiCategory | string | null;
+  location_t?: number;
+  platform_code?: string | null;
+  landmark?: string | null;
+  direction_label?: string | null;
+  distance_m?: number | null;
+  route_nams?: string | null;
+  mode?: "RAIL" | "SUBWAY" | "TRAM" | "BRT" | "FERRY" | "BUS";
+  mode_badge?: string;
+  badge_color?: string;
 }
 
-export interface StopRoute {
-  id: string;
-  short_name: string;
-  long_name: string;
+export interface StopArrivalCountdown {
+  departure_time: string;
+  eta_seconds: number;
+  eta_label: string;
+  stops_away: number;
+  crowding: "Empty" | "Comfy" | "Busy";
+  headsign?: string | null;
+}
+
+export interface StopRouteBoardItem {
+  route_id: string;
+  route_short_name: string;
+  route_long_name: string;
   route_type: number;
+  mode: "RAIL" | "SUBWAY" | "TRAM" | "BRT" | "FERRY" | "BUS";
+  mode_badge: string;
+  badge_color: string;
+  route_color: string;
+  agency_name?: string | null;
+  direction_id: number;
+  headsign: string;
+  arrivals: StopArrivalCountdown[];
 }
 
-export interface StopDetail {
-  id: string;
-  name: string;
-  lat: number;
-  lng: number;
-  location_t: number;
-  routes: StopRoute[];
+export interface StopDeparturesResponse {
+  stop: {
+    id: string;
+    name: string;
+    stop_code: string;
+    stop_type: StopPoiCategory;
+    platform_code?: string | null;
+    landmark?: string | null;
+    direction_label: string;
+    wheelchair_boarding: boolean;
+    lat: number;
+    lng: number;
+  };
+  updated_at: string;
+  routes: StopRouteBoardItem[];
+}
+
+export interface MobilitySearchRouteItem {
+  route_id: string;
+  route_short_name: string;
+  route_long_name: string;
+  route_type: number;
+  mode: "RAIL" | "SUBWAY" | "TRAM" | "BRT" | "FERRY" | "BUS";
+  mode_badge: string;
+  route_color: string;
+  agency_name?: string | null;
+}
+
+export interface MobilitySearchResponse {
+  stops: Stop[];
+  routes: MobilitySearchRouteItem[];
+}
+
+export interface RouteCorridorDirection {
+  headsign: string;
+  points: [number, number][]; // [lng, lat][]
+  stops: Array<{
+    stop_id: string;
+    name: string;
+    stop_code?: string | null;
+    stop_type?: string | null;
+    platform_code?: string | null;
+    lat: number;
+    lng: number;
+    arrival_time: string;
+    departure_time: string;
+  }>;
+}
+
+export interface RouteCorridorResponse {
+  route_id: string;
+  route_short_name: string;
+  route_long_name: string;
+  route_type: number;
+  mode: string;
+  mode_badge: string;
+  route_color: string;
+  agency_name?: string | null;
+  directions: {
+    "0": RouteCorridorDirection;
+    "1": RouteCorridorDirection;
+  };
 }
 
 export const StopService = {
-  /**
-   * Fetches all stops once and caches them for the app session.
-   * Returns slim objects: { id, name, lat, lng }.
-   */
   async getAllStops(): Promise<Stop[]> {
-    // Tier 1: in-memory (fastest, within same session)
-    if (_allStopsCache) return _allStopsCache;
+    const res = await api.get<{ data?: Stop[] } | Stop[]>("/stops/all");
+    const raw = Array.isArray(res.data) ? res.data : (res.data?.data ?? []);
+    return raw.map((s: any) => ({
+      ...s,
+      lat: Number(s.lat),
+      lng: Number(s.lng),
+    }));
+  },
 
-    // Tier 2: AsyncStorage (fast, survives app reload, 24h TTL)
-    const cached = await CacheService.get<Stop[]>(CACHE_KEYS.STOPS_ALL, CACHE_TTL.STOPS);
-    if (cached) {
-      _allStopsCache = cached;
-      return cached;
+  async getStopDetails(stopId: string): Promise<{ stop: Stop; routes: StopRoute[] }> {
+    try {
+      const res = await api.get(`/stops/${encodeURIComponent(stopId)}`);
+      const payload = res.data?.data ?? res.data ?? {};
+      const routes: StopRoute[] = (payload.routes ?? []).map((r: any) => ({
+        id: String(r.route_id ?? r.id ?? r.short_name),
+        short_name: String(r.route_short_name ?? r.short_name ?? r.name ?? ""),
+        long_name: r.route_long_name ?? r.long_name ?? "",
+        route_color: r.route_color ?? null,
+        route_type: r.route_type ?? 3,
+      }));
+      return { stop: payload, routes };
+    } catch {
+      const dep = await this.getStopDepartures(stopId);
+      const routes: StopRoute[] = dep.routes.map((r) => ({
+        id: r.route_id,
+        short_name: r.route_short_name,
+        long_name: r.route_long_name,
+        route_color: r.route_color,
+        route_type: r.route_type,
+      }));
+      return { stop: dep.stop as unknown as Stop, routes };
     }
-
-    // Tier 3: network (deduped so parallel callers share one request)
-    const data = await dedupedGet("stops_all", () => fetchApi<{ data: Stop[] }>("/stops/all"));
-    _allStopsCache = data.data;
-    CacheService.set(CACHE_KEYS.STOPS_ALL, data.data); // fire-and-forget
-    return _allStopsCache;
   },
 
-
-  /**
-   * Fetches full stop detail including resolved routes from the routes table.
-   * Cached 30 min server-side; no client-side cache (sheet re-fetches per stop).
-   */
-  async getStopDetails(id: string): Promise<StopDetail> {
-    const data = await fetchApi<{ data: StopDetail }>(`/stops/${id}`);
-    return data.data;
-  },
-
-  /**
-   * Fetch the physical stops nearest to the user's GPS.
-   * Replaces the local dMeters array sorting in map.tsx.
-   */
   async getNearbyStops(
     lat: number,
     lng: number,
-    radius = 1500,
-    limit = 5,
-  ): Promise<UnifiedLocation[]> {
-    const data = await fetchApi<{ data: UnifiedLocation[] }>(
-      `/stops/nearby?lat=${lat}&lng=${lng}&radius=${radius}&limit=${limit}`,
-    );
-    return data.data;
+    radius = 2000,
+    limit = 8
+  ): Promise<any[]> {
+    const res = await api.get("/stops/nearby", {
+      params: { lat, lng, radius, limit },
+    });
+    const list = res.data?.data ?? res.data ?? [];
+    return list.map((s: any) => ({
+      _type: "stop" as const,
+      id: String(s.id),
+      name: s.name,
+      lat: Number(s.lat),
+      lng: Number(s.lng),
+      stop_code: s.stop_code ?? null,
+      stop_type: s.stop_type ?? null,
+      platform_code: s.platform_code ?? null,
+      direction_label: s.direction_label ?? s.landmark ?? null,
+      route_nams: s.route_nams ?? null,
+      mode_badge: s.mode_badge ?? null,
+      badge_color: s.badge_color ?? null,
+    }));
   },
 
-  /**
-   * Search your backend for specific stop names.
-   */
-  async searchStops(query: string): Promise<UnifiedLocation[]> {
-    if (!query || query.length < 2) return [];
+  async searchStops(query: string, lat?: number, lng?: number): Promise<Stop[]> {
+    const res = await api.get<MobilitySearchResponse>("/mobility/search", {
+      params: { q: query, lat, lng },
+    });
+    return res.data?.stops ?? [];
+  },
 
-    const data = await fetchApi<{ data: UnifiedLocation[] }>(
-      `/stops/search?q=${encodeURIComponent(query)}`,
+  async searchMobility(
+    query: string,
+    lat?: number,
+    lng?: number
+  ): Promise<MobilitySearchResponse> {
+    const res = await api.get<MobilitySearchResponse>("/mobility/search", {
+      params: { q: query, lat, lng },
+    });
+    return {
+      stops: res.data?.stops ?? [],
+      routes: res.data?.routes ?? [],
+    };
+  },
+
+  async getStopDepartures(stopId: string): Promise<StopDeparturesResponse> {
+    const res = await api.get<StopDeparturesResponse>(
+      `/stops/${encodeURIComponent(stopId)}/departures`
     );
+    return res.data;
+  },
 
-    console.log("Search Stops Result:", data.data);
-    return data.data;
+  async getRouteCorridor(routeId: string): Promise<RouteCorridorResponse> {
+    const res = await api.get<RouteCorridorResponse>(
+      `/routes/${encodeURIComponent(routeId)}/corridor`
+    );
+    return res.data;
   },
 };

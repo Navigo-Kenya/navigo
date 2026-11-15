@@ -110,10 +110,11 @@ function RootLayout() {
           <Stack.Screen name="index" />
           <Stack.Screen name="(auth)" />
           <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="journey" options={{ headerShown: false }} />
-        <Stack.Screen name="(account)" options={{ animation: "slide_from_right" }} />
-        <Stack.Screen name="kwame" options={{ animation: "slide_from_bottom", gestureEnabled: true }} />
-        <Stack.Screen name="kwame-settings" options={{ animation: "slide_from_right", headerShown: false }} />
+          <Stack.Screen name="route" options={{ animation: "slide_from_bottom", headerShown: false }} />
+          <Stack.Screen name="journey" options={{ headerShown: false }} />
+          <Stack.Screen name="(account)" options={{ animation: "slide_from_right" }} />
+          <Stack.Screen name="kwame" options={{ animation: "slide_from_bottom", gestureEnabled: true }} />
+          <Stack.Screen name="kwame-settings" options={{ animation: "slide_from_right", headerShown: false }} />
         </Stack>
       </QueryClientProvider>
     </SafeAreaProvider>
