@@ -1,6 +1,9 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, Animated, StyleSheet, Dimensions } from 'react-native';
+import {
+  View, Text, TouchableOpacity, Animated, StyleSheet, Easing,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface Props {
   C: any;
@@ -13,135 +16,272 @@ interface Props {
   handleOrbPress: () => void;
 }
 
-const ORANGE  = '#FF6F00';
-const { width: SCREEN_W } = Dimensions.get('window');
+const ORB_SIZE = 215;
 
 export default function VoiceOverlay({
-  C, voiceState, holdingPhrase, orbScaleAnim, isMuted, setIsMuted, toggleUiMode, handleOrbPress
+  C,
+  voiceState,
+  holdingPhrase,
+  orbScaleAnim,
+  isMuted,
+  setIsMuted,
+  toggleUiMode,
+  handleOrbPress,
 }: Props) {
-  
-  // Smooth fade-in for the container
+  const insets = useSafeAreaInsets();
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const cloudDriftAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
       toValue: 1,
-      duration: 300,
+      duration: 260,
       useNativeDriver: true,
     }).start();
+
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(cloudDriftAnim, {
+          toValue: 1,
+          duration: 3800,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(cloudDriftAnim, {
+          toValue: 0,
+          duration: 3800,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
   }, []);
 
-  // Determine status text to mimic ChatGPT
   const getStatusText = () => {
     if (holdingPhrase) return holdingPhrase;
+    if (isMuted) return 'Microphone muted';
     switch (voiceState) {
-      case 'listening': return "Listening — pause to send";
-      case 'processing': return "Thinking...";
-      case 'speaking': return "";
-      case 'idle': return "Tap to speak";
-      default: return "";
+      case 'listening':
+        return 'Listening...';
+      case 'processing':
+        return 'Thinking...';
+      case 'speaking':
+        return '';
+      case 'idle':
+        return 'Tap orb to speak';
+      default:
+        return '';
     }
   };
 
+  const cloudTranslateY = cloudDriftAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [8, -10],
+  });
+
+  const cloudRotate = cloudDriftAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['-6deg', '8deg'],
+  });
+
+  // Palette shifts gently between active/muted states while keeping the organic cloud aesthetic
+  const baseOrbColor = isMuted
+    ? '#94A3B8'
+    : voiceState === 'speaking'
+    ? '#FF6F00'
+    : '#3B82F6';
+
+  const secondaryWashColor = isMuted
+    ? '#CBD5E1'
+    : voiceState === 'speaking'
+    ? '#FFCC80'
+    : '#93C5FD';
+
   return (
-    <Animated.View style={[styles.container, { backgroundColor: C.bg, opacity: fadeAnim }]}>
-      
-      {/* Dynamic Status Text above the Orb */}
-      <View style={styles.statusContainer}>
-        <Text style={[styles.statusText, { color: C.text }]}>{getStatusText()}</Text>
-      </View>
-
-      {/* Main Control Row */}
-      <View style={styles.controlRow}>
-        
-        {/* Left Slot: Mute Button */}
-        <View style={[styles.sideSlot, { alignItems: 'flex-start' }]}>
-          <TouchableOpacity 
-            style={[styles.sideBtn, { backgroundColor: C.iconBg }]} 
-            onPress={() => setIsMuted(!isMuted)}
+    <Animated.View
+      style={[
+        styles.overlayContainer,
+        { backgroundColor: C.bg, opacity: fadeAnim },
+      ]}
+    >
+      {/* Center Organic Fluid Cloud Orb */}
+      <View style={styles.centerStage}>
+        <TouchableOpacity
+          activeOpacity={0.92}
+          onPress={handleOrbPress}
+          style={styles.orbTouchArea}
+        >
+          <Animated.View
+            style={[
+              styles.orbShell,
+              {
+                backgroundColor: baseOrbColor,
+                transform: [{ scale: orbScaleAnim }],
+              },
+            ]}
           >
-            <Ionicons 
-              name={isMuted ? "mic-off" : "mic"} 
-              size={22} 
-              color={isMuted ? "#FF3B30" : C.text} 
+            {/* Upper Mid-Tone Sky/Amber Wash */}
+            <Animated.View
+              style={[
+                styles.cloudLayerMid,
+                {
+                  backgroundColor: secondaryWashColor,
+                  transform: [
+                    { translateY: cloudTranslateY },
+                    { rotate: cloudRotate },
+                  ],
+                },
+              ]}
             />
-          </TouchableOpacity>
-        </View>
-
-        {/* The Glowing Orb */}
-        <TouchableOpacity activeOpacity={0.9} onPress={handleOrbPress} style={styles.orbHitArea}>
-          <Animated.View style={[
-            styles.orb,
-            { transform: [{ scale: orbScaleAnim }] },
-            voiceState === 'listening'  && { backgroundColor: '#FF8F00', shadowColor: '#FF8F00', shadowOpacity: 0.7, shadowRadius: 30 },
-            voiceState === 'speaking'   && { backgroundColor: ORANGE, shadowColor: ORANGE, shadowOpacity: 0.9, shadowRadius: 40 },
-            voiceState === 'processing' && { backgroundColor: '#CC5800', shadowOpacity: 0 },
-            isMuted && { backgroundColor: '#331A00' },
-          ]} />
+            {/* Lower Soft White Cloud Crest */}
+            <Animated.View
+              style={[
+                styles.cloudLayerBright,
+                {
+                  transform: [
+                    {
+                      translateY: Animated.multiply(cloudTranslateY, -0.8),
+                    },
+                  ],
+                },
+              ]}
+            />
+          </Animated.View>
         </TouchableOpacity>
 
-        {/* Right Slot: Close 'X' Button */}
-        <View style={[styles.sideSlot, { alignItems: 'flex-end' }]}>
-          <TouchableOpacity 
-            style={[styles.sideBtn, { backgroundColor: C.iconBg }]} 
-            onPress={() => toggleUiMode('chat')}
-          >
-            <Ionicons name="close" size={24} color={C.text} />
-          </TouchableOpacity>
-        </View>
+        {!!getStatusText() && (
+          <Text style={[styles.statusCaption, { color: C.sub }]}>
+            {getStatusText()}
+          </Text>
+        )}
+      </View>
 
+      {/* Bottom Voice Mode Dock: "+ Ask Kwame" Pill + Mute Circle + Dark Close Circle */}
+      <View
+        style={[
+          styles.bottomVoiceBar,
+          { paddingBottom: Math.max(insets.bottom, 12) + 8 },
+        ]}
+      >
+        <TouchableOpacity
+          style={[
+            styles.askTextPill,
+            { backgroundColor: C.surfacePill, shadowColor: C.shadow },
+          ]}
+          activeOpacity={0.8}
+          onPress={() => toggleUiMode('chat', { keepAudio: true })}
+        >
+          <Ionicons name="add" size={24} color={C.text} />
+          <Text style={[styles.askPlaceholder, { color: C.sub }]}>Ask Kwame</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.roundControlBtn,
+            { backgroundColor: C.surfacePill, shadowColor: C.shadow },
+          ]}
+          onPress={() => setIsMuted(!isMuted)}
+          activeOpacity={0.75}
+        >
+          <Ionicons
+            name={isMuted ? 'mic-off-outline' : 'mic-outline'}
+            size={22}
+            color={isMuted ? '#FF3B30' : C.text}
+          />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.roundControlBtn, { backgroundColor: C.text }]}
+          onPress={() => toggleUiMode('chat')}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="close" size={22} color={C.bg} />
+        </TouchableOpacity>
       </View>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    position: 'absolute',
-    bottom: 0,
-    width: SCREEN_W,
-    paddingBottom: 40,
-    paddingTop: 20,
-    borderTopLeftRadius: 30,
-    borderTopRightRadius: 30,
-    zIndex: 999,
+  overlayContainer: {
+    flex: 1,
+    justifyContent: 'space-between',
   },
-  statusContainer: {
+  centerStage: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 20,
-    height: 24,
   },
-  statusText: {
-    fontSize: 16,
+  orbTouchArea: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  orbShell: {
+    width: ORB_SIZE,
+    height: ORB_SIZE,
+    borderRadius: ORB_SIZE / 2,
+    overflow: 'hidden',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  cloudLayerMid: {
+    position: 'absolute',
+    bottom: -25,
+    left: -30,
+    width: ORB_SIZE * 1.35,
+    height: ORB_SIZE * 0.72,
+    borderRadius: ORB_SIZE * 0.45,
+    opacity: 0.75,
+  },
+  cloudLayerBright: {
+    position: 'absolute',
+    bottom: -48,
+    right: -25,
+    width: ORB_SIZE * 1.25,
+    height: ORB_SIZE * 0.65,
+    borderRadius: ORB_SIZE * 0.45,
+    backgroundColor: '#F8FAFC',
+    opacity: 0.92,
+  },
+  statusCaption: {
+    marginTop: 28,
+    fontSize: 15,
     fontWeight: '500',
-    opacity: 0.8,
   },
-  controlRow: {
+  bottomVoiceBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 30,
+    paddingHorizontal: 16,
+    gap: 10,
   },
-  sideSlot: {
+  askTextPill: {
     flex: 1,
+    height: 50,
+    borderRadius: 25,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    gap: 8,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  sideBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  askPlaceholder: {
+    fontSize: 16,
+    fontWeight: '400',
+  },
+  roundControlBtn: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  orbHitArea: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  orb: {
-    width: 90, 
-    height: 90, 
-    borderRadius: 45, 
-    backgroundColor: ORANGE,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 10,
-  }
 });
