@@ -27,8 +27,7 @@ import {
   useExploreSearchStore,
   type SearchTabFilter,
 } from "@/store/exploreSearchStore";
-import { MapService } from "@/services/map";
-import { StopService } from "@/services/stop";
+import { runExploreSearch } from "@/services/exploreSearch";
 import WeatherMeteoSheet, {
   fetchLiveMeteo,
   type LiveWeatherData,
@@ -172,7 +171,6 @@ export default function MapFloatingUI({
     stops: searchStops,
     loading: searchLoading,
     startSearch,
-    setResults,
     setLoading,
     clearSearch,
   } = useExploreSearchStore();
@@ -283,50 +281,15 @@ export default function MapFloatingUI({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sheetTop, liftedTop, topEdge, stackTop]);
 
-  const handleCategoryPress = async (label: string) => {
+  // Category chips: real places + our stops/lines in one search, around the
+  // area being looked at (camera centre), falling back to the user.
+  const handleCategoryPress = (label: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     startSearch({ query: label, activeTab: "all" });
-    setLoading(true);
-
-    try {
-      const [preds, mobility] = await Promise.all([
-        MapService.placesAutocomplete(
-          label,
-          userLat ?? FALLBACK_LAT,
-          userLng ?? FALLBACK_LNG
-        ),
-        StopService.searchMobility(
-          label,
-          userLat ?? FALLBACK_LAT,
-          userLng ?? FALLBACK_LNG
-        ),
-      ]);
-
-      const resolvedPlaces = await Promise.all(
-        preds.slice(0, 4).map(async (p) => {
-          const det = await MapService.getPlaceDetails(p.place_id);
-          if (!det) return null;
-          return {
-            id: p.place_id,
-            name: p.main_text,
-            address: p.secondary_text || p.description,
-            category: label,
-            lat: det.lat,
-            lng: det.lng,
-            rating: 4.3,
-            reviewCount: 19,
-          };
-        })
-      );
-
-      setResults({
-        places: resolvedPlaces.filter(Boolean) as any[],
-        stops: mobility.stops,
-        routes: mobility.routes,
-      });
-    } catch {
-      setLoading(false);
-    }
+    runExploreSearch(label, {
+      lat: areaLat ?? userLat,
+      lng: areaLng ?? userLng,
+    }).catch(() => setLoading(false));
   };
 
   const cardBg = dark ? "rgba(24, 24, 27, 0.96)" : "rgba(255, 255, 255, 0.97)";

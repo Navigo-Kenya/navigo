@@ -1,4 +1,8 @@
-// app/(tabs)/search.tsx
+// app/search.tsx
+//
+// Full-screen search: type → places, stops and lines as you go; submit or tap
+// a category → results on the map (MapSearchContextSheet). Only real data:
+// no invented ratings; recent places open directly.
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -12,6 +16,7 @@ import {
   View,
   useColorScheme,
 } from "react-native";
+import Reanimated, { FadeIn } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import * as Haptics from "expo-haptics";
@@ -20,15 +25,46 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useStopSearch } from "@/hooks/useStopSearch";
 import { MapService, type PlacePrediction } from "@/services/map";
 import { StopService, type MobilitySearchRouteItem } from "@/services/stop";
+import { runExploreSearch } from "@/services/exploreSearch";
 import { useSavedStore } from "@/store/savedStore";
 import { UnifiedLocation } from "@/store/journeyStore";
 import { useExploreSearchStore } from "@/store/exploreSearchStore";
 import { QUICK_CATEGORIES } from "@/components/app/MapFloatingUI";
-import { PlaceCategoryIcon } from "@/components/icons/NavigoIcons";
+import { resolveStopCategory } from "@/components/app/StopsLayer";
+import { PlaceCategoryIcon, StopTypeGlyph } from "@/components/icons/NavigoIcons";
+import { PressableScale } from "@/components/ui/PressableScale";
 
 const ORANGE = "#FF6F00";
 
-type HistoryFilter = "recent" | "place" | "address" | "transit" | "route";
+type Filter = "all" | "place" | "transit" | "route";
+
+const FILTERS: { key: Filter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "place", label: "Places" },
+  { key: "transit", label: "Stops" },
+  { key: "route", label: "Lines" },
+];
+
+type Row =
+  | { kind: "header"; key: string; title: string }
+  | { kind: "recent"; key: string; item: UnifiedLocation }
+  | { kind: "route"; key: string; item: MobilitySearchRouteItem }
+  | { kind: "stop"; key: string; item: UnifiedLocation }
+  | { kind: "place"; key: string; item: PlacePrediction };
+
+/** Bold the part of `text` that matches `query` (case-insensitive). */
+function Highlight({ text, query, style, strong }: { text: string; query: string; style: any; strong: any }) {
+  const q = query.trim();
+  const i = q ? text.toLowerCase().indexOf(q.toLowerCase()) : -1;
+  if (i < 0) return <Text style={style} numberOfLines={1}>{text}</Text>;
+  return (
+    <Text style={style} numberOfLines={1}>
+      {text.slice(0, i)}
+      <Text style={strong}>{text.slice(i, i + q.length)}</Text>
+      {text.slice(i + q.length)}
+    </Text>
+  );
+}
 
 export default function PlaceAndTransitSearchScreen() {
   const router = useRouter();
@@ -45,7 +81,7 @@ export default function PlaceAndTransitSearchScreen() {
     tName?: string;
   }>();
 
-  // If deep-linked with planner params, forward straight to the dedicated `/route` screen
+  // Deep-linked with planner params: forward straight to the route planner.
   useEffect(() => {
     if (
       params.mode === "planner" ||
@@ -56,40 +92,35 @@ export default function PlaceAndTransitSearchScreen() {
     }
   }, [params, router]);
 
-  const { query: existingQuery, startSearch, setResults, setLoading } =
-    useExploreSearchStore();
+  const { query: existingQuery, startSearch } = useExploreSearchStore();
 
   const [query, setQuery] = useState(existingQuery || "");
-  const [activeFilter, setActiveFilter] = useState<HistoryFilter>(
-    params.tab === "transit" ? "transit" : "recent"
-  );
-  const [me, setMe] = useState<{ latitude: number; longitude: number } | null>(
-    null
-  );
-  const [matchedRoutes, setMatchedRoutes] = useState<MobilitySearchRouteItem[]>(
-    []
-  );
+  const [filter, setFilter] = useState<Filter>(params.tab === "transit" ? "transit" : "all");
+  const [me, setMe] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [matchedRoutes, setMatchedRoutes] = useState<MobilitySearchRouteItem[]>([]);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
 
   const { places: savedPlaces, fetch: fetchSaved } = useSavedStore();
   useEffect(() => {
     fetchSaved().catch(() => {});
   }, [fetchSaved]);
-
   const homePlace = savedPlaces.find((p) => p.pin === "home");
   const workPlace = savedPlaces.find((p) => p.pin === "work");
 
+  // Position for nearby ranking: last known fix right away, a fresh one after.
   useEffect(() => {
+    let alive = true;
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === "granted") {
-        const pos = await Location.getCurrentPositionAsync({});
-        setMe({
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-        });
-      }
+      if (status !== "granted") return;
+      const last = await Location.getLastKnownPositionAsync().catch(() => null);
+      if (alive && last) setMe({ latitude: last.coords.latitude, longitude: last.coords.longitude });
+      const fresh = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null);
+      if (alive && fresh) setMe({ latitude: fresh.coords.latitude, longitude: fresh.coords.longitude });
     })();
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const {
@@ -101,7 +132,7 @@ export default function PlaceAndTransitSearchScreen() {
     isSearchingPlaces,
   } = useStopSearch(query, me);
 
-  // Also fetch matching transit routes (Bus, BRT, Rail, SGR)
+  // Matching lines (bus, BRT, rail…), debounced.
   useEffect(() => {
     const q = query.trim();
     if (q.length < 1) {
@@ -122,54 +153,48 @@ export default function PlaceAndTransitSearchScreen() {
     };
   }, [query, me?.latitude, me?.longitude]);
 
-  const bg = dark ? "#0F0F0F" : "#FFFFFF";
-  const cardBg = dark ? "#18181B" : "#F8FAFC";
-  const textPrimary = dark ? "#F9FAFB" : "#111827";
-  const textMuted = dark ? "#9CA3AF" : "#6B7280";
-  const borderCol = dark ? "#27272A" : "#E5E7EB";
+  const C = {
+    bg: dark ? "#0F0F0F" : "#FFFFFF",
+    field: dark ? "#18181B" : "#F4F4F5",
+    chip: dark ? "#1F1F22" : "#F4F4F5",
+    text: dark ? "#F4F4F5" : "#111827",
+    sub: dark ? "#A1A1AA" : "#6B7280",
+    line: dark ? "#27272A" : "#EEF0F3",
+  };
 
-  // Smoothly transitions to `/map` while preserving the full search results & context sheet!
-  const handleExecuteSearchToMap = async (searchTerm: string) => {
-    const q = searchTerm.trim();
+  const near = { lat: me?.latitude, lng: me?.longitude };
+
+  /** Submit / category: show results on the map, then fill them in. */
+  const searchOnMap = (term: string) => {
+    const q = term.trim();
     if (!q) return;
     Keyboard.dismiss();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
     startSearch({ query: q, activeTab: "all" });
-    setLoading(true);
     router.replace("/(tabs)/map" as any);
+    runExploreSearch(q, near).catch(() => useExploreSearchStore.getState().setLoading(false));
+  };
 
-    try {
-      const [preds, mobility] = await Promise.all([
-        MapService.placesAutocomplete(q, me?.latitude, me?.longitude),
-        StopService.searchMobility(q, me?.latitude, me?.longitude),
-      ]);
-
-      const resolvedPlaces = await Promise.all(
-        preds.slice(0, 4).map(async (p) => {
-          const det = await MapService.getPlaceDetails(p.place_id);
-          if (!det) return null;
-          return {
-            id: p.place_id,
-            name: p.main_text,
-            address: p.secondary_text || p.description,
-            category: "Place",
-            lat: det.lat,
-            lng: det.lng,
-            rating: 4.5,
-            reviewCount: 28,
-          };
-        })
-      );
-
-      setResults({
-        places: resolvedPlaces.filter(Boolean) as any[],
-        stops: mobility.stops,
-        routes: mobility.routes,
-      });
-    } catch {
-      setLoading(false);
-    }
+  /** Open a place on the map's place sheet. */
+  const openPlace = (p: {
+    id: string; name: string; lat: number; lng: number;
+    address?: string; category?: string; rating?: number; reviewCount?: number;
+    openNow?: boolean; photos?: string[];
+  }) => {
+    const place = {
+      id: p.id,
+      name: p.name,
+      address: p.address ?? "",
+      category: p.category ?? "",
+      lat: p.lat,
+      lng: p.lng,
+      rating: p.rating,
+      reviewCount: p.reviewCount,
+      openNow: p.openNow,
+      photos: p.photos,
+    };
+    startSearch({ query: p.name, activeTab: "place", places: [place], selectedPlace: place });
+    router.replace("/(tabs)/map" as any);
   };
 
   const handleSelectPrediction = async (pred: PlacePrediction) => {
@@ -177,146 +202,233 @@ export default function PlaceAndTransitSearchScreen() {
     const details = await MapService.getPlaceDetails(pred.place_id);
     setResolvingId(null);
     if (!details) return;
-
-    const unified: UnifiedLocation = {
-      _type: "location",
+    pushRecent({ _type: "location", id: pred.place_id, name: pred.main_text, lat: details.lat, lng: details.lng });
+    openPlace({
       id: pred.place_id,
       name: pred.main_text,
+      address: details.address || pred.secondary_text || pred.description,
       lat: details.lat,
       lng: details.lng,
-    };
-    pushRecent(unified);
-
-    const placeObj = {
-      id: pred.place_id,
-      name: pred.main_text,
-      address: pred.secondary_text || pred.description,
-      category: "Place & Building",
-      lat: details.lat,
-      lng: details.lng,
-      rating: 4.5,
-      reviewCount: 31,
-    };
-
-    startSearch({
-      query: pred.main_text,
-      activeTab: "place",
-      places: [placeObj],
-      selectedPlace: placeObj,
+      rating: details.rating,
+      reviewCount: details.reviewCount,
+      openNow: details.openNow,
+      photos: details.photos,
     });
-    router.replace("/(tabs)/map" as any);
   };
 
-  const handleSelectStopItem = (loc: UnifiedLocation) => {
+  const handleSelectStop = (loc: UnifiedLocation) => {
     pushRecent(loc);
+    const l = loc as any;
     startSearch({
       query: loc.name,
       activeTab: "stop",
-      stops: [
-        {
-          id: loc.id,
-          name: loc.name,
-          lat: loc.lat,
-          lng: loc.lng,
-          route_nams: loc.route_nams,
-          stop_code: (loc as any).stop_code,
-          direction_label: (loc as any).direction_label,
-          mode_badge: (loc as any).mode_badge ?? "Bus",
-          badge_color: (loc as any).badge_color ?? "#2563EB",
-        },
-      ],
+      stops: [{
+        id: loc.id, name: loc.name, lat: loc.lat, lng: loc.lng,
+        route_nams: loc.route_nams, stop_code: l.stop_code, stop_type: l.stop_type,
+        direction_label: l.direction_label, mode_badge: l.mode_badge, badge_color: l.badge_color,
+      } as any],
     });
     router.replace("/(tabs)/map" as any);
   };
 
-  const handleSelectRouteItem = (rt: MobilitySearchRouteItem) => {
-    startSearch({
-      query: `Line ${rt.route_short_name}`,
-      activeTab: "bus",
-      routes: [rt],
-    });
+  const handleSelectRoute = (rt: MobilitySearchRouteItem) => {
+    startSearch({ query: `Line ${rt.route_short_name}`, activeTab: "bus", routes: [rt] });
     router.replace("/(tabs)/map" as any);
   };
 
-  const listItems = useMemo(() => {
-    const rows: any[] = [];
-    const q = query.trim();
+  const q = query.trim();
+  const searching = !!q && (isSearchingStops || isSearchingPlaces);
 
+  const rows = useMemo<Row[]>(() => {
+    const out: Row[] = [];
     if (!q) {
-      const filteredRecents = recents.filter((r) => {
-        if (activeFilter === "place") return r._type === "location";
-        if (activeFilter === "transit") return r._type === "stop";
-        return true;
+      const rec = recents.filter((r) =>
+        filter === "place" ? r._type === "location" : filter === "transit" ? r._type === "stop" : filter !== "route"
+      );
+      if (rec.length) out.push({ kind: "header", key: "h-rec", title: "Recent" });
+      rec.forEach((r) => out.push({ kind: "recent", key: `rec-${r.id}`, item: r }));
+      return out;
+    }
+    const add = (title: string, items: Row[]) => {
+      if (!items.length) return;
+      if (filter === "all") out.push({ kind: "header", key: `h-${title}`, title });
+      out.push(...items);
+    };
+    if (filter === "all" || filter === "route")
+      add("Lines", matchedRoutes.map((rt) => ({ kind: "route" as const, key: `rt-${rt.route_id}`, item: rt })));
+    if (filter === "all" || filter === "transit")
+      add("Stops", stops.map((st) => ({ kind: "stop" as const, key: `st-${st.id}`, item: st })));
+    if (filter === "all" || filter === "place")
+      add("Places", placePredictions.map((p) => ({ kind: "place" as const, key: `pl-${p.place_id}`, item: p })));
+    return out;
+  }, [q, recents, filter, matchedRoutes, stops, placePredictions]);
+
+  const goPinned = (place: typeof homePlace, label: string) => {
+    Haptics.selectionAsync();
+    if (place) {
+      router.push({
+        pathname: "/route" as any,
+        params: { tLat: String(place.lat), tLng: String(place.lng), tName: label },
       });
-      filteredRecents.forEach((r) =>
-        rows.push({ _kind: "recent", item: r, key: `rec-${r.id}` })
-      );
-      return rows;
+    } else {
+      router.push("/(account)/saved-places" as any);
     }
+  };
 
-    if (activeFilter === "recent" || activeFilter === "route" || activeFilter === "transit") {
-      matchedRoutes.forEach((rt) =>
-        rows.push({ _kind: "route", item: rt, key: `rt-${rt.route_id}` })
-      );
-    }
+  const strong = { fontWeight: "800" as const, color: C.text };
 
-    if (activeFilter === "recent" || activeFilter === "transit") {
-      stops.forEach((st) =>
-        rows.push({ _kind: "stop", item: st, key: `st-${st.id}` })
-      );
-    }
+  const renderRow = ({ item, index }: { item: Row; index: number }) => {
+    const enter = FadeIn.duration(160).delay(Math.min(index, 8) * 18);
 
-    if (activeFilter === "recent" || activeFilter === "place" || activeFilter === "address") {
-      placePredictions.forEach((p) =>
-        rows.push({ _kind: "place", item: p, key: `pl-${p.place_id}` })
+    if (item.kind === "header") {
+      return (
+        <Reanimated.View entering={enter}>
+          <Text style={[s.section, { color: C.sub }]}>{item.title.toUpperCase()}</Text>
+        </Reanimated.View>
       );
     }
 
-    return rows;
-  }, [query, recents, activeFilter, matchedRoutes, stops, placePredictions]);
+    if (item.kind === "route") {
+      const rt = item.item;
+      return (
+        <Reanimated.View entering={enter}>
+          <PressableScale pressedScale={0.98} onPress={() => handleSelectRoute(rt)} style={[s.row, { borderBottomColor: C.line }]}>
+            <View style={[s.modeTag, { backgroundColor: rt.route_color || ORANGE }]}>
+              <Text style={s.modeTagText}>{rt.mode_badge}</Text>
+            </View>
+            <View style={s.rowText}>
+              <Highlight text={`Line ${rt.route_short_name}`} query={q} style={[s.rowTitle, { color: C.text }]} strong={strong} />
+              <Text style={[s.rowSub, { color: C.sub }]} numberOfLines={1}>
+                {[rt.route_long_name, rt.agency_name].filter(Boolean).join(" · ")}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={17} color={C.sub} />
+          </PressableScale>
+        </Reanimated.View>
+      );
+    }
+
+    if (item.kind === "stop" || (item.kind === "recent" && item.item._type === "stop")) {
+      const st = item.item as UnifiedLocation & Record<string, any>;
+      const meta = resolveStopCategory(st as any);
+      return (
+        <Reanimated.View entering={enter}>
+          <PressableScale pressedScale={0.98} onPress={() => handleSelectStop(st)} style={[s.row, { borderBottomColor: C.line }]}>
+            <View style={[s.stopBadge, { backgroundColor: meta.color }]}>
+              <StopTypeGlyph category={meta.category} size={16} />
+            </View>
+            <View style={s.rowText}>
+              <Highlight text={st.name} query={q} style={[s.rowTitle, { color: C.text }]} strong={strong} />
+              <Text style={[s.rowSub, { color: C.sub }]} numberOfLines={1}>
+                {[st.stop_code, st.route_nams ? `Lines ${st.route_nams}` : null].filter(Boolean).join(" · ") || "Stop"}
+              </Text>
+            </View>
+            {item.kind === "recent" && <Ionicons name="time-outline" size={16} color={C.sub} />}
+          </PressableScale>
+        </Reanimated.View>
+      );
+    }
+
+    if (item.kind === "place") {
+      const pred = item.item;
+      const busy = resolvingId === pred.place_id;
+      return (
+        <Reanimated.View entering={enter}>
+          <PressableScale pressedScale={0.98} onPress={() => handleSelectPrediction(pred)} style={[s.row, { borderBottomColor: C.line }]}>
+            <View style={[s.iconDisc, { backgroundColor: C.chip }]}>
+              {busy ? <ActivityIndicator size="small" color={ORANGE} /> : <Ionicons name="location" size={16} color={C.sub} />}
+            </View>
+            <View style={s.rowText}>
+              <Highlight text={pred.main_text} query={q} style={[s.rowTitle, { color: C.text }]} strong={strong} />
+              {!!pred.secondary_text && (
+                <Text style={[s.rowSub, { color: C.sub }]} numberOfLines={1}>{pred.secondary_text}</Text>
+              )}
+            </View>
+            <Pressable
+              hitSlop={10}
+              onPress={() => setQuery(pred.main_text)}
+              accessibilityLabel={`Search for ${pred.main_text}`}
+            >
+              <Ionicons name="arrow-up-outline" size={17} color={C.sub} style={{ transform: [{ rotate: "-45deg" }] }} />
+            </Pressable>
+          </PressableScale>
+        </Reanimated.View>
+      );
+    }
+
+    // Recent place: open it directly (we already have its coordinates).
+    const rec = item.item;
+    return (
+      <Reanimated.View entering={enter}>
+        <PressableScale
+          pressedScale={0.98}
+          onPress={() => openPlace({ id: rec.id, name: rec.name, lat: rec.lat, lng: rec.lng })}
+          style={[s.row, { borderBottomColor: C.line }]}
+        >
+          <View style={[s.iconDisc, { backgroundColor: C.chip }]}>
+            <Ionicons name="location" size={16} color={C.sub} />
+          </View>
+          <View style={s.rowText}>
+            <Text style={[s.rowTitle, { color: C.text }]} numberOfLines={1}>{rec.name}</Text>
+          </View>
+          <Ionicons name="time-outline" size={16} color={C.sub} />
+        </PressableScale>
+      </Reanimated.View>
+    );
+  };
+
+  const empty = q ? (
+    searching ? null : (
+      <View style={s.empty}>
+        <View style={[s.emptyDisc, { backgroundColor: C.chip }]}>
+          <Ionicons name="search-outline" size={24} color={C.sub} />
+        </View>
+        <Text style={[s.emptyTitle, { color: C.text }]}>No matches for “{q}”</Text>
+        <Text style={[s.emptySub, { color: C.sub }]}>
+          Press search to look around the map, or try a stop name, a line number (“14A”) or a place.
+        </Text>
+      </View>
+    )
+  ) : (
+    <View style={s.empty}>
+      <View style={[s.emptyDisc, { backgroundColor: C.chip }]}>
+        <Ionicons name="compass-outline" size={24} color={C.sub} />
+      </View>
+      <Text style={[s.emptyTitle, { color: C.text }]}>Where to?</Text>
+      <Text style={[s.emptySub, { color: C.sub }]}>
+        Search a place, a stop or a line. Your recent searches will show up here.
+      </Text>
+    </View>
+  );
 
   return (
-    <View style={[s.container, { backgroundColor: bg }]}>
-      {/* 1. Top Search Input Header (< Search places or buses)[cite: 4, 14] */}
-      <View
-        style={[
-          s.topHeader,
-          { paddingTop: Math.max(insets.top, 12) + 4, borderBottomColor: borderCol },
-        ]}
-      >
-        <View
-          style={[
-            s.searchBox,
-            { backgroundColor: cardBg, borderColor: borderCol },
-          ]}
-        >
-          <Pressable
-            onPress={() => router.back()}
-            hitSlop={12}
-            style={s.backBtn}
-          >
-            <Ionicons name="chevron-back" size={22} color={textPrimary} />
+    <View style={[s.container, { backgroundColor: C.bg }]}>
+      {/* ── Search field + categories ─────────────────────────────────────── */}
+      <View style={[s.topHeader, { paddingTop: Math.max(insets.top, 12) + 4, borderBottomColor: C.line }]}>
+        <View style={[s.searchBox, { backgroundColor: C.field }]}>
+          <Pressable onPress={() => router.back()} hitSlop={12} accessibilityLabel="Back">
+            <Ionicons name="chevron-back" size={22} color={C.text} />
           </Pressable>
-
           <TextInput
             autoFocus
             value={query}
             onChangeText={setQuery}
-            placeholder="Search places, buses, or stations"
-            placeholderTextColor={textMuted}
-            style={[s.searchInput, { color: textPrimary }]}
+            placeholder="Search places, stops or lines"
+            placeholderTextColor={C.sub}
+            style={[s.searchInput, { color: C.text }]}
             returnKeyType="search"
-            onSubmitEditing={() => handleExecuteSearchToMap(query)}
+            onSubmitEditing={() => searchOnMap(query)}
+            autoCorrect={false}
           />
-
-          {query.length > 0 && (
-            <Pressable onPress={() => setQuery("")} hitSlop={10}>
-              <Ionicons name="close-circle" size={18} color={textMuted} />
+          {searching ? (
+            <ActivityIndicator size="small" color={ORANGE} />
+          ) : query.length > 0 ? (
+            <Pressable onPress={() => setQuery("")} hitSlop={10} accessibilityLabel="Clear">
+              <Ionicons name="close-circle" size={18} color={C.sub} />
             </Pressable>
-          )}
+          ) : null}
         </View>
 
-        {/* 2. Quick Category Row (Restaurant, Cafe, 24h Store, Gas Station, Hospital, Parking)[cite: 4, 14] */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -324,423 +436,128 @@ export default function PlaceAndTransitSearchScreen() {
           contentContainerStyle={s.categoryStrip}
         >
           {QUICK_CATEGORIES.map((cat) => (
-            <Pressable
+            <PressableScale
               key={cat.key}
-              onPress={() => handleExecuteSearchToMap(cat.label)}
-              style={s.catItem}
+              onPress={() => searchOnMap(cat.label)}
+              style={[s.catChip, { backgroundColor: C.chip }]}
+              accessibilityRole="button"
             >
               <PlaceCategoryIcon category={cat.key} size={16} color={cat.color} />
-              <Text style={[s.catLabel, { color: textPrimary }]}>
-                {cat.label}
-              </Text>
-            </Pressable>
+              <Text style={[s.catLabel, { color: C.text }]}>{cat.label}</Text>
+            </PressableScale>
           ))}
         </ScrollView>
       </View>
 
-      {/* 3. Home / Work/School Quick Bar + [Edit] Pill[cite: 4, 14] */}
-      <View style={[s.homeWorkBar, { borderBottomColor: borderCol }]}>
-        <View style={s.homeWorkLeft}>
-          <Pressable
-            onPress={() => {
-              if (homePlace) {
-                router.push({
-                  pathname: "/route" as any,
-                  params: {
-                    tLat: String(homePlace.lat),
-                    tLng: String(homePlace.lng),
-                    tName: "Home",
-                  },
-                });
-              } else {
-                router.push("/(account)/saved-places" as any);
-              }
-            }}
-            style={s.pinShortcut}
-          >
-            <Ionicons name="home" size={16} color={textMuted} />
-            <Text style={[s.pinShortcutText, { color: textPrimary }]}>
-              Home
-            </Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => {
-              if (workPlace) {
-                router.push({
-                  pathname: "/route" as any,
-                  params: {
-                    tLat: String(workPlace.lat),
-                    tLng: String(workPlace.lng),
-                    tName: "Work",
-                  },
-                });
-              } else {
-                router.push("/(account)/saved-places" as any);
-              }
-            }}
-            style={s.pinShortcut}
-          >
-            <Ionicons name="business" size={16} color={textMuted} />
-            <Text style={[s.pinShortcutText, { color: textPrimary }]}>
-              Work/School
-            </Text>
-          </Pressable>
-        </View>
-
-        <Pressable
-          onPress={() => router.push("/(account)/saved-places" as any)}
-          style={[s.editPill, { borderColor: borderCol }]}
+      {/* ── Home / Work + Directions ──────────────────────────────────────── */}
+      <View style={[s.quickRow, { borderBottomColor: C.line }]}>
+        <PressableScale onPress={() => goPinned(homePlace, "Home")} style={[s.quickChip, { backgroundColor: C.chip }]}>
+          <Ionicons name="home" size={15} color={ORANGE} />
+          <Text style={[s.quickText, { color: C.text }]}>{homePlace ? "Home" : "Set home"}</Text>
+        </PressableScale>
+        <PressableScale onPress={() => goPinned(workPlace, "Work")} style={[s.quickChip, { backgroundColor: C.chip }]}>
+          <Ionicons name="briefcase" size={15} color={ORANGE} />
+          <Text style={[s.quickText, { color: C.text }]}>{workPlace ? "Work" : "Set work"}</Text>
+        </PressableScale>
+        <View style={{ flex: 1 }} />
+        <PressableScale
+          onPress={() => router.push("/route" as any)}
+          style={[s.quickChip, { backgroundColor: ORANGE }]}
+          accessibilityRole="button"
         >
-          <Text style={[s.editPillText, { color: textMuted }]}>Edit</Text>
-        </Pressable>
+          <Ionicons name="navigate" size={14} color="#FFFFFF" />
+          <Text style={[s.quickText, { color: "#FFFFFF" }]}>Directions</Text>
+        </PressableScale>
       </View>
 
-      {/* 4. Filter Tabs: Recent | Place | Address | Transit | Route[cite: 4, 14] */}
-      <View style={s.filterPillsRow}>
-        {(
-          [
-            { key: "recent", label: "Recent" },
-            { key: "place", label: "Place" },
-            { key: "address", label: "Address" },
-            { key: "transit", label: "Transit" },
-            { key: "route", label: "Route" },
-          ] as const
-        ).map((f) => {
-          const active = activeFilter === f.key;
+      {/* ── Filters ───────────────────────────────────────────────────────── */}
+      <View style={s.filterRow}>
+        {FILTERS.map((f) => {
+          const on = filter === f.key;
           return (
-            <Pressable
+            <PressableScale
               key={f.key}
               onPress={() => {
                 Haptics.selectionAsync();
-                if (f.key === "route" && !query.trim()) {
-                  router.push("/route" as any);
-                  return;
-                }
-                setActiveFilter(f.key);
+                setFilter(f.key);
               }}
-              style={[
-                s.filterPill,
-                active
-                  ? [s.filterPillActive, { borderColor: textPrimary }]
-                  : { backgroundColor: cardBg },
-              ]}
+              style={[s.filterPill, { backgroundColor: on ? C.text : C.chip }]}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: on }}
             >
-              <Text
-                style={[
-                  s.filterPillText,
-                  { color: active ? textPrimary : textMuted },
-                ]}
-              >
-                {f.label}
-              </Text>
-            </Pressable>
+              <Text style={[s.filterText, { color: on ? C.bg : C.sub }]}>{f.label}</Text>
+            </PressableScale>
           );
         })}
       </View>
 
-      {/* 5. Results & Recent History List[cite: 4, 14] */}
-      {(isSearchingStops || isSearchingPlaces) && listItems.length === 0 ? (
-        <View style={s.loadingRow}>
-          <ActivityIndicator size="small" color={ORANGE} />
-          <Text style={{ color: textMuted, fontSize: 13 }}>Searching…</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={listItems}
-          keyExtractor={(item) => item.key}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingBottom: 100 }}
-          renderItem={({ item }) => {
-            if (item._kind === "route") {
-              const rt = item.item as MobilitySearchRouteItem;
-              return (
-                <Pressable
-                  onPress={() => handleSelectRouteItem(rt)}
-                  style={[s.row, { borderBottomColor: borderCol }]}
-                >
-                  <View
-                    style={[
-                      s.roundBadge,
-                      { backgroundColor: rt.route_color || ORANGE },
-                    ]}
-                  >
-                    <Ionicons name="bus" size={15} color="#FFFFFF" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={[s.rowTitle, { color: textPrimary }]}
-                      numberOfLines={1}
-                    >
-                      Line {rt.route_short_name} · {rt.route_long_name}
-                    </Text>
-                    <Text style={[s.rowSub, { color: textMuted }]}>
-                      {rt.mode_badge}
-                      {rt.agency_name ? ` · ${rt.agency_name}` : ""}
-                    </Text>
-                  </View>
-                </Pressable>
-              );
-            }
-
-            if (item._kind === "stop") {
-              const st = item.item as UnifiedLocation;
-              const code =
-                (st as any).stop_code ?? st.id.slice(-5).toUpperCase();
-              return (
-                <Pressable
-                  onPress={() => handleSelectStopItem(st)}
-                  style={[s.row, { borderBottomColor: borderCol }]}
-                >
-                  <View style={[s.roundBadge, { backgroundColor: cardBg }]}>
-                    <Text style={[s.busCircleText, { color: textMuted }]}>
-                      BUS
-                    </Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <View style={s.stopTitleLine}>
-                      <Text
-                        style={[s.rowTitle, { color: textPrimary }]}
-                        numberOfLines={1}
-                      >
-                        {st.name}
-                      </Text>
-                      <Text style={[s.stopCodeText, { color: textMuted }]}>
-                        {code}
-                      </Text>
-                    </View>
-                    {st.route_nams && (
-                      <Text
-                        style={[s.rowSub, { color: textMuted }]}
-                        numberOfLines={1}
-                      >
-                        Lines: {st.route_nams}
-                      </Text>
-                    )}
-                  </View>
-                </Pressable>
-              );
-            }
-
-            if (item._kind === "place") {
-              const pred = item.item as PlacePrediction;
-              const busy = resolvingId === pred.place_id;
-              return (
-                <Pressable
-                  onPress={() => handleSelectPrediction(pred)}
-                  style={[s.row, { borderBottomColor: borderCol }]}
-                >
-                  <View style={[s.roundBadge, { backgroundColor: cardBg }]}>
-                    {busy ? (
-                      <ActivityIndicator size="small" color={ORANGE} />
-                    ) : (
-                      <Ionicons
-                        name="location"
-                        size={16}
-                        color={textMuted}
-                      />
-                    )}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={[s.rowTitle, { color: textPrimary }]}
-                      numberOfLines={1}
-                    >
-                      {pred.main_text}
-                    </Text>
-                    {pred.secondary_text ? (
-                      <Text
-                        style={[s.rowSub, { color: textMuted }]}
-                        numberOfLines={1}
-                      >
-                        {pred.secondary_text}
-                      </Text>
-                    ) : null}
-                  </View>
-                </Pressable>
-              );
-            }
-
-            // Recent item (matches KakaoMap's BUS / Pin / Train icon + date on right)[cite: 4, 14]
-            const rec = item.item as UnifiedLocation;
-            const isStop = rec._type === "stop";
-            const code = isStop ? rec.id.slice(-5).toUpperCase() : null;
-            return (
-              <Pressable
-                onPress={() =>
-                  isStop
-                    ? handleSelectStopItem(rec)
-                    : handleExecuteSearchToMap(rec.name)
-                }
-                style={[s.row, { borderBottomColor: borderCol }]}
-              >
-                <View style={[s.roundBadge, { backgroundColor: cardBg }]}>
-                  {isStop ? (
-                    <Text style={[s.busCircleText, { color: textMuted }]}>
-                      BUS
-                    </Text>
-                  ) : (
-                    <Ionicons name="location" size={16} color={textMuted} />
-                  )}
-                </View>
-                <View style={s.stopTitleLine}>
-                  <Text
-                    style={[s.rowTitle, { color: textPrimary }]}
-                    numberOfLines={1}
-                  >
-                    {rec.name}
-                  </Text>
-                  {code && (
-                    <Text style={[s.stopCodeText, { color: textMuted }]}>
-                      {code}
-                    </Text>
-                  )}
-                </View>
-                <Text style={[s.dateRight, { color: textMuted }]}>Recent</Text>
-              </Pressable>
-            );
-          }}
-        />
-      )}
+      {/* ── Results / recents ─────────────────────────────────────────────── */}
+      <FlatList
+        data={rows}
+        keyExtractor={(r) => r.key}
+        renderItem={renderRow}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        ListEmptyComponent={empty}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
+      />
     </View>
   );
 }
 
 const s = StyleSheet.create({
   container: { flex: 1 },
-  topHeader: {
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
+  topHeader: { paddingHorizontal: 14, paddingBottom: 10, borderBottomWidth: StyleSheet.hairlineWidth },
   searchBox: {
     flexDirection: "row",
     alignItems: "center",
-    height: 46,
-    borderRadius: 12,
-    borderWidth: 1,
+    height: 48,
+    borderRadius: 14,
     paddingHorizontal: 10,
     gap: 8,
   },
-  backBtn: { paddingRight: 2 },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: "500",
-  },
-  categoryStrip: {
-    paddingTop: 12,
-    paddingBottom: 2,
-    gap: 18,
-    paddingHorizontal: 4,
-  },
-  catItem: {
+  searchInput: { flex: 1, fontSize: 16, fontWeight: "500" },
+  categoryStrip: { paddingTop: 12, gap: 8 },
+  catChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 18 },
+  catLabel: { fontSize: 13, fontWeight: "600" },
+
+  quickRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
-  },
-  catLabel: {
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  homeWorkBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  homeWorkLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 20,
-  },
-  pinShortcut: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  pinShortcutText: {
-    fontSize: 13.5,
-    fontWeight: "600",
-  },
-  editPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 14,
-    borderWidth: 1,
-  },
-  editPillText: {
-    fontSize: 11.5,
-    fontWeight: "600",
-  },
-  filterPillsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  filterPill: {
-    paddingHorizontal: 13,
-    paddingVertical: 6,
-    borderRadius: 18,
-  },
-  filterPillActive: {
-    backgroundColor: "transparent",
-    borderWidth: 1.5,
-  },
-  filterPillText: {
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  loadingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 28,
-  },
+  quickChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16 },
+  quickText: { fontSize: 13, fontWeight: "700" },
+
+  filterRow: { flexDirection: "row", gap: 8, paddingHorizontal: 14, paddingVertical: 10 },
+  filterPill: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18 },
+  filterText: { fontSize: 13, fontWeight: "700" },
+
+  section: { fontSize: 11, fontWeight: "800", letterSpacing: 0.6, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  roundBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
+  rowText: { flex: 1, minWidth: 0 },
+  rowTitle: { fontSize: 15, fontWeight: "600" },
+  rowSub: { fontSize: 12.5, marginTop: 2 },
+  iconDisc: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
+  stopBadge: {
+    width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center",
+    borderWidth: 2, borderColor: "#FFFFFF",
   },
-  busCircleText: {
-    fontSize: 9,
-    fontWeight: "900",
-  },
-  stopTitleLine: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "baseline",
-    gap: 6,
-  },
-  rowTitle: {
-    fontSize: 15,
-    fontWeight: "600",
-    flexShrink: 1,
-  },
-  stopCodeText: {
-    fontSize: 12.5,
-    fontWeight: "500",
-  },
-  rowSub: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  dateRight: {
-    fontSize: 11.5,
-  },
+  modeTag: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, minWidth: 38, alignItems: "center" },
+  modeTagText: { color: "#FFFFFF", fontSize: 10.5, fontWeight: "800" },
+
+  empty: { alignItems: "center", paddingHorizontal: 34, paddingTop: 40, gap: 8 },
+  emptyDisc: { width: 58, height: 58, borderRadius: 29, alignItems: "center", justifyContent: "center", marginBottom: 4 },
+  emptyTitle: { fontSize: 16, fontWeight: "800", textAlign: "center" },
+  emptySub: { fontSize: 13, lineHeight: 19, textAlign: "center" },
 });
