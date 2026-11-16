@@ -202,10 +202,11 @@ const RouteActions = ({ route, C, startLeg, endLeg }: { route: any; C: any; star
 
 // --- MAIN ROUTE CARD COMPONENT ---
 export default function RouteCard({ route, index, C }: Props) {
+  // Hooks before any early return: a card whose route gains or loses legs
+  // between renders would otherwise change the hook order and crash.
+  const { prefs } = usePrefsStore();
   const legs = route.legs || route.segments || [];
   if (legs.length === 0) return null;
-
-  const { prefs } = usePrefsStore();
 
   const startLeg = legs[0];
   const endLeg = legs[legs.length - 1];
