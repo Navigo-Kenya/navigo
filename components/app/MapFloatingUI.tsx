@@ -752,18 +752,18 @@ export default function MapFloatingUI({
               color="#F59E0B"
             />
             <Text style={[styles.weatherTemp, { color: textPrimary }]}>
-              {liveMeteo?.tempC ?? 23}°
+              {liveMeteo ? `${liveMeteo.tempC}°` : "--"}
             </Text>
             <View
               style={[
                 styles.aqiBadge,
-                { backgroundColor: liveMeteo?.aqiBg ?? "#DCFCE7" },
+                { backgroundColor: liveMeteo?.aqiBg ?? (dark ? "#3F3F46" : "#E5E7EB") },
               ]}
             >
               <Text
                 style={[
                   styles.aqiText,
-                  { color: liveMeteo?.aqiColor ?? "#15803D" },
+                  { color: liveMeteo?.aqiColor ?? textMuted },
                 ]}
               >
                 PM10

@@ -21,189 +21,191 @@ const KAKAO_BLUE = "#3B82F6";
 export interface LiveWeatherData {
   tempC: number;
   tempDecimal: string;
-  deltaYesterday: string;
+  /** "+2° vs yesterday" (same hour), or null when yesterday's reading is missing. */
+  deltaYesterday: string | null;
   conditionLabel: string;
   iconName: keyof typeof Ionicons.glyphMap;
-  pm10: number;
-  pm25: number;
-  pm10Label: "Good" | "Normal" | "Bad";
-  pm25Label: "Good" | "Normal" | "Bad";
+  pm10: number | null;
+  pm25: number | null;
+  pm10Label: "Good" | "Normal" | "Bad" | "N/A";
+  pm25Label: "Good" | "Normal" | "Bad" | "N/A";
   pm10Color: string;
   pm25Color: string;
   aqiBg: string;
   aqiColor: string;
+  /** When the provider measured the current values, in the location's time. */
   updatedAtLabel: string;
-  hourly: Array<{
+  hourly: {
     hourLabel: string;
     tempC: number;
-    precipProb: number;
+    precipProb: number | null;
     icon: keyof typeof Ionicons.glyphMap;
-  }>;
-  daily: Array<{
+  }[];
+  daily: {
     dayLabel: string;
     minC: number;
     maxC: number;
-    precipProb: number;
+    precipProb: number | null;
     icon: keyof typeof Ionicons.glyphMap;
-  }>;
+  }[];
 }
 
-function decodeWmoCode(code: number): {
+const NO_DATA_GREY = "#9CA3AF";
+
+/** WMO weather code -> label + icon, with night variants where they exist. */
+function decodeWmoCode(code: number, isDay = true): {
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
 } {
-  if (code === 0) return { label: "Clear", icon: "sunny" };
-  if (code <= 2) return { label: "Partly Cloudy", icon: "partly-sunny" };
+  if (code === 0) return { label: "Clear", icon: isDay ? "sunny" : "moon" };
+  if (code <= 2) return { label: "Partly Cloudy", icon: isDay ? "partly-sunny" : "cloudy-night" };
   if (code === 3) return { label: "Cloudy", icon: "cloud" };
-  if (code <= 48) return { label: "Misty", icon: "cloud" };
+  if (code <= 48) return { label: "Fog", icon: "cloud" };
+  if (code <= 57) return { label: "Drizzle", icon: "rainy" };
   if (code <= 67) return { label: "Rain", icon: "rainy" };
+  if (code <= 77) return { label: "Snow", icon: "snow" };
   if (code <= 82) return { label: "Showers", icon: "rainy" };
-  if (code >= 95) return { label: "Thunderstorm", icon: "thunderstorm" };
-  return { label: "Cloudy", icon: "cloud" };
+  if (code <= 86) return { label: "Snow Showers", icon: "snow" };
+  return { label: "Thunderstorm", icon: "thunderstorm" };
 }
 
+function pmLevel(v: number | null, good: number, normal: number) {
+  if (v == null) return { label: "N/A" as const, color: NO_DATA_GREY };
+  if (v <= good) return { label: "Good" as const, color: KAKAO_BLUE };
+  if (v <= normal) return { label: "Normal" as const, color: "#16A34A" };
+  return { label: "Bad" as const, color: "#DC2626" };
+}
+
+const num = (v: unknown): number | null =>
+  typeof v === "number" && Number.isFinite(v) ? v : null;
+
+async function getJson(url: string): Promise<any> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Open-Meteo HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Live weather + air quality from Open-Meteo (open-meteo.com, CC BY 4.0).
+ *
+ * Every value shown comes from the response: if the forecast request fails
+ * this throws (callers show "unavailable", never invented numbers). Air
+ * quality is optional: if that request fails, PM values are N/A.
+ * Times are the location's local time (timezone=auto), not the phone's.
+ */
 export async function fetchLiveMeteo(
   lat = -1.2864,
   lng = 36.8172
 ): Promise<LiveWeatherData> {
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const ampm = now.getHours() >= 12 ? "PM" : "AM";
-  const hr12 = pad(now.getHours() % 12 || 12);
-  const updatedAtLabel = `${now.getFullYear()}.${pad(
-    now.getMonth() + 1
-  )}.${pad(now.getDate())}. ${ampm} ${hr12}:00`;
+  const [w, aqi] = await Promise.all([
+    getJson(
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}` +
+        `&current=temperature_2m,weather_code,is_day` +
+        `&hourly=temperature_2m,precipitation_probability,weather_code,is_day` +
+        `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max` +
+        `&timezone=auto&forecast_days=7&past_days=1`
+    ),
+    getJson(
+      `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lng}` +
+        `&current=pm10,pm2_5&timezone=auto`
+    ).catch(() => null),
+  ]);
 
-  try {
-    const [wRes, aqiRes] = await Promise.all([
-      fetch(
-        `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,weather_code&hourly=temperature_2m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=7`
-      ),
-      fetch(
-        `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lng}&current=pm10,pm2_5`
-      ),
-    ]);
-
-    const wJson = await wRes.json();
-    const aqiJson = await aqiRes.json();
-
-    const rawTemp = Number(wJson?.current?.temperature_2m ?? 22.4);
-    const pm10 = Math.round(aqiJson?.current?.pm10 ?? 16);
-    const pm25 = Math.round(aqiJson?.current?.pm2_5 ?? 8);
-    const wmo = decodeWmoCode(wJson?.current?.weather_code ?? 2);
-
-    const pm10Label: LiveWeatherData["pm10Label"] =
-      pm10 <= 30 ? "Good" : pm10 <= 80 ? "Normal" : "Bad";
-    const pm25Label: LiveWeatherData["pm25Label"] =
-      pm25 <= 15 ? "Good" : pm25 <= 35 ? "Normal" : "Bad";
-
-    const pm10Color =
-      pm10Label === "Good"
-        ? KAKAO_BLUE
-        : pm10Label === "Normal"
-        ? "#16A34A"
-        : "#DC2626";
-    const pm25Color =
-      pm25Label === "Good"
-        ? KAKAO_BLUE
-        : pm25Label === "Normal"
-        ? "#16A34A"
-        : "#DC2626";
-
-    const nowHr = now.getHours();
-    const times: string[] = wJson?.hourly?.time ?? [];
-    const temps: number[] = wJson?.hourly?.temperature_2m ?? [];
-    const probs: number[] = wJson?.hourly?.precipitation_probability ?? [];
-    const codes: number[] = wJson?.hourly?.weather_code ?? [];
-
-    const hourly: LiveWeatherData["hourly"] = [];
-    for (
-      let i = Math.max(0, nowHr);
-      i < Math.min(times.length, nowHr + 10);
-      i++
-    ) {
-      const d = new Date(times[i]);
-      const h = d.getHours();
-      const hourLabel = h === 0 && i > nowHr ? "TMR" : pad(h);
-      hourly.push({
-        hourLabel,
-        tempC: Math.round(temps[i] ?? 22),
-        precipProb: Math.round((probs[i] ?? 10) / 10) * 10,
-        icon: decodeWmoCode(codes[i] ?? 2).icon,
-      });
-    }
-
-    const dTimes: string[] = wJson?.daily?.time ?? [];
-    const dMax: number[] = wJson?.daily?.temperature_2m_max ?? [];
-    const dMin: number[] = wJson?.daily?.temperature_2m_min ?? [];
-    const dProb: number[] =
-      wJson?.daily?.precipitation_probability_max ?? [];
-    const dCodes: number[] = wJson?.daily?.weather_code ?? [];
-    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-    const daily: LiveWeatherData["daily"] = dTimes.map((t, idx) => {
-      const dt = new Date(t);
-      return {
-        dayLabel: idx === 0 ? "Today" : dayNames[dt.getDay()],
-        minC: Math.round(dMin[idx] ?? 15),
-        maxC: Math.round(dMax[idx] ?? 25),
-        precipProb: Math.round((dProb[idx] ?? 20) / 10) * 10,
-        icon: decodeWmoCode(dCodes[idx] ?? 2).icon,
-      };
-    });
-
-    return {
-      tempC: Math.round(rawTemp),
-      tempDecimal: rawTemp.toFixed(1),
-      deltaYesterday: "Today -1°",
-      conditionLabel: wmo.label,
-      iconName: wmo.icon,
-      pm10,
-      pm25,
-      pm10Label,
-      pm25Label,
-      pm10Color,
-      pm25Color,
-      aqiBg: pm10Color,
-      aqiColor: "#FFFFFF",
-      updatedAtLabel,
-      hourly,
-      daily,
-    };
-  } catch {
-    return {
-      tempC: 22,
-      tempDecimal: "22.4",
-      deltaYesterday: "Today -1°",
-      conditionLabel: "Cloudy",
-      iconName: "cloud",
-      pm10: 15,
-      pm25: 8,
-      pm10Label: "Good",
-      pm25Label: "Good",
-      pm10Color: KAKAO_BLUE,
-      pm25Color: KAKAO_BLUE,
-      aqiBg: KAKAO_BLUE,
-      aqiColor: "#FFFFFF",
-      updatedAtLabel,
-      hourly: [
-        { hourLabel: "19", tempC: 21, precipProb: 60, icon: "cloud" },
-        { hourLabel: "20", tempC: 20, precipProb: 30, icon: "cloudy-night" },
-        { hourLabel: "21", tempC: 20, precipProb: 30, icon: "cloudy-night" },
-        { hourLabel: "22", tempC: 19, precipProb: 30, icon: "rainy" },
-        { hourLabel: "23", tempC: 19, precipProb: 30, icon: "cloud" },
-        { hourLabel: "TMR", tempC: 18, precipProb: 30, icon: "cloud" },
-        { hourLabel: "01", tempC: 18, precipProb: 30, icon: "cloud" },
-        { hourLabel: "02", tempC: 17, precipProb: 30, icon: "cloud" },
-      ],
-      daily: [
-        { dayLabel: "Today", minC: 15, maxC: 24, precipProb: 30, icon: "cloud" },
-        { dayLabel: "Sun", minC: 15, maxC: 25, precipProb: 20, icon: "partly-sunny" },
-        { dayLabel: "Mon", minC: 16, maxC: 26, precipProb: 10, icon: "sunny" },
-        { dayLabel: "Tue", minC: 15, maxC: 24, precipProb: 40, icon: "rainy" },
-      ],
-    };
+  const nowTemp = num(w?.current?.temperature_2m);
+  const nowCode = num(w?.current?.weather_code);
+  const nowTime: string | undefined = w?.current?.time; // "2026-11-16T05:30" (location time)
+  if (nowTemp == null || nowCode == null || !nowTime) {
+    throw new Error("Open-Meteo returned no current weather");
   }
+  const isDay = w.current.is_day !== 0;
+  const wmo = decodeWmoCode(nowCode, isDay);
+
+  // Hourly: from the location's current hour, 10 entries.
+  const times: string[] = w?.hourly?.time ?? [];
+  const temps: (number | null)[] = w?.hourly?.temperature_2m ?? [];
+  const probs: (number | null)[] = w?.hourly?.precipitation_probability ?? [];
+  const codes: (number | null)[] = w?.hourly?.weather_code ?? [];
+  const days: (number | null)[] = w?.hourly?.is_day ?? [];
+  const hourKey = nowTime.slice(0, 13); // "2026-11-16T05"
+  let nowIdx = times.findIndex((t) => t.slice(0, 13) === hourKey);
+  if (nowIdx < 0) nowIdx = Math.max(0, times.findIndex((t) => t >= nowTime));
+  const today = nowTime.slice(0, 10);
+
+  const hourly: LiveWeatherData["hourly"] = [];
+  for (let i = nowIdx; i < Math.min(times.length, nowIdx + 10); i++) {
+    const temp = num(temps[i]);
+    const code = num(codes[i]);
+    if (temp == null || code == null) continue;
+    const hh = times[i].slice(11, 13);
+    const p = num(probs[i]);
+    hourly.push({
+      hourLabel: i === nowIdx ? "Now" : times[i].slice(0, 10) !== today && hh === "00" ? "TMR" : hh,
+      tempC: Math.round(temp),
+      precipProb: p == null ? null : Math.round(p / 10) * 10,
+      icon: decodeWmoCode(code, days[i] !== 0).icon,
+    });
+  }
+
+  // Change vs the same hour yesterday (past_days=1 puts yesterday first).
+  const yesterday = nowIdx >= 24 ? num(temps[nowIdx - 24]) : null;
+  let deltaYesterday: string | null = null;
+  if (yesterday != null) {
+    const d = Math.round(nowTemp - yesterday);
+    deltaYesterday =
+      d === 0 ? "Same as yesterday" : `${d > 0 ? "+" : "\u2212"}${Math.abs(d)}° vs yesterday`;
+  }
+
+  // Daily: from today.
+  const dTimes: string[] = w?.daily?.time ?? [];
+  const dMax: (number | null)[] = w?.daily?.temperature_2m_max ?? [];
+  const dMin: (number | null)[] = w?.daily?.temperature_2m_min ?? [];
+  const dProb: (number | null)[] = w?.daily?.precipitation_probability_max ?? [];
+  const dCodes: (number | null)[] = w?.daily?.weather_code ?? [];
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const todayIdx = Math.max(0, dTimes.indexOf(today));
+
+  const daily: LiveWeatherData["daily"] = [];
+  for (let i = todayIdx; i < dTimes.length; i++) {
+    const max = num(dMax[i]);
+    const min = num(dMin[i]);
+    const code = num(dCodes[i]);
+    if (max == null || min == null || code == null) continue;
+    const p = num(dProb[i]);
+    daily.push({
+      dayLabel: i === todayIdx ? "Today" : dayNames[new Date(`${dTimes[i]}T12:00:00Z`).getUTCDay()],
+      minC: Math.round(min),
+      maxC: Math.round(max),
+      precipProb: p == null ? null : Math.round(p / 10) * 10,
+      icon: decodeWmoCode(code).icon,
+    });
+  }
+
+  // Air quality.
+  const pm10Raw = num(aqi?.current?.pm10);
+  const pm25Raw = num(aqi?.current?.pm2_5);
+  const pm10 = pm10Raw == null ? null : Math.round(pm10Raw);
+  const pm25 = pm25Raw == null ? null : Math.round(pm25Raw);
+  const p10 = pmLevel(pm10, 30, 80);
+  const p25 = pmLevel(pm25, 15, 35);
+
+  return {
+    tempC: Math.round(nowTemp),
+    tempDecimal: nowTemp.toFixed(1),
+    deltaYesterday,
+    conditionLabel: wmo.label,
+    iconName: wmo.icon,
+    pm10,
+    pm25,
+    pm10Label: p10.label,
+    pm25Label: p25.label,
+    pm10Color: p10.color,
+    pm25Color: p25.color,
+    aqiBg: p10.color,
+    aqiColor: "#FFFFFF",
+    updatedAtLabel: `${nowTime.slice(0, 10).replace(/-/g, ".")} ${nowTime.slice(11, 16)} (local time)`,
+    hourly,
+    daily,
+  };
 }
 
 export default function WeatherMeteoSheet({
@@ -223,6 +225,8 @@ export default function WeatherMeteoSheet({
   const dark = useColorScheme() === "dark";
   const [data, setData] = useState<LiveWeatherData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [tab, setTab] = useState<"hourly" | "daily">("hourly");
   const [districtName, setDistrictName] = useState("Nairobi Metropolitan");
 
@@ -239,11 +243,15 @@ export default function WeatherMeteoSheet({
       })
       .catch(() => {});
 
+    setFailed(false);
     fetchLiveMeteo(lat, lng)
       .then((res) => {
         if (!mounted) return;
         setData(res);
         onWeatherLoaded?.(res);
+      })
+      .catch(() => {
+        if (mounted) setFailed(true);
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -252,7 +260,7 @@ export default function WeatherMeteoSheet({
     return () => {
       mounted = false;
     };
-  }, [visible, userLat, userLng]);
+  }, [visible, userLat, userLng, attempt]);
 
   if (!visible) return null;
 
@@ -316,6 +324,20 @@ export default function WeatherMeteoSheet({
             <View style={s.loadingBox}>
               <ActivityIndicator size="large" color={KAKAO_BLUE} />
             </View>
+          ) : failed && !data ? (
+            <View style={s.loadingBox}>
+              <Ionicons name="cloud-offline-outline" size={40} color={textMuted} />
+              <Text style={[s.conditionLine, { color: textPrimary }]}>Weather unavailable</Text>
+              <Text style={[s.footerMeta, { color: textMuted }]}>
+                Couldn&apos;t reach the weather service.
+              </Text>
+              <Pressable
+                onPress={() => setAttempt((n) => n + 1)}
+                style={[s.moreBtn, { borderColor: borderCol, marginTop: 10 }]}
+              >
+                <Text style={[s.moreBtnText, { color: textPrimary }]}>Try again</Text>
+              </Pressable>
+            </View>
           ) : data ? (
             <>
               {/* Centered Weather Icon + Decimal Temp + Condition + PM10/PM2.5 Pills[cite: 17] */}
@@ -332,7 +354,8 @@ export default function WeatherMeteoSheet({
                 </View>
 
                 <Text style={[s.conditionLine, { color: textPrimary }]}>
-                  {data.conditionLabel}. {data.deltaYesterday}
+                  {data.conditionLabel}
+                  {data.deltaYesterday ? ` · ${data.deltaYesterday}` : ""}
                 </Text>
 
                 <View style={s.pmRow}>
@@ -418,7 +441,7 @@ export default function WeatherMeteoSheet({
                             : "#CBD5E1"
                         }
                       />
-                      <Text style={s.precipText}>{h.precipProb}%</Text>
+                      <Text style={s.precipText}>{h.precipProb == null ? "\u2013" : `${h.precipProb}%`}</Text>
                       <Text style={[s.hourTemp, { color: textPrimary }]}>
                         {h.tempC}°
                       </Text>
@@ -441,7 +464,7 @@ export default function WeatherMeteoSheet({
                         size={26}
                         color={d.icon === "sunny" ? "#F59E0B" : "#94A3B8"}
                       />
-                      <Text style={s.precipText}>{d.precipProb}%</Text>
+                      <Text style={s.precipText}>{d.precipProb == null ? "\u2013" : `${d.precipProb}%`}</Text>
                       <Text style={[s.hourTemp, { color: textPrimary }]}>
                         {d.minC}°/{d.maxC}°
                       </Text>
@@ -454,10 +477,10 @@ export default function WeatherMeteoSheet({
               <View style={s.footerRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={[s.footerMeta, { color: textMuted }]}>
-                    Last updated {data.updatedAtLabel}
+                    Measured {data.updatedAtLabel}
                   </Text>
                   <Text style={[s.footerMeta, { color: textMuted }]}>
-                    Provided by Open-Meteo & Navigo AirSense
+                    Weather & air quality: Open-Meteo (CC BY 4.0)
                   </Text>
                 </View>
 
@@ -526,6 +549,7 @@ const s = StyleSheet.create({
     height: 220,
     alignItems: "center",
     justifyContent: "center",
+    gap: 6,
   },
   heroCenter: {
     alignItems: "center",
