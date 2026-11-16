@@ -35,6 +35,12 @@ export interface NextDepartureItem {
   headsign?: string | null;
 }
 
+export interface TrafficSegment {
+  congestion: "low" | "moderate" | "heavy";
+  color: string; // "#16A34A" | "#FACC15" | "#EF4444"
+  coordinates: [number, number][]; // [[lat, lng], ...]
+}
+
 export interface RouteSegment {
   mode: "WALK" | "BUS" | "BRT" | "TRAM" | "SUBWAY" | "RAIL" | "FERRY" | "BICYCLE" | "CAR";
   route_type?: number | null;
@@ -56,6 +62,7 @@ export interface RouteSegment {
   stops?: RouteStop[];
   stop_count?: number;
   next_departures?: NextDepartureItem[];
+  traffic_segments?: TrafficSegment[];
   from: {
     stop_id?: string | null;
     stop_code?: string | null;
@@ -90,6 +97,7 @@ export interface Route {
   total_duration: number;
   total_walk_distance: number;
   total_distance: number;
+  route_badge?: string | null;
   segments: RouteSegment[];
   safety?: { score: number; safer: boolean };
 }
