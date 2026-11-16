@@ -6,10 +6,11 @@
 //   - place sheet: details of the selected place with From / To
 // Only real data is shown: ratings / open-now only when Google returns them,
 // distances computed from the user's position.
-import React, { useMemo, useRef } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
+  Linking,
   ScrollView,
   Share,
   StyleSheet,
@@ -29,6 +30,7 @@ import { useSavedStore } from "@/store/savedStore";
 import type { MobilitySearchRouteItem } from "@/services/stop";
 import type { Stop } from "@/utils/mapHelpers";
 import { distanceM, formatDistance } from "@/services/exploreSearch";
+import { poiPhotoUrl, usePoiDetails } from "@/services/poi";
 import { StopTypeGlyph } from "@/components/icons/NavigoIcons";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { resolveStopCategory } from "./StopsLayer";
@@ -333,20 +335,41 @@ function ResultsSheet({
 
 // ─── Selected place ──────────────────────────────────────────────────────────
 
-function PlaceSheet({ place, onFocusCoords, userLat, userLng }: Props & { place: ExplorePlaceItem }) {
+function PlaceSheet({ place: base, onFocusCoords, userLat, userLng }: Props & { place: ExplorePlaceItem }) {
   const dark = useColorScheme() === "dark";
   const C = palette(dark);
   const router = useRouter();
   const sheet = useRef<MapSheetHandle>(null);
   const { selectPlace } = useExploreSearchStore();
   const { places: saved, addPlace } = useSavedStore();
-  const isSaved = saved.some((p) => p.place_id === place.id);
+  const isSaved = saved.some((p) => p.place_id === base.id);
+
+  // One of our POIs (tapped on the map): fetch our data + live Google details.
+  const poiId = base.id.startsWith("poi:") ? base.id.slice(4) : null;
+  const { data: details, isLoading: detailsLoading } = usePoiDetails(poiId);
+  const g = details?.google ?? null;
+  const place: ExplorePlaceItem = useMemo(
+    () => ({
+      ...base,
+      address: base.address || g?.short_address || details?.address || "",
+      rating: base.rating ?? g?.rating ?? undefined,
+      reviewCount: base.reviewCount ?? g?.rating_count ?? undefined,
+      openNow: base.openNow ?? g?.open_now ?? undefined,
+      phone: base.phone ?? g?.phone ?? details?.phone ?? undefined,
+    }),
+    [base, g, details]
+  );
+  const website = g?.website ?? details?.website ?? null;
+  const permanentlyClosed = g?.business_status === "CLOSED_PERMANENTLY";
 
   const dist = formatDistance(
     place.distanceM ??
       (userLat != null && userLng != null ? distanceM(userLat, userLng, place.lat, place.lng) : undefined)
   );
-  const photos = place.photos?.length ? place.photos : [mapboxStaticPhoto(place.lng, place.lat)];
+  // Google photos carry their author attribution, shown on each photo.
+  const photos: { uri: string; credit?: string }[] = g?.photos?.length
+    ? g.photos.map((p) => ({ uri: poiPhotoUrl(p.name, 600), credit: p.attributions[0]?.name ?? undefined }))
+    : (place.photos?.length ? place.photos : [mapboxStaticPhoto(place.lng, place.lat)]).map((uri) => ({ uri }));
 
   const go = (role: "from" | "to") => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -401,14 +424,22 @@ function PlaceSheet({ place, onFocusCoords, userLat, userLng }: Props & { place:
       footer={footer}
     >
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.photoStrip}>
-        {photos.map((uri, i) => (
-          <Image
-            key={i}
-            source={{ uri }}
-            style={[s.photo, { backgroundColor: C.chip }]}
-            contentFit="cover"
-            transition={200}
-          />
+        {photos.map((p, i) => (
+          <View key={p.uri} style={[s.photo, { backgroundColor: C.chip }]}>
+            <Image
+              source={{ uri: p.uri }}
+              style={StyleSheet.absoluteFill}
+              contentFit="cover"
+              transition={200}
+              recyclingKey={p.uri}
+              accessibilityLabel={`${place.name}, photo ${i + 1}`}
+            />
+            {p.credit ? (
+              <Text style={s.photoCredit} numberOfLines={1}>
+                {p.credit}
+              </Text>
+            ) : null}
+          </View>
         ))}
       </ScrollView>
 
@@ -452,7 +483,134 @@ function PlaceSheet({ place, onFocusCoords, userLat, userLng }: Props & { place:
           }}
         />
       </View>
+
+      {poiId && detailsLoading ? (
+        <InfoSkeleton color={C.skeleton} />
+      ) : (
+        <View style={[s.infoList, { borderTopColor: C.line }]}>
+          {permanentlyClosed && (
+            <InfoRow icon="alert-circle-outline" color={RED} text="Permanently closed" textColor={RED} line={C.line} />
+          )}
+          {!!place.address && (
+            <InfoRow icon="location-outline" color={C.sub} text={place.address} textColor={C.text} line={C.line} />
+          )}
+          {!!g?.weekday_hours?.length && (
+            <HoursRow hours={g.weekday_hours} openNow={place.openNow} C={C} />
+          )}
+          {!!place.phone && (
+            <InfoRow
+              icon="call-outline"
+              color={BLUE}
+              text={place.phone}
+              textColor={BLUE}
+              line={C.line}
+              onPress={() => Linking.openURL(`tel:${(g?.phone_intl ?? place.phone ?? "").replace(/\s+/g, "")}`).catch(() => {})}
+            />
+          )}
+          {!!website && (
+            <InfoRow
+              icon="globe-outline"
+              color={BLUE}
+              text={website.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}
+              textColor={BLUE}
+              line={C.line}
+              onPress={() => Linking.openURL(/^https?:\/\//.test(website) ? website : `https://${website}`).catch(() => {})}
+            />
+          )}
+          {g && (
+            // Google Maps Platform terms: attribute Places content.
+            <View style={s.googleRow}>
+              <Text style={[s.googleText, { color: C.sub }]}>Details and photos from Google</Text>
+              {!!g.maps_url && (
+                <PressableScale onPress={() => Linking.openURL(g.maps_url!).catch(() => {})} hitSlop={8}>
+                  <Text style={[s.googleText, { color: BLUE, fontWeight: "700" }]}>Open in Google Maps</Text>
+                </PressableScale>
+              )}
+            </View>
+          )}
+        </View>
+      )}
     </MapSheet>
+  );
+}
+
+function InfoRow({
+  icon, color, text, textColor, line, onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  color: string;
+  text: string;
+  textColor: string;
+  line: string;
+  onPress?: () => void;
+}) {
+  const body = (
+    <View style={[s.infoRow, { borderBottomColor: line }]}>
+      <Ionicons name={icon} size={18} color={color} />
+      <Text style={[s.infoText, { color: textColor }]} numberOfLines={2}>{text}</Text>
+      {onPress && <Ionicons name="chevron-forward" size={14} color={color} style={{ opacity: 0.6 }} />}
+    </View>
+  );
+  return onPress ? (
+    <PressableScale onPress={onPress} accessibilityRole="button" accessibilityLabel={text}>{body}</PressableScale>
+  ) : body;
+}
+
+/** Today's hours, tap to see the whole week (Google's lines, Monday first). */
+function HoursRow({ hours, openNow, C }: { hours: string[]; openNow?: boolean; C: ReturnType<typeof palette> }) {
+  const [open, setOpen] = useState(false);
+  const todayIdx = (new Date().getDay() + 6) % 7;
+  const today = hours[todayIdx] ?? hours[0];
+  const todayHours = today.split(": ").slice(1).join(": ") || today;
+  return (
+    <PressableScale
+      onPress={() => { Haptics.selectionAsync(); setOpen((v) => !v); }}
+      accessibilityRole="button"
+      accessibilityLabel={open ? "Hide opening hours" : "Show opening hours"}
+    >
+      <View style={[s.infoRow, { borderBottomColor: C.line, alignItems: "flex-start" }]}>
+        <Ionicons name="time-outline" size={18} color={C.sub} />
+        <View style={{ flex: 1, gap: 6 }}>
+          <Text style={[s.infoText, { color: C.text }]}>
+            {openNow != null && (
+              <Text style={{ color: openNow ? GREEN : RED, fontWeight: "700" }}>
+                {openNow ? "Open" : "Closed"}
+                {" · "}
+              </Text>
+            )}
+            Today {todayHours}
+          </Text>
+          {open &&
+            hours.map((h, i) => {
+              const [day, ...rest] = h.split(": ");
+              return (
+                <View key={day} style={s.hoursLine}>
+                  <Text style={[s.hoursDay, { color: i === todayIdx ? C.text : C.sub, fontWeight: i === todayIdx ? "700" : "500" }]}>
+                    {day}
+                  </Text>
+                  <Text style={[s.hoursTime, { color: i === todayIdx ? C.text : C.sub, fontWeight: i === todayIdx ? "700" : "500" }]}>
+                    {rest.join(": ")}
+                  </Text>
+                </View>
+              );
+            })}
+        </View>
+        <Ionicons name={open ? "chevron-up" : "chevron-down"} size={14} color={C.sub} style={{ marginTop: 2 }} />
+      </View>
+    </PressableScale>
+  );
+}
+
+function InfoSkeleton({ color }: { color: string }) {
+  return (
+    <View style={s.infoList}>
+      {["70%", "52%", "60%"].map((w) => (
+        <View key={w} style={s.infoRow}>
+          <View style={[s.skelDot, { backgroundColor: color }]} />
+          <View style={[s.skelLine, { width: w as any, backgroundColor: color }]} />
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -594,7 +752,37 @@ const s = StyleSheet.create({
   placeTitle: { fontSize: 20, fontWeight: "800", letterSpacing: -0.4 },
   roundBtn: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
   photoStrip: { paddingHorizontal: 18, gap: 10 },
-  photo: { width: 200, height: 128, borderRadius: 14 },
+  photo: { width: 200, height: 128, borderRadius: 14, overflow: "hidden" },
+  photoCredit: {
+    position: "absolute",
+    left: 6,
+    bottom: 6,
+    maxWidth: 188,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    overflow: "hidden",
+    backgroundColor: "rgba(0,0,0,0.5)",
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "600",
+  },
+  infoList: { marginTop: 16, marginHorizontal: 18, borderTopWidth: StyleSheet.hairlineWidth },
+  infoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    paddingVertical: 13,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "transparent",
+  },
+  infoText: { flex: 1, fontSize: 14, lineHeight: 19, fontWeight: "500" },
+  hoursLine: { flexDirection: "row", justifyContent: "space-between", gap: 12 },
+  hoursDay: { fontSize: 13 },
+  hoursTime: { fontSize: 13, textAlign: "right", flexShrink: 1 },
+  googleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 12, gap: 8 },
+  googleText: { fontSize: 11.5 },
+  skelDot: { width: 18, height: 18, borderRadius: 9 },
   placeActions: { justifyContent: "space-around", paddingHorizontal: 18, paddingTop: 16 },
 
   footerRow: { flexDirection: "row", gap: 10 },
