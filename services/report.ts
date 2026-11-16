@@ -1,16 +1,11 @@
 // services/report.ts
 import api from "./apiClient";
+import type { ReportType } from "@/components/icons/reportIcons";
 
-export type ReportCategory =
-  | "stage_queue"
-  | "accident"
-  | "police_check"
-  | "flooded_route"
-  | "fare_hike"
-  | "traffic_jam"
-  | "road_blocked"
-  | "breakdown"
-  | "security";
+/** Report types. Labels, colours and icons live in components/icons/reportIcons. */
+export type ReportCategory = ReportType;
+
+export type ReportVote = "up" | "down";
 
 export interface TransitReport {
   id:         string;
@@ -22,6 +17,18 @@ export interface TransitReport {
   created_at: string;
   expires_at: string;
   reporter:   { name: string; level: string } | null;
+  /** 0–1, how much the community trusts this report. */
+  reliability?: number;
+  /** The signed-in user's own vote, from the server. */
+  my_vote?:   ReportVote | null;
+}
+
+export interface ReportVoteResult {
+  upvotes:   number;
+  downvotes: number;
+  my_vote:   ReportVote | null;
+  /** "dismissed" once the community has voted the report down. */
+  status:    "active" | "dismissed" | string;
 }
 
 export const ReportService = {
@@ -42,7 +49,6 @@ export const ReportService = {
       Object.entries(bounds).map(([key, value]) => [key, String(value)]),
     ).toString();
     const { data } = await api.get<{ data: TransitReport[] }>(`/reports/viewport?${query}`);
-    console.info(`Fetched ${data.data.length} reports in viewport`);
     return data.data;
   },
 
@@ -50,14 +56,23 @@ export const ReportService = {
     await api.post("/reports", { lat, lng, type });
   },
 
-  async voteReport(
-    id: string,
-    vote: "up" | "down"
-  ): Promise<{ upvotes: number; downvotes: number }> {
-    const { data } = await api.post<{ data: { upvotes: number; downvotes: number } }>(
+  /**
+   * Set the user's vote. "clear" removes it. Idempotent on the server:
+   * re-sending the current vote changes nothing.
+   */
+  async voteReport(id: string, vote: ReportVote | "clear"): Promise<ReportVoteResult> {
+    const { data } = await api.post<{ data: ReportVoteResult }>(
       `/reports/${id}/vote`,
       { vote }
     );
-    return data.data;
+    return {
+      upvotes:   data.data.upvotes,
+      downvotes: data.data.downvotes,
+      // Older API builds return counts only; assume the vote we sent stuck.
+      my_vote:   data.data.my_vote !== undefined
+        ? data.data.my_vote
+        : vote === "clear" ? null : vote,
+      status:    data.data.status ?? "active",
+    };
   },
 };

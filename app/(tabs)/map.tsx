@@ -33,7 +33,7 @@ import { useHeadingTracker }   from "@/hooks/useHeadingTracker";
 import { useHeadingStore }     from "@/store/headingStore";
 import { RouteService }        from "@/services/route";
 import { ReportService }       from "@/services/report";
-import type { TransitReport }  from "@/services/report";
+import type { ReportVoteResult, TransitReport } from "@/services/report";
 import { StopService }         from "@/services/stop";
 import { CacheService, CACHE_KEYS, CACHE_TTL } from "@/services/cache";
 import { UnifiedLocation, useJourneyStore } from "@/store/journeyStore";
@@ -692,6 +692,20 @@ export default function MapScreen() {
   const handleReportPress = useCallback((r: TransitReport, count: number) => {
     setReportSheetOpen(false);
     setSelectedReport({ report: r, count });
+  }, []);
+
+  // Keep the map's copy of a report in sync after a vote, so reopening its
+  // card shows the new counts and vote; drop it once the community dismissed it.
+  const handleReportVoted = useCallback((id: string, res: ReportVoteResult) => {
+    setActiveReports((prev) =>
+      res.status === "dismissed"
+        ? prev.filter((r) => r.id !== id)
+        : prev.map((r) =>
+            r.id === id
+              ? { ...r, upvotes: res.upvotes, downvotes: res.downvotes, my_vote: res.my_vote }
+              : r
+          )
+    );
   }, []);
 
   const handleClearJourney = useCallback(() => {
@@ -1427,6 +1441,7 @@ export default function MapScreen() {
           report={selectedReport.report}
           clusterCount={selectedReport.count}
           onClose={() => setSelectedReport(null)}
+          onVoted={handleReportVoted}
         />
       )}
 
