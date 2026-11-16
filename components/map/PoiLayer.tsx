@@ -68,6 +68,10 @@ interface Props {
    * but the route, stops and instructions must stay on top.
    */
   navigating?: boolean;
+  /** Category search: show only this category (results draw their own pins). */
+  focusCategory?: string | null;
+  /** POI ids (numeric, as strings) drawn by PoiResultsLayer; left out here. */
+  excludeIds?: string[];
   /** The active map style is Mapbox Standard (POIs hidden via its config). */
   standardStyle: boolean;
   dark: boolean;
@@ -79,10 +83,24 @@ const LANDMARKS_ONLY = ["==", ["get", "importance"], 1];
 export const PoiLayer = memo(function PoiLayer({
   visible,
   navigating = false,
+  focusCategory = null,
+  excludeIds,
   standardStyle,
   dark,
   onPress,
 }: Props) {
+  const filter = useMemo(() => {
+    if (navigating) return LANDMARKS_ONLY;
+    // Always a real filter: going back to `undefined` may not clear the
+    // previous one on the native layer.
+    if (!focusCategory) return ["has", "category"];
+    const parts: any[] = [["==", ["get", "category"], focusCategory]];
+    if (excludeIds?.length) {
+      parts.push(["!", ["in", ["to-string", ["get", "id"]], ["literal", excludeIds]]]);
+    }
+    return ["all", ...parts];
+  }, [navigating, focusCategory, excludeIds]);
+
   const labelColor = useMemo(
     () => [
       "match",
@@ -138,7 +156,7 @@ export const PoiLayer = memo(function PoiLayer({
             <NativeSymbolLayer
               id="navigo-pois-symbols"
               sourceLayerID="pois"
-              filter={navigating ? LANDMARKS_ONLY : undefined}
+              filter={filter}
               style={{
                 iconImage: ["concat", "poi-", ["get", "category"]],
                 iconSize: navigating

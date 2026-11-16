@@ -17,6 +17,7 @@ import {
   PlaceCategoryIcon,
   ReportIcon,
   type PlaceCategoryKey,
+  type PoiCategory,
 } from "@/components/icons/NavigoIcons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
@@ -27,7 +28,7 @@ import {
   useExploreSearchStore,
   type SearchTabFilter,
 } from "@/store/exploreSearchStore";
-import { runExploreSearch } from "@/services/exploreSearch";
+import { distanceM, runCategorySearch } from "@/services/exploreSearch";
 import WeatherMeteoSheet, {
   fetchLiveMeteo,
   type LiveWeatherData,
@@ -56,20 +57,25 @@ const FALLBACK_LAT = -1.2864;
 const FALLBACK_LNG = 36.8172;
 
 /** Quick-search chips. Icons come from PlaceCategoryIcon, keyed by `key`. */
+/** Category chips; `poi` is the POI category they search (config/pois.php). */
 export const QUICK_CATEGORIES: readonly {
   key: PlaceCategoryKey;
+  poi: PoiCategory;
   label: string;
   color: string;
 }[] = [
-  { key: "restaurant", label: "Restaurant",  color: "#EA580C" },
-  { key: "cafe",       label: "Cafe",        color: "#B45309" },
-  { key: "gas",        label: "Gas Station", color: "#2563EB" },
-  { key: "hospital",   label: "Hospital",    color: "#DC2626" },
-  { key: "parking",    label: "Parking",     color: "#0284C7" },
-  { key: "store",      label: "24h Store",   color: "#7C3AED" },
-  { key: "pharmacy",   label: "Pharmacy",    color: "#16A34A" },
-  { key: "atm",        label: "ATM / Bank",  color: "#0D9488" },
+  { key: "restaurant", poi: "food",     label: "Restaurant",  color: "#EA580C" },
+  { key: "cafe",       poi: "cafe",     label: "Cafe",        color: "#B45309" },
+  { key: "gas",        poi: "fuel",     label: "Gas Station", color: "#2563EB" },
+  { key: "hospital",   poi: "health",   label: "Hospital",    color: "#DC2626" },
+  { key: "parking",    poi: "parking",  label: "Parking",     color: "#0284C7" },
+  { key: "store",      poi: "grocery",  label: "Groceries",   color: "#7C3AED" },
+  { key: "pharmacy",   poi: "pharmacy", label: "Pharmacy",    color: "#16A34A" },
+  { key: "atm",        poi: "bank",     label: "ATM / Bank",  color: "#0D9488" },
 ];
+
+/** Camera moved this far from the last category search: offer "Search this area". */
+const SEARCH_AREA_MOVE_M = 500;
 
 export interface MapFloatingUIProps {
   onRecenter: () => void;
@@ -170,7 +176,9 @@ export default function MapFloatingUI({
     routes: searchRoutes,
     stops: searchStops,
     loading: searchLoading,
-    startSearch,
+    poiCategory,
+    searchCenter,
+    selectedPlace,
     setLoading,
     clearSearch,
   } = useExploreSearchStore();
@@ -281,16 +289,26 @@ export default function MapFloatingUI({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sheetTop, liftedTop, topEdge, stackTop]);
 
-  // Category chips: real places + our stops/lines in one search, around the
-  // area being looked at (camera centre), falling back to the user.
-  const handleCategoryPress = (label: string) => {
+  // Category chips: our POIs of that category nearest the area being looked
+  // at (camera centre), falling back to the user. List + pins on the map.
+  const handleCategoryPress = (cat: (typeof QUICK_CATEGORIES)[number]) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    startSearch({ query: label, activeTab: "all" });
-    runExploreSearch(label, {
+    runCategorySearch(cat.poi, cat.label, {
       lat: areaLat ?? userLat,
       lng: areaLng ?? userLng,
     }).catch(() => setLoading(false));
   };
+
+  // "Search this area" once the camera has moved away from the last search.
+  const activeCategory = QUICK_CATEGORIES.find((c) => c.poi === poiCategory) ?? null;
+  const showSearchArea =
+    !!activeCategory &&
+    !selectedPlace &&
+    !searchLoading &&
+    searchCenter != null &&
+    areaLat != null &&
+    areaLng != null &&
+    distanceM(searchCenter.lat, searchCenter.lng, areaLat, areaLng) > SEARCH_AREA_MOVE_M;
 
   const cardBg = dark ? "rgba(24, 24, 27, 0.96)" : "rgba(255, 255, 255, 0.97)";
   const textPrimary = dark ? "#F9FAFB" : "#111827";
@@ -390,6 +408,24 @@ export default function MapFloatingUI({
       pointerEvents="box-none"
       onLayout={(e) => setScreenH(Math.round(e.nativeEvent.layout.height))}
     >
+      {/* "Search this area": re-run the category search at the camera centre. */}
+      {showSearchArea && !activeJourney && !topCovered && (
+        <Animated.View
+          pointerEvents="box-none"
+          style={[styles.searchAreaWrap, { top: topEdge + 10, opacity: anim.topBar }]}
+        >
+          <PressableScale
+            onPress={() => activeCategory && handleCategoryPress(activeCategory)}
+            style={[styles.searchAreaPill, { backgroundColor: cardBg, borderColor: borderCol }]}
+            accessibilityRole="button"
+            accessibilityLabel={`Search ${activeCategory?.label ?? ""} in this area`}
+          >
+            <Ionicons name="refresh" size={15} color={ORANGE} />
+            <Text style={[styles.searchAreaText, { color: textPrimary }]}>Search this area</Text>
+          </PressableScale>
+        </Animated.View>
+      )}
+
       {/* ─── 1. TOP BAR (fades out when a sheet is dragged over it) ─── */}
       {hasTopBar && (
       <Animated.View
@@ -454,6 +490,41 @@ export default function MapFloatingUI({
               </PressableScale>
             </View>
 
+            {activeCategory ? (
+              /* Category search: switch category in place (tabs would be empty). */
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.contextTabsRow}
+              >
+                {QUICK_CATEGORIES.map((cat) => {
+                  const isSel = cat.poi === activeCategory.poi;
+                  return (
+                    <PressableScale
+                      key={cat.key}
+                      onPress={() => !isSel && handleCategoryPress(cat)}
+                      style={[
+                        styles.contextTab,
+                        { backgroundColor: isSel ? cat.color : dark ? "#27272A" : "#F4F4F5" },
+                      ]}
+                      accessibilityRole="tab"
+                      accessibilityState={{ selected: isSel }}
+                      accessibilityLabel={isSel ? `${cat.label}, ${searchPlaces.length} results` : cat.label}
+                    >
+                      <PlaceCategoryIcon category={cat.key} size={14} color={isSel ? "#FFFFFF" : cat.color} />
+                      <Text style={[styles.contextTabLabel, { color: isSel ? "#FFFFFF" : textMuted }]}>
+                        {cat.label}
+                      </Text>
+                      {isSel && !searchLoading && (
+                        <Text style={[styles.contextTabCount, { color: "#FFFFFF" }]}>
+                          {searchPlaces.length}
+                        </Text>
+                      )}
+                    </PressableScale>
+                  );
+                })}
+              </ScrollView>
+            ) : (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -497,6 +568,7 @@ export default function MapFloatingUI({
                 );
               })}
             </ScrollView>
+            )}
           </View>
         ) : (
           /* Default Explore Map Top Search + Square [↱ Route] Button + Category Badges[cite: 9] */
@@ -562,7 +634,7 @@ export default function MapFloatingUI({
               {QUICK_CATEGORIES.map((cat) => (
                 <PressableScale
                   key={cat.key}
-                  onPress={() => handleCategoryPress(cat.label)}
+                  onPress={() => handleCategoryPress(cat)}
                   style={[
                     styles.modeChip,
                     { backgroundColor: cardBg, borderColor: borderCol },
@@ -930,6 +1002,28 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  searchAreaWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 5,
+  },
+  searchAreaPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    shadowColor: "#000",
+    shadowOpacity: 0.16,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  searchAreaText: { fontSize: 13, fontWeight: "700" },
   activeSearchField: {
     height: 44,
     borderRadius: 14,

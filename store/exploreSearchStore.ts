@@ -31,6 +31,10 @@ interface ExploreSearchState {
   routes: MobilitySearchRouteItem[];
   selectedPlace: ExplorePlaceItem | null;
   loading: boolean;
+  /** Category-chip search (POI category key, e.g. "food"); null for text search. */
+  poiCategory: string | null;
+  /** Where the current category search was centred ("Search this area"). */
+  searchCenter: { lat: number; lng: number } | null;
 
   startSearch: (payload: {
     query: string;
@@ -39,6 +43,8 @@ interface ExploreSearchState {
     stops?: Stop[];
     routes?: MobilitySearchRouteItem[];
     selectedPlace?: ExplorePlaceItem | null;
+    poiCategory?: string | null;
+    searchCenter?: { lat: number; lng: number } | null;
   }) => void;
   setResults: (payload: {
     places?: ExplorePlaceItem[];
@@ -64,6 +70,8 @@ export const useExploreSearchStore = create<ExploreSearchState>((set) => ({
   routes: [],
   selectedPlace: null,
   loading: false,
+  poiCategory: null,
+  searchCenter: null,
 
   startSearch: ({
     query,
@@ -72,6 +80,8 @@ export const useExploreSearchStore = create<ExploreSearchState>((set) => ({
     stops = [],
     routes = [],
     selectedPlace = null,
+    poiCategory = null,
+    searchCenter = null,
   }) =>
     set({
       active: true,
@@ -82,6 +92,8 @@ export const useExploreSearchStore = create<ExploreSearchState>((set) => ({
       stops,
       routes,
       selectedPlace,
+      poiCategory,
+      searchCenter,
     }),
 
   setResults: ({ places, stops, routes }) =>
@@ -109,5 +121,7 @@ export const useExploreSearchStore = create<ExploreSearchState>((set) => ({
       routes: [],
       selectedPlace: null,
       loading: false,
+      poiCategory: null,
+      searchCenter: null,
     }),
 }));
