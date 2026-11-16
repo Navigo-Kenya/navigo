@@ -1516,30 +1516,59 @@ export default function MultiModalRoutePlannerScreen() {
               );
             })}
 
-            {/* Currently Selected Route rendered brightly on top[cite: 10, 11, 13] */}
+            {/* Currently Selected Route rendered brightly on top with Green/Yellow/Red Traffic Segments */}
             {(() => {
               const selRoute =
                 activeMapRoutes[selectedMapRouteIdx] ?? activeMapRoutes[0];
               if (!selRoute) return null;
+
               const coords = (selRoute.segments ?? [])
                 .flatMap((s) => s.coordinates ?? [])
                 .map(([lat, lng]) => [lng, lat]);
               if (coords.length < 2) return null;
 
+              const trafficSegs =
+                selRoute.segments?.[0]?.traffic_segments ?? [];
+
               const primaryLineColor =
                 topMode === "car"
-                  ? "#EF4444" // KakaoMap Car Traffic Red/Amber highlight
+                  ? "#16A34A"
                   : topMode === "walk"
-                  ? "#2563EB" // KakaoMap Walk Blue highlight
-                  : "#16A34A";
+                  ? "#2563EB"
+                  : "#0D9488";
+
+              const trafficFeatures: GeoJSON.Feature<GeoJSON.LineString>[] =
+                topMode === "car" && trafficSegs.length > 0
+                  ? trafficSegs
+                      .filter((ts) => ts.coordinates.length >= 2)
+                      .map((ts) => ({
+                        type: "Feature" as const,
+                        geometry: {
+                          type: "LineString" as const,
+                          coordinates: ts.coordinates.map(([lat, lng]) => [
+                            lng,
+                            lat,
+                          ]),
+                        },
+                        properties: { color: ts.color },
+                      }))
+                  : [
+                      {
+                        type: "Feature" as const,
+                        geometry: {
+                          type: "LineString" as const,
+                          coordinates: coords,
+                        },
+                        properties: { color: primaryLineColor },
+                      },
+                    ];
 
               return (
                 <NativeShapeSource
                   id="selected-mode-route-src"
                   shape={{
-                    type: "Feature",
-                    geometry: { type: "LineString", coordinates: coords },
-                    properties: {},
+                    type: "FeatureCollection",
+                    features: trafficFeatures,
                   }}
                 >
                   <NativeLineLayer
@@ -1554,7 +1583,7 @@ export default function MultiModalRoutePlannerScreen() {
                   <NativeLineLayer
                     id="selected-mode-route-line"
                     style={{
-                      lineColor: primaryLineColor,
+                      lineColor: ["get", "color"],
                       lineWidth: 7.5,
                       lineCap: "round",
                       lineJoin: "round",
@@ -1656,7 +1685,7 @@ export default function MultiModalRoutePlannerScreen() {
                   }
                 }}
                 renderItem={({ item: rt, index }) => {
-                  const mins = Math.max(1, Math.round(rt.total_duration / 60));
+                  const durParts = formatDurationParts(rt.total_duration);
                   const km = (rt.total_distance / 1000).toFixed(1);
                   const kcal = Math.max(
                     12,
@@ -1669,13 +1698,16 @@ export default function MultiModalRoutePlannerScreen() {
                   const isSel = index === selectedMapRouteIdx;
 
                   const badgeTitle =
-                    topMode === "car"
+                    rt.route_badge ??
+                    (topMode === "car"
                       ? index === 0
                         ? "Recommended · Main Roads Priority"
-                        : "Shortest Distance"
+                        : index === 1
+                        ? "Free Roads Priority"
+                        : "Shortest"
                       : index === 0
                       ? "Shortest Route"
-                      : "Main Boulevard";
+                      : "Main Boulevard");
 
                   return (
                     <Pressable
@@ -1689,13 +1721,61 @@ export default function MultiModalRoutePlannerScreen() {
                         },
                       ]}
                     >
-                      <Text style={s.mapCardBadgeText}>{badgeTitle}</Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          marginBottom: 4,
+                        }}
+                      >
+                        <Text style={s.mapCardBadgeText}>{badgeTitle}</Text>
+                        {topMode === "car" && (
+                          <View
+                            style={{
+                              backgroundColor: dark
+                                ? "rgba(59, 130, 246, 0.16)"
+                                : "#EFF6FF",
+                              paddingHorizontal: 7,
+                              paddingVertical: 2,
+                              borderRadius: 6,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                color: HEADER_BLUE,
+                                fontSize: 10.5,
+                                fontWeight: "700",
+                              }}
+                            >
+                              Live Traffic
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+
                       <Text style={[s.mapCardDuration, { color: textPrimary }]}>
-                        {mins}min
+                        {durParts.hours > 0 && (
+                          <>
+                            {durParts.hours}
+                            <Text style={{ fontSize: 18, fontWeight: "600" }}>
+                              hr{" "}
+                            </Text>
+                          </>
+                        )}
+                        {durParts.minutes > 0 || durParts.hours === 0 ? (
+                          <>
+                            {durParts.minutes}
+                            <Text style={{ fontSize: 18, fontWeight: "600" }}>
+                              min
+                            </Text>
+                          </>
+                        ) : null}
                       </Text>
+
                       <Text style={[s.mapCardSub, { color: textMuted }]}>
                         {topMode === "car"
-                          ? `${km}km · Toll: KES 0 · Est. Taxi: KES ${taxiKes}`
+                          ? `${km}km · Toll: KES 0 · Taxi: ~KES ${taxiKes}`
                           : `${km}km · ${kcal} kcal`}
                       </Text>
 
