@@ -3,7 +3,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,6 +10,7 @@ import {
   useColorScheme,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { PressableScale } from "@/components/ui/PressableScale";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   MapLayersIcon,
@@ -113,6 +113,9 @@ export interface MapFloatingUIProps {
   onOpenAR: () => void;
   userLat?: number | null;
   userLng?: number | null;
+  /** Centre of the map camera: weather describes the area being looked at. */
+  areaLat?: number | null;
+  areaLng?: number | null;
 }
 
 export default function MapFloatingUI({
@@ -149,6 +152,8 @@ export default function MapFloatingUI({
   onOpenAR,
   userLat,
   userLng,
+  areaLat,
+  areaLng,
 }: MapFloatingUIProps) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -162,16 +167,21 @@ export default function MapFloatingUI({
     query: searchContextQuery,
     activeTab: searchContextTab,
     setActiveTab: setSearchContextTab,
+    places: searchPlaces,
+    routes: searchRoutes,
+    stops: searchStops,
+    loading: searchLoading,
     startSearch,
     setResults,
     setLoading,
     clearSearch,
   } = useExploreSearchStore();
 
-  // Weather barely changes over a few km: refetch per ~5 km cell, not on
-  // every GPS fix.
-  const meteoLat = Math.round((userLat ?? FALLBACK_LAT) * 20) / 20;
-  const meteoLng = Math.round((userLng ?? FALLBACK_LNG) * 20) / 20;
+  // Weather for the area on screen (camera centre), falling back to the
+  // user's position. Snapped to ~5 km cells: panning within a neighbourhood
+  // doesn't refetch, and fetchLiveMeteo caches each cell for 10 minutes.
+  const meteoLat = Math.round((areaLat ?? userLat ?? FALLBACK_LAT) * 20) / 20;
+  const meteoLng = Math.round((areaLng ?? userLng ?? FALLBACK_LNG) * 20) / 20;
   useEffect(() => {
     let alive = true;
     fetchLiveMeteo(meteoLat, meteoLng)
@@ -330,7 +340,7 @@ export default function MapFloatingUI({
     {
       key: "report",
       node: (
-        <Pressable
+        <PressableScale
           onPress={() => {
             Haptics.selectionAsync();
             onOpenReport();
@@ -343,13 +353,13 @@ export default function MapFloatingUI({
           accessibilityLabel="Report transit issue"
         >
           <ReportIcon color={textPrimary} />
-        </Pressable>
+        </PressableScale>
       ),
     },
     {
       key: "layers",
       node: (
-        <Pressable
+        <PressableScale
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             onOpenLayers();
@@ -362,7 +372,7 @@ export default function MapFloatingUI({
           accessibilityLabel="Map layers"
         >
           <MapLayersIcon color={textPrimary} />
-        </Pressable>
+        </PressableScale>
       ),
     },
   ];
@@ -370,7 +380,7 @@ export default function MapFloatingUI({
     stackButtons.push({
       key: "compass",
       node: (
-        <Pressable
+        <PressableScale
           onPress={() => {
             Haptics.selectionAsync();
             onResetNorth();
@@ -386,7 +396,7 @@ export default function MapFloatingUI({
             size={20}
             color={headingUp ? ORANGE : textPrimary}
           />
-        </Pressable>
+        </PressableScale>
       ),
     });
   }
@@ -394,7 +404,7 @@ export default function MapFloatingUI({
     stackButtons.push({
       key: "ar",
       node: (
-        <Pressable
+        <PressableScale
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             onOpenAR();
@@ -406,7 +416,7 @@ export default function MapFloatingUI({
           accessibilityLabel="Open AR Walk View"
         >
           <Ionicons name="camera-outline" size={20} color="#FFFFFF" />
-        </Pressable>
+        </PressableScale>
       ),
     });
   }
@@ -429,7 +439,7 @@ export default function MapFloatingUI({
       >
       {!activeJourney ? (
         searchContextActive ? (
-          /* KakaoMap Active Search Context Header on Map (< query X + Place | Bus | Bus Stop tabs)[cite: 5, 12] */
+          /* Search results header: back, the query (tap to edit, X clears), tabs with counts */
           <View
             pointerEvents="box-none"
             style={[
@@ -437,83 +447,93 @@ export default function MapFloatingUI({
               { paddingTop: insets.top + 8, backgroundColor: cardBg },
             ]}
           >
-            <View
-              style={[
-                styles.activeSearchBox,
-                { borderColor: borderCol, backgroundColor: dark ? "#27272A" : "#F9FAFB" },
-              ]}
-            >
-              <Pressable
+            <View style={styles.activeSearchRow}>
+              <PressableScale
                 onPress={() => {
                   Haptics.selectionAsync();
                   onOpenSearch();
                 }}
-                hitSlop={10}
+                hitSlop={8}
+                style={[styles.headerCircle, { backgroundColor: dark ? "#27272A" : "#F4F4F5" }]}
+                accessibilityRole="button"
+                accessibilityLabel="Back to search"
               >
-                <Ionicons name="chevron-back" size={22} color={textPrimary} />
-              </Pressable>
-              <Pressable
+                <Ionicons name="chevron-back" size={20} color={textPrimary} />
+              </PressableScale>
+
+              <PressableScale
+                containerStyle={{ flex: 1 }}
+                pressedScale={0.98}
                 onPress={onOpenSearch}
-                style={{ flex: 1, paddingHorizontal: 8 }}
+                style={[styles.activeSearchField, { backgroundColor: dark ? "#27272A" : "#F4F4F5" }]}
+                accessibilityRole="search"
+                accessibilityLabel={`Search: ${searchContextQuery}. Tap to edit`}
               >
+                <Ionicons name="search" size={17} color={ORANGE} />
                 <Text
                   style={[styles.activeSearchQueryText, { color: textPrimary }]}
                   numberOfLines={1}
                 >
                   {searchContextQuery}
                 </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  clearSearch();
-                }}
-                hitSlop={10}
-              >
-                <Ionicons name="close" size={22} color={textPrimary} />
-              </Pressable>
+                <PressableScale
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    clearSearch();
+                  }}
+                  hitSlop={10}
+                  style={[styles.clearBtn, { backgroundColor: dark ? "#3F3F46" : "#E4E4E7" }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search"
+                >
+                  <Ionicons name="close" size={14} color={textPrimary} />
+                </PressableScale>
+              </PressableScale>
             </View>
 
-            {/* Place | Bus | Bus Stop Sub-Tabs[cite: 5] */}
-            <View style={styles.contextTabsRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.contextTabsRow}
+            >
               {(
                 [
-                  { id: "all", label: "All", icon: "apps" },
-                  { id: "place", label: "Place", icon: "location" },
-                  { id: "bus", label: "Bus / Rail", icon: "bus" },
-                  { id: "stop", label: "Bus Stop", icon: "radio-button-on" },
+                  { id: "all", label: "All", count: searchPlaces.length + searchRoutes.length + searchStops.length },
+                  { id: "place", label: "Places", count: searchPlaces.length },
+                  { id: "bus", label: "Lines", count: searchRoutes.length },
+                  { id: "stop", label: "Stops", count: searchStops.length },
                 ] as const
-              ).map((t) => {
-                const isSel = searchContextTab === t.id;
+              ).map((tab) => {
+                const isSel = searchContextTab === tab.id;
+                const empty = !searchLoading && tab.count === 0 && tab.id !== "all";
                 return (
-                  <Pressable
-                    key={t.id}
+                  <PressableScale
+                    key={tab.id}
                     onPress={() => {
                       Haptics.selectionAsync();
-                      setSearchContextTab(t.id as SearchTabFilter);
+                      setSearchContextTab(tab.id as SearchTabFilter);
                     }}
                     style={[
-                      styles.contextTabItem,
-                      isSel && styles.contextTabItemActive,
+                      styles.contextTab,
+                      { backgroundColor: isSel ? textPrimary : dark ? "#27272A" : "#F4F4F5" },
+                      empty && !isSel && { opacity: 0.5 },
                     ]}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: isSel }}
+                    accessibilityLabel={`${tab.label}, ${tab.count} results`}
                   >
-                    <Ionicons
-                      name={t.icon as any}
-                      size={14}
-                      color={isSel ? "#2563EB" : textMuted}
-                    />
-                    <Text
-                      style={[
-                        styles.contextTabLabel,
-                        { color: isSel ? "#2563EB" : textMuted },
-                      ]}
-                    >
-                      {t.label}
+                    <Text style={[styles.contextTabLabel, { color: isSel ? cardBg : textMuted }]}>
+                      {tab.label}
                     </Text>
-                  </Pressable>
+                    {!searchLoading && (
+                      <Text style={[styles.contextTabCount, { color: isSel ? cardBg : textMuted }]}>
+                        {tab.count}
+                      </Text>
+                    )}
+                  </PressableScale>
                 );
               })}
-            </View>
+            </ScrollView>
           </View>
         ) : (
           /* Default Explore Map Top Search + Square [↱ Route] Button + Category Badges[cite: 9] */
@@ -522,11 +542,12 @@ export default function MapFloatingUI({
             style={[styles.topContainer, { paddingTop: insets.top + 8 }]}
           >
             <View style={styles.topSearchRow}>
-              <Pressable
+              <PressableScale
                 onPress={() => {
                   Haptics.selectionAsync();
                   onOpenSearch();
                 }}
+                containerStyle={{ flex: 1 }}
                 style={[
                   styles.searchBarPill,
                   { backgroundColor: cardBg, borderColor: borderCol },
@@ -539,7 +560,7 @@ export default function MapFloatingUI({
                 >
                   Search places, buses, stations…
                 </Text>
-                <Pressable
+                <PressableScale
                   hitSlop={10}
                   onPress={(e) => {
                     e.stopPropagation();
@@ -549,19 +570,16 @@ export default function MapFloatingUI({
                   style={styles.kwameMicBtn}
                 >
                   <Ionicons name="sparkles" size={16} color={ORANGE} />
-                </Pressable>
-              </Pressable>
+                </PressableScale>
+              </PressableScale>
 
               {/* Dedicated [↱ Route] Button -> Opens `app/route.tsx`[cite: 9] */}
-              <Pressable
+              <PressableScale
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                   router.push("/route" as any);
                 }}
-                style={({ pressed }) => [
-                  styles.routeSquareBtn,
-                  pressed && { opacity: 0.9, transform: [{ scale: 0.97 }] },
-                ]}
+                style={styles.routeSquareBtn}
               >
                 <MaterialCommunityIcons
                   name="directions-fork"
@@ -569,7 +587,7 @@ export default function MapFloatingUI({
                   color="#FFFFFF"
                 />
                 <Text style={styles.routeSquareText}>Route</Text>
-              </Pressable>
+              </PressableScale>
             </View>
 
             {/* KakaoMap Category Badges Under Search Bar (Restaurant, Cafe, Gas Station, Hospital, Parking...)[cite: 9] */}
@@ -579,7 +597,7 @@ export default function MapFloatingUI({
               contentContainerStyle={styles.chipsScroll}
             >
               {QUICK_CATEGORIES.map((cat) => (
-                <Pressable
+                <PressableScale
                   key={cat.key}
                   onPress={() => handleCategoryPress(cat.label)}
                   style={[
@@ -595,7 +613,7 @@ export default function MapFloatingUI({
                   <Text style={[styles.modeChipText, { color: textPrimary }]}>
                     {cat.label}
                   </Text>
-                </Pressable>
+                </PressableScale>
               ))}
             </ScrollView>
           </View>
@@ -643,13 +661,13 @@ export default function MapFloatingUI({
                   )}
                 </View>
               </View>
-              <Pressable
+              <PressableScale
                 onPress={onClearJourney}
                 hitSlop={10}
                 style={styles.navCloseBtn}
               >
                 <Ionicons name="close" size={20} color="#FFFFFF" />
-              </Pressable>
+              </PressableScale>
             </View>
 
             {nextNextPreview && (
@@ -679,9 +697,9 @@ export default function MapFloatingUI({
                     : "Indoor signal — head outside for lock"}
                 </Text>
                 {paused && (
-                  <Pressable onPress={onResume} style={styles.resumePill}>
+                  <PressableScale onPress={onResume} style={styles.resumePill}>
                     <Text style={styles.resumePillText}>Resume</Text>
-                  </Pressable>
+                  </PressableScale>
                 )}
               </View>
             )}
@@ -738,15 +756,14 @@ export default function MapFloatingUI({
             <Text style={[styles.speedUnit, { color: textMuted }]}>km/h</Text>
           </View>
         ) : !activeJourney ? (
-          <Pressable
+          <PressableScale
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setWeatherOpen(true);
             }}
-            style={({ pressed }) => [
+            style={[
               styles.weatherPill,
               { backgroundColor: cardBg, borderColor: borderCol },
-              pressed && { transform: [{ scale: 0.96 }] },
             ]}
           >
             <Ionicons
@@ -755,24 +772,24 @@ export default function MapFloatingUI({
               color="#F59E0B"
             />
             <Text style={[styles.weatherTemp, { color: textPrimary }]}>
-              {liveMeteo?.tempC ?? 23}°
+              {liveMeteo ? `${liveMeteo.tempC}°` : "--"}
             </Text>
             <View
               style={[
                 styles.aqiBadge,
-                { backgroundColor: liveMeteo?.aqiBg ?? "#DCFCE7" },
+                { backgroundColor: liveMeteo?.aqiBg ?? (dark ? "#3F3F46" : "#E5E7EB") },
               ]}
             >
               <Text
                 style={[
                   styles.aqiText,
-                  { color: liveMeteo?.aqiColor ?? "#15803D" },
+                  { color: liveMeteo?.aqiColor ?? textMuted },
                 ]}
               >
                 PM10
               </Text>
             </View>
-          </Pressable>
+          </PressableScale>
         ) : null}
       </Animated.View>
 
@@ -788,7 +805,7 @@ export default function MapFloatingUI({
             },
           ]}
         >
-          <Pressable
+          <PressableScale
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               onBoardTransit();
@@ -797,7 +814,7 @@ export default function MapFloatingUI({
           >
             <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
             <Text style={styles.boardChipText}>I&apos;m on board</Text>
-          </Pressable>
+          </PressableScale>
         </Animated.View>
       )}
 
@@ -813,7 +830,7 @@ export default function MapFloatingUI({
           },
         ]}
       >
-        <Pressable
+        <PressableScale
           onPress={() => {
             Haptics.selectionAsync();
             onRecenter();
@@ -832,15 +849,15 @@ export default function MapFloatingUI({
             size={21}
             color={followMe ? ORANGE : textPrimary}
           />
-        </Pressable>
+        </PressableScale>
       </Animated.View>
 
       {/* Interactive Meteo & Air Quality Modal Sheet */}
       <WeatherMeteoSheet
         visible={weatherOpen}
         onClose={() => setWeatherOpen(false)}
-        userLat={userLat}
-        userLng={userLng}
+        userLat={areaLat ?? userLat}
+        userLng={areaLng ?? userLng}
         onWeatherLoaded={setLiveMeteo}
       />
     </View>
@@ -927,48 +944,71 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   activeSearchHeader: {
-    paddingHorizontal: 14,
-    paddingBottom: 2,
-    borderBottomLeftRadius: 18,
-    borderBottomRightRadius: 18,
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+    gap: 10,
+    borderBottomLeftRadius: 22,
+    borderBottomRightRadius: 22,
     shadowColor: "#000",
     shadowOpacity: 0.12,
-    shadowRadius: 12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 4 },
     elevation: 10,
   },
-  activeSearchBox: {
+  activeSearchRow: {
     flexDirection: "row",
     alignItems: "center",
-    height: 46,
+    gap: 8,
+  },
+  headerCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  activeSearchField: {
+    height: 44,
+    borderRadius: 14,
+    paddingLeft: 12,
+    paddingRight: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  clearBtn: {
+    width: 24,
+    height: 24,
     borderRadius: 12,
-    borderWidth: 1,
-    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
   },
   activeSearchQueryText: {
+    flex: 1,
     fontSize: 16,
-    fontWeight: "600",
+    fontWeight: "700",
+    letterSpacing: -0.2,
   },
   contextTabsRow: {
+    gap: 8,
+    paddingHorizontal: 2,
+  },
+  contextTab: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-around",
-    paddingTop: 6,
-  },
-  contextTabItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderBottomWidth: 2,
-    borderBottomColor: "transparent",
-  },
-  contextTabItemActive: {
-    borderBottomColor: "#2563EB",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 18,
   },
   contextTabLabel: {
     fontSize: 13,
     fontWeight: "700",
+  },
+  contextTabCount: {
+    fontSize: 12,
+    fontWeight: "800",
+    opacity: 0.8,
   },
   navBanner: {
     backgroundColor: "#111827",

@@ -144,7 +144,7 @@ export default function MapSearchContextSheet({
           s.placeSheet,
           {
             backgroundColor: sheetBg,
-            paddingBottom: Math.max(insets.bottom, 16) + 64,
+            paddingBottom: Math.max(insets.bottom, 16),
           },
         ]}
       >
@@ -297,7 +297,7 @@ export default function MapSearchContextSheet({
           pointerEvents="box-none"
           style={[
             s.minimizedWrap,
-            { bottom: Math.max(insets.bottom, 16) + 126 },
+            { bottom: Math.max(insets.bottom, 12) + 70 },
           ]}
         >
           <Pressable
@@ -323,7 +323,7 @@ export default function MapSearchContextSheet({
             s.minimizedBottomBar,
             {
               backgroundColor: sheetBg,
-              paddingBottom: Math.max(insets.bottom, 12) + 64,
+              paddingBottom: Math.max(insets.bottom, 12),
             },
           ]}
         >
@@ -370,7 +370,7 @@ export default function MapSearchContextSheet({
         s.resultsSheet,
         {
           backgroundColor: sheetBg,
-          paddingBottom: Math.max(insets.bottom, 16) + 64,
+          paddingBottom: Math.max(insets.bottom, 16),
         },
       ]}
     >

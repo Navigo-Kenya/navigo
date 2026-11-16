@@ -21,7 +21,6 @@ import PostJourneySheet          from "@/components/app/PostJourneySheet";
 import BusDetailsSheet           from "@/components/app/BusDetailsSheet";
 import RouteStepsList            from "@/components/app/RouteStepsList";
 import StopDetailsSheet          from "@/components/app/StopDetailsSheet";
-import StopQuickCard             from "@/components/app/StopQuickCard";
 import StopsLayer                from "@/components/app/StopsLayer";
 import ARWalkView                from "@/components/ar/ARWalkView";
 
@@ -262,7 +261,6 @@ export default function MapScreen() {
   const [activeReports,   setActiveReports]   = useState<TransitReport[]>([]);
   const [selectedReport,  setSelectedReport]  = useState<{ report: TransitReport; count: number } | null>(null);
   const [allStops,        setAllStops]        = useState<Stop[]>([]);
-  const [stopDetailsOpen, setStopDetailsOpen] = useState(false);
   const [selectedIntermStop, setSelectedIntermStop] = useState<IntermediateStop | null>(null);
   const [viewCenter,     setViewCenter]     = useState<{ lat: number; lng: number } | null>(null);
   const [viewZoom,       setViewZoom]       = useState<number>(13);
@@ -742,7 +740,6 @@ export default function MapScreen() {
     stopNavigation();
     setFollowMe(false);
     setSelected(s);
-    setStopDetailsOpen(false);
     setNearestOpen(false);
     camera.animateTo({ center: { latitude: s.lat, longitude: s.lng }, zoom: 17.2, duration: 500 });
   }, [stopNavigation, camera]);
@@ -1433,11 +1430,14 @@ export default function MapScreen() {
         paused={tripPaused}
         onResume={resumeNavigation}
         showAR={isNavigationMode && !isVehicleMode && navState?.currentSegmentMode === "WALK"}
+        areaLat={viewCenter?.lat ?? meLat}
+        areaLng={viewCenter?.lng ?? meLng}
         onOpenAR={() => setArOpen(true)}
       />
 
       {selectedReport && (
         <ReportDetailCard
+          key={selectedReport.report.id}
           report={selectedReport.report}
           clusterCount={selectedReport.count}
           onClose={() => setSelectedReport(null)}
@@ -1504,16 +1504,6 @@ export default function MapScreen() {
         />
       )}
 
-      {selected && !activeJourney && !stopDetailsOpen && (
-        <StopQuickCard
-          stop={selected}
-          onClose={() => setSelected(null)}
-          onGoToStop={handleGoToStop}
-          onViewDetails={() => setStopDetailsOpen(true)}
-          loading={routeLoading}
-        />
-      )}
-
       {/* Tapping any stop on the map opens the unified KakaoMap StopDetailsSheet directly */}
       {selected && !activeJourney && (
         <StopDetailsSheet
@@ -1525,7 +1515,6 @@ export default function MapScreen() {
             handleSelectCorridorRoute(routeId);
           }}
           onClose={() => {
-            setStopDetailsOpen(false);
             setSelected(null);
           }}
           onGoToStop={handleGoToStop}

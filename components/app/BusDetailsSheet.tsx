@@ -1,5 +1,6 @@
 // components/app/BusDetailsSheet.tsx
 import { useReportSheetTop } from "./mapSheetInsets";
+import { sToMin } from "@/utils/mapHelpers";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -84,10 +85,7 @@ function formatEta(state: StopState, secs: number): string {
   if (state === "past")    return "";
   if (state === "current") return "At stop";
   if (secs < 60)           return "< 1 min";
-  const m = Math.round(secs / 60);
-  if (m < 60) return `${m} min`;
-  const h = Math.floor(m / 60), rm = m % 60;
-  return rm > 0 ? `${h}h ${rm}m` : `${h}h`;
+  return sToMin(secs);
 }
 
 function formatRouteName(longName: string): string {
@@ -342,7 +340,6 @@ export default function BusDetailsSheet({ bus, following, onFollow, onDismiss }:
 
           {/* Summary row */}
           {bus && (() => {
-            const totalMin  = Math.round((bus.cycleTime / 2) / 60);
             const totalKm   = bus.stops.length > 0 ? bus.stops[bus.stops.length - 1].distKm : 0;
             const nextStop  = bus.stops[states.findIndex((st) => st === "next" || st === "current")];
             return (
@@ -354,7 +351,7 @@ export default function BusDetailsSheet({ bus, following, onFollow, onDismiss }:
                 <View style={[s.summaryDivider, { backgroundColor: C.border }]} />
                 <View style={s.summaryItem}>
                   <MaterialIcons name="schedule" size={14} color={accent} />
-                  <Text style={[s.summaryVal, { color: C.text }]}>{totalMin} min route</Text>
+                  <Text style={[s.summaryVal, { color: C.text }]}>{sToMin(bus.cycleTime / 2)} route</Text>
                 </View>
                 <View style={[s.summaryDivider, { backgroundColor: C.border }]} />
                 <View style={s.summaryItem}>

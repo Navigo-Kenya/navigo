@@ -92,12 +92,23 @@ export function routeDeltas(routes: RankableRoute[]): RouteDeltas[] {
   });
 }
 
+/**
+ * "32 min", or past 70 minutes "1hr 11min". Mirrors sToMin in mapHelpers;
+ * kept local so this module stays free of app imports (unit-testable).
+ */
+function durationLabel(secs: number): string {
+  const m = Math.max(1, Math.round(secs / 60));
+  if (m <= 70) return `${m} min`;
+  const h = Math.floor(m / 60), rm = m % 60;
+  return rm > 0 ? `${h}hr ${rm}min` : `${h}hr`;
+}
+
 /** Headline stat for the selected chip, e.g. "Fastest · 32 min". */
 export function rankingHeadline(routes: RankableRoute[], criterion: RouteRanking): string | null {
   if (routes.length === 0) return null;
   const best = rankRoutes(routes, criterion)[0];
   switch (criterion) {
-    case "fastest":          return `${Math.round(best.total_duration / 60)} min`;
+    case "fastest":          return durationLabel(best.total_duration);
     case "cheapest": {
       const fare = totalFare(best);
       return fare != null ? `KES ${fare}` : null;

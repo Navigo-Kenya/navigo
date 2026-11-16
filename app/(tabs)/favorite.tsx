@@ -1,4 +1,5 @@
 import { useAuthStore } from "@/store/authStore";
+import { sToMin } from "@/utils/mapHelpers";
 import { useSavedStore } from "@/store/savedStore";
 import { useJourneyStore, UnifiedLocation } from "@/store/journeyStore";
 import { SavedJourney, SavedPlace } from "@/services/user";
@@ -57,8 +58,7 @@ function mapboxJourneyThumb(fromLng: number, fromLat: number, toLng: number, toL
 }
 
 function formatDuration(secs: number): string {
-  const m = Math.round(secs / 60);
-  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m} min`;
+  return sToMin(secs);
 }
 
 // ── PlaceCard ─────────────────────────────────────────────────────────────────

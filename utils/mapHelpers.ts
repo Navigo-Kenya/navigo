@@ -166,33 +166,64 @@ export function mToNice(m: number) {
 }
 
 /**
- * Formats seconds into friendly "1hr 24min" or "26min" string.
+ * Durations up to this many minutes read as minutes ("65min"); longer ones
+ * switch to hours ("1hr 11min"), so nothing ever reads like "600min".
  */
-export function sToMin(s: number): string {
-  if (!s || s <= 0) return "1min";
-  const totalMin = Math.max(1, Math.round(s / 60));
-  const hrs = Math.floor(totalMin / 60);
-  const mins = totalMin % 60;
-  if (hrs > 0) {
-    return mins > 0 ? `${hrs}hr ${mins}min` : `${hrs}hr`;
-  }
-  return `${totalMin}min`;
+export const HOURS_FROM_MINUTES = 70;
+
+/** Whole minutes (at least 1) for a duration in seconds. */
+function totalMinutes(s: number): number {
+  return Math.max(1, Math.round((s || 0) / 60));
 }
 
 /**
- * Splits seconds into { hours, minutes } for KakaoMap mixed bold/regular typography ("1hr 24min").
+ * Formats seconds as "26min", "70min" or, past 70 minutes, "1hr 11min" /
+ * "10hr" (whole hours drop the minutes).
+ */
+export function sToMin(s: number): string {
+  const totalMin = totalMinutes(s);
+  if (totalMin <= HOURS_FROM_MINUTES) return `${totalMin}min`;
+  const hrs = Math.floor(totalMin / 60);
+  const mins = totalMin % 60;
+  return mins > 0 ? `${hrs}hr ${mins}min` : `${hrs}hr`;
+}
+
+/**
+ * Compact form for tight spots (route bars, badges): "26m", "70m", "1h 11m".
+ * Same 70-minute rule as sToMin.
+ */
+export function sToShort(s: number): string {
+  const totalMin = totalMinutes(s);
+  if (totalMin <= HOURS_FROM_MINUTES) return `${totalMin}m`;
+  const hrs = Math.floor(totalMin / 60);
+  const mins = totalMin % 60;
+  return mins > 0 ? `${hrs}h ${mins}m` : `${hrs}h`;
+}
+
+/**
+ * Countdown to a departure, from its eta_seconds: "Arriving" within 90 s,
+ * then the same format as sToMin. Use this instead of the API's eta_label.
+ */
+export function formatEta(etaSeconds: number): string {
+  if (etaSeconds <= 90) return "Arriving";
+  return sToMin(etaSeconds);
+}
+
+/**
+ * Splits seconds into { hours, minutes } for KakaoMap mixed bold/regular
+ * typography ("1hr 24min"). Follows the 70-minute rule: `hours` is 0 (and
+ * `minutes` holds the full count) up to 70 minutes.
  */
 export function formatDurationParts(s: number): {
   hours: number;
   minutes: number;
   text: string;
 } {
-  const totalMin = Math.max(1, Math.round((s || 0) / 60));
-  const hours = Math.floor(totalMin / 60);
-  const minutes = totalMin % 60;
+  const totalMin = totalMinutes(s);
+  const useHours = totalMin > HOURS_FROM_MINUTES;
   return {
-    hours,
-    minutes,
+    hours: useHours ? Math.floor(totalMin / 60) : 0,
+    minutes: useHours ? totalMin % 60 : totalMin,
     text: sToMin(s),
   };
 }

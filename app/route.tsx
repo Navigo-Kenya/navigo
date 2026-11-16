@@ -34,8 +34,9 @@ import { RouteService, type Route, type RouteSegment } from "@/services/route";
 import { useSavedStore } from "@/store/savedStore";
 import { usePrefsStore } from "@/store/prefsStore";
 import { UnifiedLocation, useJourneyStore } from "@/store/journeyStore";
-import { extractFares, formatDurationParts, getRouteColor } from "@/utils/mapHelpers";
+import { extractFares, formatDurationParts, formatEta, getRouteColor, sToShort } from "@/utils/mapHelpers";
 import { rankRoutes, type RouteRanking } from "@/utils/rankRoutes";
+import { departureMeta } from "@/utils/departures";
 
 const NativeShapeSource = ShapeSource as unknown as React.ComponentType<any>;
 const NativeLineLayer = LineLayer as unknown as React.ComponentType<any>;
@@ -398,14 +399,14 @@ function ProportionalDurationBar({
   return (
     <View style={[s.propBarTrack, { backgroundColor: walkBg }]}>
       {segments.map((seg, idx) => {
-        const mins = Math.max(1, Math.round(seg.duration / 60));
+        const mins = sToShort(seg.duration);
         const flexWeight = Math.max(0.12, seg.duration / safeTotal);
 
         if (seg.mode === "WALK") {
           return (
             <View key={idx} style={[s.propWalkSeg, { flex: flexWeight }]}>
               <Text style={[s.propWalkText, { color: walkText }]} numberOfLines={1}>
-                {mins}m
+                {mins}
               </Text>
             </View>
           );
@@ -442,7 +443,7 @@ function ProportionalDurationBar({
               <Ionicons name={modeIcon as any} size={11} color={color} />
             </View>
             <Text style={s.propTransitText} numberOfLines={1}>
-              {mins}m
+              {mins}
             </Text>
           </View>
         );
@@ -728,7 +729,6 @@ export default function MultiModalRoutePlannerScreen() {
     SORT_OPTIONS.find((o) => o.key === sortBy)?.label ?? "Recommendation";
 
   const renderTransitItineraryCard = (route: Route, index: number) => {
-    const totalMins = Math.max(1, Math.round(route.total_duration / 60));
     const durParts = formatDurationParts(route.total_duration);
     const distKm = (route.total_distance / 1000).toFixed(1);
     const fare = extractFares(route.segments ?? []);
@@ -875,10 +875,12 @@ export default function MultiModalRoutePlannerScreen() {
                           >
                             {leg.route_name}
                           </Text>
-                          <Text style={s.depRedEta}>{dep.eta_label}</Text>
-                          <Text style={[s.depCrowding, { color: textMuted }]}>
-                            · {dep.crowding}
-                          </Text>
+                          <Text style={s.depRedEta}>{formatEta(dep.eta_seconds)}</Text>
+                          {!!departureMeta(dep) && (
+                            <Text style={[s.depCrowding, { color: textMuted }]}>
+                              · {departureMeta(dep)}
+                            </Text>
+                          )}
                         </View>
                       ))
                     ) : (
