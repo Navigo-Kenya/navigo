@@ -62,13 +62,27 @@ export interface TappedPoi {
 interface Props {
   /** Show Navigo POIs (and hide Mapbox's). */
   visible: boolean;
+  /**
+   * Navigation mode: landmarks only (importance 1: hospitals, fuel, hotels,
+   * malls, attractions), quieter badges, no taps. Riders orient by landmarks,
+   * but the route, stops and instructions must stay on top.
+   */
+  navigating?: boolean;
   /** The active map style is Mapbox Standard (POIs hidden via its config). */
   standardStyle: boolean;
   dark: boolean;
   onPress: (poi: TappedPoi) => void;
 }
 
-export const PoiLayer = memo(function PoiLayer({ visible, standardStyle, dark, onPress }: Props) {
+const LANDMARKS_ONLY = ["==", ["get", "importance"], 1];
+
+export const PoiLayer = memo(function PoiLayer({
+  visible,
+  navigating = false,
+  standardStyle,
+  dark,
+  onPress,
+}: Props) {
   const labelColor = useMemo(
     () => [
       "match",
@@ -107,6 +121,7 @@ export const PoiLayer = memo(function PoiLayer({ visible, standardStyle, dark, o
             maxZoomLevel={17}
             hitbox={{ width: 26, height: 26 }}
             onPress={(e: any) => {
+              if (navigating) return; // no place sheet mid-trip
               const f = e?.features?.[0];
               const [lng, lat] = f?.geometry?.coordinates ?? [];
               if (!f || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
@@ -123,9 +138,14 @@ export const PoiLayer = memo(function PoiLayer({ visible, standardStyle, dark, o
             <NativeSymbolLayer
               id="navigo-pois-symbols"
               sourceLayerID="pois"
+              filter={navigating ? LANDMARKS_ONLY : undefined}
               style={{
                 iconImage: ["concat", "poi-", ["get", "category"]],
-                iconSize: ["interpolate", ["linear"], ["zoom"], 11, 0.62, 15, 0.8, 18, 1],
+                iconSize: navigating
+                  ? ["interpolate", ["linear"], ["zoom"], 11, 0.55, 15, 0.65, 18, 0.8]
+                  : ["interpolate", ["linear"], ["zoom"], 11, 0.62, 15, 0.8, 18, 1],
+                iconOpacity: navigating ? 0.75 : 1,
+                textOpacity: navigating ? 0.8 : 1,
                 iconAllowOverlap: false,
                 iconPitchAlignment: "viewport",
                 symbolSortKey: ["get", "importance"],

@@ -1308,7 +1308,8 @@ export default function MapScreen() {
 
             {/* Our POIs (Overture + console), below routes, stops and reports. */}
             <PoiLayer
-              visible={!isNavigationMode}
+              visible
+              navigating={isNavigationMode}
               standardStyle={activeStyleURL === process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL}
               dark={dark}
               onPress={handlePoiPress}
