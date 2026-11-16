@@ -36,9 +36,37 @@ export type SheetTopNode = Animated.Value | Animated.AnimatedAddition<number>;
  */
 const OFFSCREEN = new Animated.Value(WINDOW_H);
 
-type Entry = { top: Animated.Value; gen: number };
+type Entry = { top: Animated.Value; gen: number; hidesTabBar: boolean };
 
 let entries: Entry[] = [];
+
+// ─── Tab bar visibility ──────────────────────────────────────────────────────
+// Map sheets sit where the floating tab bar is, so the tab bar slides away
+// while any of them is open (KakaoMap does the same). The tab sheets in
+// (tabs)/_layout opt out: they are designed around the tab bar.
+let tabBarHidden = false;
+const tabBarListeners = new Set<() => void>();
+
+function syncTabBar() {
+  const hidden = entries.some((e) => e.hidesTabBar);
+  if (hidden === tabBarHidden) return;
+  tabBarHidden = hidden;
+  tabBarListeners.forEach((l) => l());
+}
+
+/** True while a map sheet that covers the tab bar is open. */
+export function useTabBarHidden(): boolean {
+  return useSyncExternalStore(
+    (l) => {
+      tabBarListeners.add(l);
+      return () => {
+        tabBarListeners.delete(l);
+      };
+    },
+    () => tabBarHidden,
+    () => tabBarHidden
+  );
+}
 let genCounter = 0;
 /** The sheet controls are heading towards. */
 let target: Animated.Value = OFFSCREEN;
@@ -89,30 +117,42 @@ function subscribe(l: () => void) {
   };
 }
 
-function add(top: Animated.Value): number {
+function add(top: Animated.Value, hidesTabBar: boolean): number {
   const gen = ++genCounter;
   entries = entries.filter((e) => e.top !== top);
-  entries.push({ top, gen });
+  entries.push({ top, gen, hidesTabBar });
   publish();
+  syncTabBar();
   return gen;
 }
 
 function remove(top: Animated.Value, gen: number) {
   const before = entries.length;
   entries = entries.filter((e) => !(e.top === top && e.gen === gen));
-  if (entries.length !== before) publish();
+  if (entries.length !== before) {
+    publish();
+    syncTabBar();
+  }
 }
 
-/** Report a draggable sheet's top edge (its translateY from the screen top). */
-export function useReportSheetTop(top: Animated.Value, active = true) {
+/**
+ * Report a draggable sheet's top edge (its translateY from the screen top).
+ * By default an open sheet also hides the floating tab bar.
+ */
+export function useReportSheetTop(
+  top: Animated.Value,
+  active = true,
+  opts: { hidesTabBar?: boolean } = {}
+) {
+  const hidesTabBar = opts.hidesTabBar ?? true;
   useEffect(() => {
     if (!active) return;
-    const gen = add(top);
+    const gen = add(top, hidesTabBar);
     // No exit animation on the sheet's own value: the handoff in publish()
     // glides controls back, and leaving the value alone means we never fight
     // a sheet that is running its own close animation.
     return () => remove(top, gen);
-  }, [top, active]);
+  }, [top, active, hidesTabBar]);
 }
 
 /**

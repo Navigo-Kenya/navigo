@@ -53,6 +53,9 @@ const GREY = "#8E8E93";
 const AMBER = "#F59E0B";
 
 const SCREEN_H = Dimensions.get("window").height;
+const SCREEN_W = Dimensions.get("window").width;
+/** Horizontal drag that switches to the neighbouring stop on release. */
+const SWIPE_SWITCH_PX = SCREEN_W * 0.22;
 const FULL_Y = SCREEN_H * 0.08;
 const HALF_Y = SCREEN_H * 0.36;
 const PEEK_Y = SCREEN_H - 390;
@@ -1308,33 +1311,63 @@ export default function StopDetailsSheet({
     }).start(onClose);
   }, [translateY, onClose]);
 
+  // ── Horizontal swipe between neighbouring stops ──────────────────────────
+  // The stop's content follows the finger, slides out on release and the next
+  // stop slides in from the other side. The gesture locks to one axis as soon
+  // as it starts, so a slightly diagonal drag never jitters between the two.
+  const slideX = useRef(new Animated.Value(0)).current;
+  const gestureAxis = useRef<"x" | "y" | null>(null);
+  /** Side the incoming stop enters from: 1 = from the right, -1 = left. */
+  const enterFrom = useRef<0 | 1 | -1>(0);
+
+  const slideBack = useCallback(() => {
+    Animated.spring(slideX, { toValue: 0, useNativeDriver: true, damping: 20, stiffness: 260 }).start();
+  }, [slideX]);
+
   const headerPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, g) =>
-        Math.abs(g.dx) > 10 || Math.abs(g.dy) > 8,
+        Math.abs(g.dx) > 8 || Math.abs(g.dy) > 8,
+      onPanResponderGrant: () => {
+        gestureAxis.current = null;
+        translateY.stopAnimation((v) => { currentY.current = v; });
+        slideX.stopAnimation();
+      },
       onPanResponderMove: (_, g) => {
-        if (Math.abs(g.dy) >= Math.abs(g.dx)) {
+        if (!gestureAxis.current) {
+          gestureAxis.current =
+            Math.abs(g.dx) > Math.abs(g.dy) * 1.15 && onSelectStopRef.current ? "x" : "y";
+        }
+        if (gestureAxis.current === "x") {
+          const neighbor = g.dx < 0 ? nextStopRef.current : prevStopRef.current;
+          // Resist when there is no stop on that side.
+          slideX.setValue(neighbor ? g.dx : g.dx * 0.22);
+        } else {
           translateY.setValue(Math.max(FULL_Y, currentY.current + g.dy));
         }
       },
+      onPanResponderTerminate: () => {
+        if (gestureAxis.current === "x") slideBack();
+      },
       onPanResponderRelease: (_, g) => {
-        // 1. Horizontal Swipe -> Switch to Previous or Next Stop!
-        if (
-          Math.abs(g.dx) > 48 &&
-          Math.abs(g.dx) > Math.abs(g.dy) * 1.3 &&
-          onSelectStopRef.current
-        ) {
-          if (g.dx < 0 && nextStopRef.current) {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            onSelectStopRef.current(nextStopRef.current);
-            return;
+        // 1. Horizontal: switch to the previous / next stop, or settle back.
+        if (gestureAxis.current === "x") {
+          const dir = g.dx < 0 ? -1 : 1;
+          const neighbor = dir < 0 ? nextStopRef.current : prevStopRef.current;
+          const far = Math.abs(g.dx) > SWIPE_SWITCH_PX || Math.abs(g.vx) > 0.55;
+          if (neighbor && far && onSelectStopRef.current) {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            enterFrom.current = dir < 0 ? 1 : -1;
+            Animated.timing(slideX, {
+              toValue: dir * SCREEN_W,
+              duration: 170,
+              useNativeDriver: true,
+            }).start(() => onSelectStopRef.current?.(neighbor));
+          } else {
+            slideBack();
           }
-          if (g.dx > 0 && prevStopRef.current) {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            onSelectStopRef.current(prevStopRef.current);
-            return;
-          }
+          return;
         }
 
         // 2. Vertical Drag -> Snap to PEEK, HALF, or FULL (or dismiss if dragged far down)
@@ -1361,9 +1394,31 @@ export default function StopDetailsSheet({
     })
   ).current;
 
+  // Open at peek once. Switching stops keeps the current height; the new
+  // stop's content slides in from the side it was swiped from.
+  const opened = useRef(false);
   useEffect(() => {
-    snapTo(PEEK_Y, "peek");
-  }, [stop.id, snapTo]);
+    if (!opened.current) {
+      opened.current = true;
+      snapTo(PEEK_Y, "peek");
+      return;
+    }
+    if (enterFrom.current !== 0) {
+      slideX.setValue(enterFrom.current * SCREEN_W * 0.5);
+      enterFrom.current = 0;
+    }
+    slideBack();
+  }, [stop.id, snapTo, slideX, slideBack]);
+
+  // Content slides horizontally and fades a little while it is off-centre.
+  const slideStyle = {
+    transform: [{ translateX: slideX }],
+    opacity: slideX.interpolate({
+      inputRange: [-SCREEN_W, 0, SCREEN_W],
+      outputRange: [0.2, 1, 0.2],
+      extrapolate: "clamp" as const,
+    }),
+  };
 
   const loadDeparturesAndInfo = useCallback(async () => {
     setBoardLoading(true);
@@ -1466,6 +1521,7 @@ export default function StopDetailsSheet({
             <View style={[s.handle, { backgroundColor: C.handle }]} />
           </View>
 
+          <Animated.View style={slideStyle}>
           {/* Visible Prev / Next Stop Swipe Strip (KakaoMap Neighbor Switcher)[cite: 3] */}
           {onSelectStop && (prevStop || nextStop) && (
             <View style={s.neighborStrip}>
@@ -1611,10 +1667,11 @@ export default function StopDetailsSheet({
               </Pressable>
             ))}
           </View>
+          </Animated.View>
         </View>
 
-        {/* ── TAB CONTENT AREA ── */}
-        <View style={{ flex: 1 }}>
+        {/* ── TAB CONTENT AREA (slides with the stop) ── */}
+        <Animated.View style={[{ flex: 1 }, slideStyle]}>
           <ScrollView
             contentContainerStyle={[
               s.scrollContent,
@@ -1928,7 +1985,7 @@ export default function StopDetailsSheet({
               {
                 backgroundColor: C.bg,
                 borderTopColor: C.border,
-                paddingBottom: Math.max(insets.bottom, 12) + 64,
+                paddingBottom: Math.max(insets.bottom, 12),
               },
             ]}
           >
@@ -2022,7 +2079,7 @@ export default function StopDetailsSheet({
               </Pressable>
             </View>
           </View>
-        </View>
+        </Animated.View>
       </Animated.View>
 
       {/* Mini Sheets */}

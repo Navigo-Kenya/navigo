@@ -1,5 +1,5 @@
 // app/(tabs)/_layout.tsx
-import { useReportSheetTop } from "@/components/app/mapSheetInsets";
+import { useReportSheetTop, useTabBarHidden } from "@/components/app/mapSheetInsets";
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs, useRouter } from "expo-router";
 import React, { useRef, useState, useEffect } from "react";
@@ -42,7 +42,7 @@ const TABS: {
   { id: "explore",    label: "Map",        icon: "compass-outline",       iconActive: "compass"        },
   { id: "transit",    label: "Transit",    icon: "train-outline",         iconActive: "train"          },
   { id: "you",        label: "Saved",      icon: "bookmark-outline",      iconActive: "bookmark"       },
-  { id: "contribute", label: "Report",     icon: "megaphone-outline",     iconActive: "megaphone"      },
+  { id: "contribute", label: "Contribute", icon: "add-circle-outline",    iconActive: "add-circle"     },
   { id: "profile",    label: "Profile",    icon: "person-circle-outline", iconActive: "person-circle"  },
 ];
 
@@ -73,7 +73,7 @@ function DraggableSheet({
   const currentY        = useRef(SNAP_Y);
   const [isMinimized, setIsMinimized] = useState(false);
   // Floating map controls follow this sheet's top edge.
-  useReportSheetTop(translateY, visible);
+  useReportSheetTop(translateY, visible, { hidesTabBar: false });
 
   useEffect(() => {
     if (visible) {
@@ -207,6 +207,17 @@ function CustomFloatingTabBar({
   const dark = useColorScheme() === "dark";
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const activeJourney = useJourneyStore((s) => s.activeJourney);
+  // Map sheets open where the dock sits: slide it away while one is open.
+  const sheetOpen = useTabBarHidden();
+  const slide = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.spring(slide, {
+      toValue: sheetOpen ? 1 : 0,
+      useNativeDriver: true,
+      damping: 22,
+      stiffness: 240,
+    }).start();
+  }, [sheetOpen, slide]);
 
   // Hide the floating dock when a journey sheet or turn-by-turn nav is active
   if (activeJourney) return null;
@@ -216,11 +227,22 @@ function CustomFloatingTabBar({
   const inactiveIconColor = dark ? "#A1A1AA" : "#4B5563";
 
   return (
-    <View
-      pointerEvents="box-none"
+    <Animated.View
+      pointerEvents={sheetOpen ? "none" : "box-none"}
       style={[
         styles.floatingDockWrapper,
-        { bottom: Math.max(insets.bottom, 12) },
+        {
+          bottom: Math.max(insets.bottom, 12),
+          opacity: slide.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
+          transform: [
+            {
+              translateY: slide.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, 58 + Math.max(insets.bottom, 12) + 16],
+              }),
+            },
+          ],
+        },
       ]}
     >
       <View
@@ -274,7 +296,7 @@ function CustomFloatingTabBar({
           );
         })}
       </View>
-    </View>
+    </Animated.View>
   );
 }
 

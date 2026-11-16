@@ -3,7 +3,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,6 +10,7 @@ import {
   useColorScheme,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { PressableScale } from "@/components/ui/PressableScale";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   MapLayersIcon,
@@ -330,7 +330,7 @@ export default function MapFloatingUI({
     {
       key: "report",
       node: (
-        <Pressable
+        <PressableScale
           onPress={() => {
             Haptics.selectionAsync();
             onOpenReport();
@@ -343,13 +343,13 @@ export default function MapFloatingUI({
           accessibilityLabel="Report transit issue"
         >
           <ReportIcon color={textPrimary} />
-        </Pressable>
+        </PressableScale>
       ),
     },
     {
       key: "layers",
       node: (
-        <Pressable
+        <PressableScale
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             onOpenLayers();
@@ -362,7 +362,7 @@ export default function MapFloatingUI({
           accessibilityLabel="Map layers"
         >
           <MapLayersIcon color={textPrimary} />
-        </Pressable>
+        </PressableScale>
       ),
     },
   ];
@@ -370,7 +370,7 @@ export default function MapFloatingUI({
     stackButtons.push({
       key: "compass",
       node: (
-        <Pressable
+        <PressableScale
           onPress={() => {
             Haptics.selectionAsync();
             onResetNorth();
@@ -386,7 +386,7 @@ export default function MapFloatingUI({
             size={20}
             color={headingUp ? ORANGE : textPrimary}
           />
-        </Pressable>
+        </PressableScale>
       ),
     });
   }
@@ -394,7 +394,7 @@ export default function MapFloatingUI({
     stackButtons.push({
       key: "ar",
       node: (
-        <Pressable
+        <PressableScale
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             onOpenAR();
@@ -406,7 +406,7 @@ export default function MapFloatingUI({
           accessibilityLabel="Open AR Walk View"
         >
           <Ionicons name="camera-outline" size={20} color="#FFFFFF" />
-        </Pressable>
+        </PressableScale>
       ),
     });
   }
@@ -443,7 +443,7 @@ export default function MapFloatingUI({
                 { borderColor: borderCol, backgroundColor: dark ? "#27272A" : "#F9FAFB" },
               ]}
             >
-              <Pressable
+              <PressableScale
                 onPress={() => {
                   Haptics.selectionAsync();
                   onOpenSearch();
@@ -451,8 +451,8 @@ export default function MapFloatingUI({
                 hitSlop={10}
               >
                 <Ionicons name="chevron-back" size={22} color={textPrimary} />
-              </Pressable>
-              <Pressable
+              </PressableScale>
+              <PressableScale
                 onPress={onOpenSearch}
                 style={{ flex: 1, paddingHorizontal: 8 }}
               >
@@ -462,8 +462,8 @@ export default function MapFloatingUI({
                 >
                   {searchContextQuery}
                 </Text>
-              </Pressable>
-              <Pressable
+              </PressableScale>
+              <PressableScale
                 onPress={() => {
                   Haptics.selectionAsync();
                   clearSearch();
@@ -471,7 +471,7 @@ export default function MapFloatingUI({
                 hitSlop={10}
               >
                 <Ionicons name="close" size={22} color={textPrimary} />
-              </Pressable>
+              </PressableScale>
             </View>
 
             {/* Place | Bus | Bus Stop Sub-Tabs[cite: 5] */}
@@ -486,7 +486,7 @@ export default function MapFloatingUI({
               ).map((t) => {
                 const isSel = searchContextTab === t.id;
                 return (
-                  <Pressable
+                  <PressableScale
                     key={t.id}
                     onPress={() => {
                       Haptics.selectionAsync();
@@ -510,7 +510,7 @@ export default function MapFloatingUI({
                     >
                       {t.label}
                     </Text>
-                  </Pressable>
+                  </PressableScale>
                 );
               })}
             </View>
@@ -522,11 +522,12 @@ export default function MapFloatingUI({
             style={[styles.topContainer, { paddingTop: insets.top + 8 }]}
           >
             <View style={styles.topSearchRow}>
-              <Pressable
+              <PressableScale
                 onPress={() => {
                   Haptics.selectionAsync();
                   onOpenSearch();
                 }}
+                containerStyle={{ flex: 1 }}
                 style={[
                   styles.searchBarPill,
                   { backgroundColor: cardBg, borderColor: borderCol },
@@ -539,7 +540,7 @@ export default function MapFloatingUI({
                 >
                   Search places, buses, stations…
                 </Text>
-                <Pressable
+                <PressableScale
                   hitSlop={10}
                   onPress={(e) => {
                     e.stopPropagation();
@@ -549,19 +550,16 @@ export default function MapFloatingUI({
                   style={styles.kwameMicBtn}
                 >
                   <Ionicons name="sparkles" size={16} color={ORANGE} />
-                </Pressable>
-              </Pressable>
+                </PressableScale>
+              </PressableScale>
 
               {/* Dedicated [↱ Route] Button -> Opens `app/route.tsx`[cite: 9] */}
-              <Pressable
+              <PressableScale
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                   router.push("/route" as any);
                 }}
-                style={({ pressed }) => [
-                  styles.routeSquareBtn,
-                  pressed && { opacity: 0.9, transform: [{ scale: 0.97 }] },
-                ]}
+                style={styles.routeSquareBtn}
               >
                 <MaterialCommunityIcons
                   name="directions-fork"
@@ -569,7 +567,7 @@ export default function MapFloatingUI({
                   color="#FFFFFF"
                 />
                 <Text style={styles.routeSquareText}>Route</Text>
-              </Pressable>
+              </PressableScale>
             </View>
 
             {/* KakaoMap Category Badges Under Search Bar (Restaurant, Cafe, Gas Station, Hospital, Parking...)[cite: 9] */}
@@ -579,7 +577,7 @@ export default function MapFloatingUI({
               contentContainerStyle={styles.chipsScroll}
             >
               {QUICK_CATEGORIES.map((cat) => (
-                <Pressable
+                <PressableScale
                   key={cat.key}
                   onPress={() => handleCategoryPress(cat.label)}
                   style={[
@@ -595,7 +593,7 @@ export default function MapFloatingUI({
                   <Text style={[styles.modeChipText, { color: textPrimary }]}>
                     {cat.label}
                   </Text>
-                </Pressable>
+                </PressableScale>
               ))}
             </ScrollView>
           </View>
@@ -643,13 +641,13 @@ export default function MapFloatingUI({
                   )}
                 </View>
               </View>
-              <Pressable
+              <PressableScale
                 onPress={onClearJourney}
                 hitSlop={10}
                 style={styles.navCloseBtn}
               >
                 <Ionicons name="close" size={20} color="#FFFFFF" />
-              </Pressable>
+              </PressableScale>
             </View>
 
             {nextNextPreview && (
@@ -679,9 +677,9 @@ export default function MapFloatingUI({
                     : "Indoor signal — head outside for lock"}
                 </Text>
                 {paused && (
-                  <Pressable onPress={onResume} style={styles.resumePill}>
+                  <PressableScale onPress={onResume} style={styles.resumePill}>
                     <Text style={styles.resumePillText}>Resume</Text>
-                  </Pressable>
+                  </PressableScale>
                 )}
               </View>
             )}
@@ -738,15 +736,14 @@ export default function MapFloatingUI({
             <Text style={[styles.speedUnit, { color: textMuted }]}>km/h</Text>
           </View>
         ) : !activeJourney ? (
-          <Pressable
+          <PressableScale
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setWeatherOpen(true);
             }}
-            style={({ pressed }) => [
+            style={[
               styles.weatherPill,
               { backgroundColor: cardBg, borderColor: borderCol },
-              pressed && { transform: [{ scale: 0.96 }] },
             ]}
           >
             <Ionicons
@@ -772,7 +769,7 @@ export default function MapFloatingUI({
                 PM10
               </Text>
             </View>
-          </Pressable>
+          </PressableScale>
         ) : null}
       </Animated.View>
 
@@ -788,7 +785,7 @@ export default function MapFloatingUI({
             },
           ]}
         >
-          <Pressable
+          <PressableScale
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               onBoardTransit();
@@ -797,7 +794,7 @@ export default function MapFloatingUI({
           >
             <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
             <Text style={styles.boardChipText}>I&apos;m on board</Text>
-          </Pressable>
+          </PressableScale>
         </Animated.View>
       )}
 
@@ -813,7 +810,7 @@ export default function MapFloatingUI({
           },
         ]}
       >
-        <Pressable
+        <PressableScale
           onPress={() => {
             Haptics.selectionAsync();
             onRecenter();
@@ -832,7 +829,7 @@ export default function MapFloatingUI({
             size={21}
             color={followMe ? ORANGE : textPrimary}
           />
-        </Pressable>
+        </PressableScale>
       </Animated.View>
 
       {/* Interactive Meteo & Air Quality Modal Sheet */}

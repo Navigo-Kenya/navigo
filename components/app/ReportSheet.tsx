@@ -1,41 +1,34 @@
+// components/app/ReportSheet.tsx
+//
+// "Report an issue": pick a report type from a KakaoMap-style grid of 3D
+// icons, then send it from the sticky footer. Draggable (MapSheet), so the
+// floating map controls ride above it and the tab bar steps aside.
 import { ReportCategory, ReportService } from "@/services/report";
 import { REPORT_TYPES, REPORT_TYPE_ORDER } from "@/components/icons/reportIcons";
 import { ReportTypeIcon } from "@/components/icons/ReportTypeIcon";
+import { PressableScale } from "@/components/ui/PressableScale";
 import { useAuthStore } from "@/store/authStore";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Animated,
   Dimensions,
   Modal,
-  PanResponder,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
   useColorScheme,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MapSheet, type MapSheetHandle } from "./MapSheet";
 
-const { width: SW, height: SH } = Dimensions.get("window");
-const SHEET_H = Math.min(580, Math.max(440, SH * 0.72));
+const { height: SH } = Dimensions.get("window");
+const ORANGE = "#FF6F00";
 
-// Report types in display order (most common / most urgent first, fare hike
-// last as the wide card). Labels, colours and icons: components/icons/reportIcons.
-const CATS: {
-  id:    ReportCategory;
-  label: string;
-  desc:  string;
-  color: string;
-}[] = REPORT_TYPE_ORDER.map((id) => ({ id, ...REPORT_TYPES[id] }));
-
-// All but the last entry go into the 2-column grid; the last is the wide card.
-const GRID_CATS = CATS.slice(0, -1);
-const WIDE_CAT  = CATS[CATS.length - 1];
+const CATS = REPORT_TYPE_ORDER.map((id) => ({ id, ...REPORT_TYPES[id] }));
 
 interface Props {
   onClose:  () => void;
@@ -44,66 +37,40 @@ interface Props {
 }
 
 export default function ReportSheet({ onClose, userLat, userLng }: Props) {
-  const insets = useSafeAreaInsets();
   const dark = useColorScheme() === "dark";
   const router = useRouter();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const sheet = useRef<MapSheetHandle>(null);
 
   const [selectedCat, setSelectedCat] = useState<ReportCategory | null>(null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [showAuthWall, setShowAuthWall] = useState(false);
 
-  const sheetY    = useRef(new Animated.Value(SHEET_H)).current;
-  const backdropA = useRef(new Animated.Value(0)).current;
+  const C = {
+    text:    dark ? "#F4F4F5" : "#111827",
+    sub:     dark ? "#A1A1AA" : "#6B7280",
+    tile:    dark ? "#232326" : "#F6F6F8",
+    chip:    dark ? "#27272A" : "#F1F5F9",
+    disabled: dark ? "#3F3F46" : "#D4D4D8",
+  };
 
-  // ── Entrance ────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    Animated.parallel([
-      Animated.spring(sheetY, {
-        toValue: 0, useNativeDriver: true,
-        damping: 28, stiffness: 260, mass: 0.85,
-      }),
-      Animated.timing(backdropA, { toValue: 1, duration: 230, useNativeDriver: true }),
-    ]).start();
-  }, []);
+  const selected = selectedCat ? CATS.find((c) => c.id === selectedCat) ?? null : null;
+  const hasLocation = userLat != null && userLng != null;
 
-  // ── Dismiss ─────────────────────────────────────────────────────────────────
-  const dismiss = () =>
-    Animated.parallel([
-      Animated.timing(sheetY,    { toValue: SHEET_H, duration: 260, useNativeDriver: true }),
-      Animated.timing(backdropA, { toValue: 0,        duration: 210, useNativeDriver: true }),
-    ]).start(onClose);
-
-  // ── Drag-to-dismiss (handle + header only) ──────────────────────────────────
-  const pan = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder:  (_, g) => g.dy > 5,
-      onPanResponderMove:    (_, g) => { if (g.dy > 0) sheetY.setValue(g.dy); },
-      onPanResponderRelease: (_, g) => {
-        if (g.vy > 0.5 || g.dy > 90) {
-          dismiss();
-        } else {
-          Animated.spring(sheetY, { toValue: 0, useNativeDriver: true, damping: 28, stiffness: 260 }).start();
-        }
-      },
-    })
-  ).current;
-
-  // ── Submit ──────────────────────────────────────────────────────────────────
   const submit = async () => {
-    if (!selectedCat) return;
+    if (!selectedCat || busy) return;
     if (!isAuthenticated) { setShowAuthWall(true); return; }
-    if (!userLat || !userLng) {
+    if (!hasLocation) {
       Alert.alert("Location needed", "We need your current position to pin a report.");
       return;
     }
     setBusy(true);
     try {
-      await ReportService.createReport(userLat, userLng, selectedCat);
+      await ReportService.createReport(userLat!, userLng!, selectedCat);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setDone(true);
-      setTimeout(dismiss, 1600);
+      setTimeout(() => sheet.current?.close(), 1500);
     } catch {
       Alert.alert("Couldn't submit", "Check your connection and try again.");
     } finally {
@@ -111,158 +78,143 @@ export default function ReportSheet({ onClose, userLat, userLng }: Props) {
     }
   };
 
-  // ── Palette ──────────────────────────────────────────────────────────────────
-  const bg      = dark ? "#1C1C1E" : "#FFFFFF";
-  const txt     = dark ? "#F2F2F7" : "#111111";
-  const muted   = dark ? "#8E8E93" : "#8A8A8E";
-  const cardBg  = dark ? "#2C2C2E" : "#F2F2F7";
-  const pill    = dark ? "#48484A" : "#D1D1D6";
-  const divider = dark ? "#2C2C2E" : "#E5E5EA";
+  const header = (
+    <View style={s.header}>
+      <View style={{ flex: 1 }}>
+        <Text style={[s.title, { color: C.text }]}>
+          {done ? "Alert pinned" : "Report an issue"}
+        </Text>
+        <View style={[s.locChip, { backgroundColor: C.chip }]}>
+          <Ionicons name={hasLocation ? "location" : "location-outline"} size={12} color={hasLocation ? ORANGE : C.sub} />
+          <Text style={[s.locText, { color: C.sub }]} numberOfLines={1}>
+            {hasLocation ? "Pinned at your current location" : "Waiting for your location…"}
+          </Text>
+        </View>
+      </View>
+      <PressableScale
+        onPress={() => sheet.current?.close()}
+        hitSlop={12}
+        style={[s.closeBtn, { backgroundColor: C.chip }]}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      >
+        <Ionicons name="close" size={16} color={C.sub} />
+      </PressableScale>
+    </View>
+  );
 
-  const selected = selectedCat ? CATS.find((c) => c.id === selectedCat) : null;
+  const footer = done ? null : (
+    <PressableScale
+      onPress={submit}
+      disabled={!selected || busy}
+      accessibilityRole="button"
+      accessibilityLabel={selected ? `Send ${selected.label} alert` : "Select what's happening"}
+      style={[s.sendBtn, { backgroundColor: selected ? selected.color : C.disabled }]}
+    >
+      {busy ? (
+        <ActivityIndicator color="#FFFFFF" />
+      ) : (
+        <>
+          {selected && <ReportTypeIcon type={selected.id} size={26} />}
+          <Text style={s.sendText}>
+            {selected ? `Send ${selected.label} alert` : "Select what’s happening"}
+          </Text>
+        </>
+      )}
+    </PressableScale>
+  );
 
   return (
     <>
-      {/* Backdrop */}
-      <Animated.View style={[s.backdrop, { opacity: backdropA }]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={dismiss} />
-      </Animated.View>
-
-      {/* Sheet */}
-      <Animated.View
-        style={[s.sheet, { backgroundColor: bg, transform: [{ translateY: sheetY }] }]}
+      <MapSheet
+        ref={sheet}
+        snapPoints={[SH * 0.62, SH * 0.9]}
+        onClose={onClose}
+        backdrop
+        header={header}
+        footer={footer}
       >
-        {/* ── Drag zone ─────────────────────────────────────────────────────── */}
-        <View {...pan.panHandlers}>
-          <View style={s.pillWrap}>
-            <View style={[s.pill, { backgroundColor: pill }]} />
+        {done ? (
+          <View style={s.doneBox}>
+            <View style={s.doneCircle}>
+              <Ionicons name="checkmark" size={36} color="#16A34A" />
+            </View>
+            <Text style={[s.doneTitle, { color: C.text }]}>Thanks, it&apos;s live!</Text>
+            <Text style={[s.doneSub, { color: C.sub }]}>
+              Nearby commuters can see your alert now.
+            </Text>
           </View>
-          <View style={s.header}>
-            <View style={{ flex: 1 }}>
-              <Text style={[s.title, { color: txt }]}>
-                {done ? "Alert pinned" : "Report an issue"}
-              </Text>
-              <Text style={[s.subtitle, { color: muted }]}>
-                {done
-                  ? "Thanks for keeping Nairobi moving."
-                  : "Select what's happening, then confirm."}
-              </Text>
-            </View>
-            <Pressable
-              onPress={dismiss}
-              hitSlop={14}
-              style={[s.closeBtn, { backgroundColor: cardBg }]}
-            >
-              <Ionicons name="close" size={15} color={muted} />
-            </Pressable>
-          </View>
-        </View>
-
-        {/* ── Scrollable body ───────────────────────────────────────────────── */}
-        <ScrollView
-          style={s.scroll}
-          contentContainerStyle={s.body}
-          showsVerticalScrollIndicator={false}
-          bounces={false}
-        >
-          {busy ? (
-            <View style={s.stateBox}>
-              <ActivityIndicator size="large" color="#FF6F00" />
-              <Text style={[s.stateNote, { color: muted }]}>Submitting…</Text>
-            </View>
-          ) : done ? (
-            <View style={s.stateBox}>
-              <View style={s.successCircle}>
-                <Ionicons name="checkmark" size={34} color="#34C759" />
-              </View>
-              <Text style={[s.stateHeading, { color: txt }]}>Done!</Text>
-              <Text style={[s.stateNote, { color: muted }]}>
-                Your alert is live for nearby commuters.
-              </Text>
-            </View>
-          ) : (
-            <View style={s.grid}>
-              {/* Dynamic 2-column grid — pairs GRID_CATS into rows */}
-              {Array.from({ length: Math.ceil(GRID_CATS.length / 2) }, (_, ri) => (
-                <View key={ri} style={s.row}>
-                  {GRID_CATS.slice(ri * 2, ri * 2 + 2).map((c) => (
-                    <CategoryCard
-                      key={c.id} cat={c}
-                      bg={cardBg} txt={txt} muted={muted}
-                      isSelected={selectedCat === c.id}
-                      onPress={() => setSelectedCat(selectedCat === c.id ? null : c.id)}
-                    />
-                  ))}
-                </View>
-              ))}
-              {/* Wide card always at the bottom */}
-              <WideCard
-                cat={WIDE_CAT}
-                bg={cardBg} txt={txt} muted={muted}
-                isSelected={selectedCat === WIDE_CAT.id}
-                onPress={() => setSelectedCat(selectedCat === WIDE_CAT.id ? null : WIDE_CAT.id)}
-              />
-            </View>
-          )}
-        </ScrollView>
-
-        {/* ── Confirmation footer ────────────────────────────────────────────── */}
-        {selected && !busy && !done && (
-          <View style={[s.footer, { borderTopColor: divider, backgroundColor: bg, paddingBottom: insets.bottom + 12 }]}>
-            <View style={s.footerInner}>
-              <ReportTypeIcon type={selected.id} size={34} />
-              <Text style={[s.footerLabel, { color: txt }]} numberOfLines={1}>
-                {selected.label}
-              </Text>
-              <Pressable
-                onPress={() => setSelectedCat(null)}
-                hitSlop={10}
-                style={[s.cancelBtn, { backgroundColor: cardBg }]}
-              >
-                <Text style={[s.cancelText, { color: muted }]}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={submit}
-                style={[s.sendBtn, { backgroundColor: selected.color }]}
-              >
-                <Text style={s.sendText}>Send alert</Text>
-                <Ionicons name="arrow-forward" size={14} color="#fff" />
-              </Pressable>
-            </View>
+        ) : (
+          <View style={s.grid}>
+            {CATS.map((c) => {
+              const isSel = c.id === selectedCat;
+              return (
+                <PressableScale
+                  key={c.id}
+                  containerStyle={s.tileWrap}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setSelectedCat(isSel ? null : c.id);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isSel }}
+                  accessibilityLabel={`${c.label}: ${c.desc}`}
+                  style={[
+                    s.tile,
+                    {
+                      backgroundColor: isSel ? c.color + "16" : C.tile,
+                      borderColor: isSel ? c.color : "transparent",
+                    },
+                  ]}
+                >
+                  <ReportTypeIcon type={c.id} size={50} />
+                  <Text style={[s.tileLabel, { color: C.text }]} numberOfLines={1}>
+                    {c.label}
+                  </Text>
+                  <Text style={[s.tileDesc, { color: C.sub }]} numberOfLines={2}>
+                    {c.desc}
+                  </Text>
+                  {isSel && (
+                    <View style={[s.check, { backgroundColor: c.color }]}>
+                      <Ionicons name="checkmark" size={12} color="#FFFFFF" />
+                    </View>
+                  )}
+                </PressableScale>
+              );
+            })}
           </View>
         )}
-      </Animated.View>
+      </MapSheet>
 
-      {/* ── Auth wall ────────────────────────────────────────────────────────── */}
+      {/* ── Sign-in wall ─────────────────────────────────────────────────── */}
       {showAuthWall && (
-        <Modal visible transparent animationType="none" onRequestClose={() => setShowAuthWall(false)}>
+        <Modal visible transparent animationType="fade" onRequestClose={() => setShowAuthWall(false)}>
           <Pressable style={s.wallBackdrop} onPress={() => setShowAuthWall(false)} />
-          <View style={[s.wallSheet, { backgroundColor: bg }]}>
-            <View style={s.pillWrap}>
-              <View style={[s.pill, { backgroundColor: pill }]} />
+          <View style={[s.wallSheet, { backgroundColor: dark ? "#18181B" : "#FFFFFF" }]}>
+            <View style={[s.wallIcon, { backgroundColor: ORANGE + "18" }]}>
+              <Ionicons name="lock-closed" size={28} color={ORANGE} />
             </View>
-            <View style={[s.wallIconWrap, { backgroundColor: "#FF6F0018" }]}>
-              <Ionicons name="lock-closed" size={28} color="#FF6F00" />
-            </View>
-            <Text style={[s.wallTitle, { color: txt }]}>Sign in to report</Text>
-            <Text style={[s.wallSub, { color: muted }]}>
+            <Text style={[s.wallTitle, { color: C.text }]}>Sign in to report</Text>
+            <Text style={[s.wallSub, { color: C.sub }]}>
               Help Nairobi commuters stay informed. Sign in to pin a live alert on the map.
             </Text>
-            <Pressable
-              onPress={() => { setShowAuthWall(false); dismiss(); router.push("/(auth)/login" as any); }}
-              style={s.wallPrimaryBtn}
+            <PressableScale
+              containerStyle={{ alignSelf: "stretch" }}
+              onPress={() => { setShowAuthWall(false); sheet.current?.close(); router.push("/(auth)/login" as any); }}
+              style={s.wallPrimary}
             >
               <Text style={s.wallPrimaryTxt}>Sign In</Text>
               <Ionicons name="arrow-forward" size={15} color="#fff" />
-            </Pressable>
-            <Pressable
-              onPress={() => { setShowAuthWall(false); dismiss(); router.push("/(auth)/register" as any); }}
-              style={[s.wallSecondaryBtn, { borderColor: dark ? "#48484A" : "#D1D1D6" }]}
+            </PressableScale>
+            <PressableScale
+              containerStyle={{ alignSelf: "stretch" }}
+              onPress={() => { setShowAuthWall(false); sheet.current?.close(); router.push("/(auth)/register" as any); }}
+              style={[s.wallSecondary, { borderColor: dark ? "#3F3F46" : "#D4D4D8" }]}
             >
-              <Text style={[s.wallSecondaryTxt, { color: txt }]}>Create Account</Text>
-            </Pressable>
+              <Text style={[s.wallSecondaryTxt, { color: C.text }]}>Create Account</Text>
+            </PressableScale>
             <Pressable onPress={() => setShowAuthWall(false)} hitSlop={10}>
-              <Text style={[s.wallNotNow, { color: muted }]}>Not now</Text>
+              <Text style={[s.wallNotNow, { color: C.sub }]}>Not now</Text>
             </Pressable>
           </View>
         </Modal>
@@ -271,188 +223,94 @@ export default function ReportSheet({ onClose, userLat, userLng }: Props) {
   );
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
-
-interface CardProps {
-  cat:        (typeof CATS)[0];
-  bg:         string;
-  txt:        string;
-  muted:      string;
-  isSelected: boolean;
-  onPress:    () => void;
-}
-
-function CategoryCard({ cat, bg, txt, muted, isSelected, onPress }: CardProps) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[
-        s.card,
-        {
-          backgroundColor: isSelected ? cat.color + "18" : bg,
-          borderWidth:     isSelected ? 1.5 : 0,
-          borderColor:     isSelected ? cat.color : "transparent",
-        },
-      ]}
-    >
-      <ReportTypeIcon type={cat.id} size={46} />
-      <View style={s.cardText}>
-        <Text style={[s.cardLabel, { color: txt }]} numberOfLines={1}>{cat.label}</Text>
-        <Text style={[s.cardDesc,  { color: muted }]} numberOfLines={2}>{cat.desc}</Text>
-      </View>
-    </Pressable>
-  );
-}
-
-function WideCard({ cat, bg, txt, muted, isSelected, onPress }: CardProps) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[
-        s.wideCard,
-        {
-          backgroundColor: isSelected ? cat.color + "18" : bg,
-          borderWidth:     isSelected ? 1.5 : 0,
-          borderColor:     isSelected ? cat.color : "transparent",
-        },
-      ]}
-    >
-      <ReportTypeIcon type={cat.id} size={46} />
-      <View style={{ flex: 1 }}>
-        <Text style={[s.cardLabel, { color: txt }]}>{cat.label}</Text>
-        <Text style={[s.cardDesc,  { color: muted }]}>{cat.desc}</Text>
-      </View>
-      {isSelected
-        ? <Ionicons name="checkmark-circle" size={18} color={cat.color} />
-        : <Ionicons name="chevron-forward"  size={14} color={muted} />
-      }
-    </Pressable>
-  );
-}
-
-// ── Styles ────────────────────────────────────────────────────────────────────
-
-const GAP    = 10;
-const CARD_W = (SW - 32 - GAP) / 2;
+const GAP = 10;
 
 const s = StyleSheet.create({
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.42)",
-    zIndex:          29,
-  },
-  sheet: {
-    position:             "absolute",
-    bottom: 0, left: 0, right: 0,
-    height:               SHEET_H,
-    borderTopLeftRadius:  26,
-    borderTopRightRadius: 26,
-    shadowColor:          "#000",
-    shadowOffset:         { width: 0, height: -3 },
-    shadowOpacity:        0.13,
-    shadowRadius:         18,
-    elevation:            30,
-    zIndex:               30,
-    flexDirection:        "column",
-  },
-
-  pillWrap: { alignItems: "center", paddingTop: 10, paddingBottom: 4 },
-  pill:     { width: 36, height: 4, borderRadius: 2 },
-
   header: {
-    flexDirection: "row", alignItems: "flex-start",
-    paddingHorizontal: 20, paddingTop: 4, paddingBottom: 16, gap: 12,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingHorizontal: 18,
+    paddingBottom: 14,
+    gap: 12,
   },
-  title:    { fontSize: 20, fontWeight: "700", letterSpacing: -0.3, marginBottom: 3 },
-  subtitle: { fontSize: 13, lineHeight: 18 },
-  closeBtn: {
-    width: 30, height: 30, borderRadius: 15,
-    alignItems: "center", justifyContent: "center", marginTop: 2,
-  },
-
-  scroll: { flex: 1 },
-  body:   { paddingHorizontal: 16, paddingBottom: 8 },
-
-  grid: { gap: GAP },
-  row:  { flexDirection: "row", gap: GAP },
-
-  card: {
-    width: CARD_W, height: CARD_W * 0.85,
-    borderRadius: 18, padding: 16,
-    justifyContent: "space-between",
-  },
-  iconBox:   { width: 44, height: 44, borderRadius: 13, alignItems: "center", justifyContent: "center" },
-  cardText:  { gap: 2 },
-  cardLabel: { fontSize: 14, fontWeight: "700", letterSpacing: -0.2 },
-  cardDesc:  { fontSize: 11, lineHeight: 15 },
-
-  wideCard: {
-    flexDirection: "row", alignItems: "center",
-    borderRadius: 18, paddingVertical: 14, paddingHorizontal: 16, gap: 14,
-  },
-
-  footer: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 12, // base; insets.bottom added inline
-  },
-  footerInner:    { flexDirection: "row", alignItems: "center", gap: 10 },
-  footerIconWrap: {
-    width: 34, height: 34, borderRadius: 10,
-    alignItems: "center", justifyContent: "center", flexShrink: 0,
-  },
-  footerLabel: { flex: 1, fontSize: 14, fontWeight: "600" },
-  cancelBtn: {
-    borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9,
-  },
-  cancelText: { fontSize: 13, fontWeight: "600" },
-  sendBtn: {
-    flexDirection: "row", alignItems: "center", gap: 5,
-    borderRadius: 20, paddingHorizontal: 16, paddingVertical: 9,
-  },
-  sendText: { fontSize: 13, fontWeight: "700", color: "#fff" },
-
-  stateBox: { alignItems: "center", paddingTop: 28, paddingBottom: 8, gap: 10 },
-  successCircle: {
-    width: 68, height: 68, borderRadius: 34,
-    backgroundColor: "#34C75918",
-    alignItems: "center", justifyContent: "center", marginBottom: 4,
-  },
-  stateHeading: { fontSize: 20, fontWeight: "700" },
-  stateNote:    { fontSize: 13, textAlign: "center", lineHeight: 19 },
-
-  // ── Auth wall ──────────────────────────────────────────────────────────────
-  wallBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.52)",
-  },
-  wallSheet: {
-    position: "absolute",
-    bottom: 0, left: 0, right: 0,
-    borderTopLeftRadius:  28,
-    borderTopRightRadius: 28,
-    paddingHorizontal: 26,
-    paddingTop: 14,
-    paddingBottom: 36,
+  title: { fontSize: 20, fontWeight: "800", letterSpacing: -0.4 },
+  locChip: {
+    flexDirection: "row",
     alignItems: "center",
-    gap: 14,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 20,
-    elevation: 40,
+    gap: 5,
+    alignSelf: "flex-start",
+    marginTop: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
-  wallIconWrap: {
-    width: 66, height: 66, borderRadius: 21,
-    alignItems: "center", justifyContent: "center",
-    marginBottom: 2,
+  locText: { fontSize: 12, fontWeight: "500" },
+  closeBtn: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
+
+  grid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    paddingHorizontal: 14,
+    gap: GAP,
   },
-  wallTitle:        { fontSize: 21, fontWeight: "800", letterSpacing: -0.4, textAlign: "center" },
-  wallSub:          { fontSize: 13.5, lineHeight: 20, textAlign: "center", marginBottom: 6, paddingHorizontal: 4 },
-  wallPrimaryBtn:   { width: "100%", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 15, borderRadius: 16, backgroundColor: "#FF6F00" },
-  wallPrimaryTxt:   { color: "#fff", fontSize: 16, fontWeight: "700", letterSpacing: -0.2 },
-  wallSecondaryBtn: { width: "100%", alignItems: "center", paddingVertical: 14, borderRadius: 16, borderWidth: 1.5 },
-  wallSecondaryTxt: { fontSize: 15, fontWeight: "600", letterSpacing: -0.2 },
-  wallNotNow:       { fontSize: 13, fontWeight: "500", marginTop: 2 },
+  tileWrap: { width: "31.2%" },
+  tile: {
+    alignItems: "center",
+    paddingTop: 12,
+    paddingBottom: 12,
+    paddingHorizontal: 6,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    minHeight: 132,
+  },
+  tileLabel: { fontSize: 13, fontWeight: "700", marginTop: 6, letterSpacing: -0.2 },
+  tileDesc: { fontSize: 10.5, lineHeight: 14, textAlign: "center", marginTop: 2 },
+  check: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  sendBtn: {
+    height: 52,
+    borderRadius: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  sendText: { color: "#FFFFFF", fontSize: 15.5, fontWeight: "800", letterSpacing: -0.2 },
+
+  doneBox: { alignItems: "center", paddingTop: 30, paddingHorizontal: 24, gap: 8 },
+  doneCircle: {
+    width: 72, height: 72, borderRadius: 36,
+    backgroundColor: "#16A34A18",
+    alignItems: "center", justifyContent: "center", marginBottom: 6,
+  },
+  doneTitle: { fontSize: 20, fontWeight: "800" },
+  doneSub: { fontSize: 13.5, textAlign: "center", lineHeight: 19 },
+
+  wallBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.5)" },
+  wallSheet: {
+    position: "absolute", bottom: 0, left: 0, right: 0,
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingHorizontal: 24, paddingTop: 22, paddingBottom: 36,
+    alignItems: "center", gap: 12,
+  },
+  wallIcon: { width: 64, height: 64, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+  wallTitle: { fontSize: 21, fontWeight: "800", letterSpacing: -0.4, textAlign: "center" },
+  wallSub: { fontSize: 13.5, lineHeight: 20, textAlign: "center", marginBottom: 4 },
+  wallPrimary: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    paddingVertical: 15, borderRadius: 16, backgroundColor: ORANGE,
+  },
+  wallPrimaryTxt: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  wallSecondary: { alignItems: "center", paddingVertical: 14, borderRadius: 16, borderWidth: 1.5 },
+  wallSecondaryTxt: { fontSize: 15, fontWeight: "600" },
+  wallNotNow: { fontSize: 13, fontWeight: "500", marginTop: 2 },
 });
