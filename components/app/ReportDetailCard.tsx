@@ -1,5 +1,7 @@
-import type { ReportCategory, TransitReport } from "@/services/report";
+import type { ReportVoteResult, TransitReport } from "@/services/report";
 import { ReportService } from "@/services/report";
+import { reportMeta } from "@/components/icons/reportIcons";
+import { ReportTypeIcon } from "@/components/icons/ReportTypeIcon";
 import { useAuthStore } from "@/store/authStore";
 import { useReportVoteStore } from "@/store/reportVoteStore";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,20 +20,6 @@ import {
 
 const SHEET_H    = 300;
 const WALL_H     = 440;
-
-type Meta = { label: string; desc: string; icon: keyof typeof Ionicons.glyphMap; color: string };
-
-const CAT: Record<ReportCategory, Meta> = {
-  traffic_jam:  { label: "Traffic Jam",   desc: "Heavy congestion",          icon: "car-outline",          color: "#FF6F00" },
-  accident:     { label: "Accident",      desc: "Crash or collision",        icon: "alert-circle-outline", color: "#FF3B30" },
-  road_blocked: { label: "Road Blocked",  desc: "Road closed or barricaded", icon: "close-circle-outline", color: "#FF2D55" },
-  stage_queue:  { label: "Long Queue",    desc: "Long wait at the stage",    icon: "people-outline",       color: "#FF9500" },
-  police_check: { label: "Police Check",  desc: "NTSA / traffic police",     icon: "shield-outline",       color: "#007AFF" },
-  flooded_route:{ label: "Flooded Road",  desc: "Road impassable",           icon: "water-outline",        color: "#5856D6" },
-  breakdown:    { label: "Breakdown",     desc: "Vehicle blocking the road", icon: "build-outline",        color: "#AF52DE" },
-  security:     { label: "Insecurity",    desc: "Robbery or safety concern", icon: "alert-outline",        color: "#D32F2F" },
-  fare_hike:    { label: "Fare Hike",     desc: "Higher fares than usual",   icon: "trending-up-outline",  color: "#30B050" },
-};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -75,20 +63,29 @@ interface Props {
   report:        TransitReport;
   clusterCount?: number;
   onClose:       () => void;
+  /**
+   * Called with the server's result after every vote, so the map can update
+   * its copy of the report (counts, my_vote) or drop it once dismissed.
+   */
+  onVoted?:      (reportId: string, result: ReportVoteResult) => void;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function ReportDetailCard({ report, clusterCount = 1, onClose }: Props) {
+export default function ReportDetailCard({ report, clusterCount = 1, onClose, onVoted }: Props) {
   const dark   = useColorScheme() === "dark";
   const router = useRouter();
   const { user } = useAuthStore();
-  const meta   = CAT[report.type] ?? { label: "Alert", desc: "", icon: "warning-outline" as any, color: "#FF9500" };
+  const meta   = reportMeta(report.type);
 
   const [upvotes,     setUpvotes]     = useState(report.upvotes);
   const [downvotes,   setDownvotes]   = useState(report.downvotes);
-  const [userVote,    setUserVote]    = useState<"up" | "down" | null>(
-    () => useReportVoteStore.getState().votes[report.id] ?? null
+  // The server's my_vote is the truth (same on every device). The local store
+  // only fills in for older API responses that don't include it.
+  const [userVote,    setUserVote]    = useState<"up" | "down" | null>(() =>
+    report.my_vote !== undefined
+      ? report.my_vote
+      : useReportVoteStore.getState().votes[report.id] ?? null
   );
   const [voting,      setVoting]      = useState(false);
   const [showAuthWall, setShowAuthWall] = useState(false);
@@ -154,25 +151,33 @@ export default function ReportDetailCard({ report, clusterCount = 1, onClose }: 
   ).current;
 
   // ── Voting (optimistic) ───────────────────────────────────────────────────────
-  // Once a direction is chosen the button for that direction is disabled, so
-  // users can switch (up→down) but cannot retract. The guard `userVote === v`
-  // is a safety net in case the disabled prop is bypassed.
+  // Tap 👍 / 👎 to vote, tap a different one to switch, tap your current vote
+  // again to take it back. The server sets (not toggles) the vote, so the
+  // request always says exactly what we want; its answer is the final word.
   const handleVote = async (v: "up" | "down") => {
     if (!user) { setShowAuthWall(true); return; }
-    if (voting || userVote === v) return;
+    if (voting) return;
     const prevVote = userVote;
     const prevUp   = upvotes;
     const prevDown = downvotes;
+    const next     = prevVote === v ? null : v;
 
-    persistVote(v);
-    if (v === "up")  { setUpvotes(n => n + 1); if (prevVote === "down") setDownvotes(n => n - 1); }
-    else             { setDownvotes(n => n + 1); if (prevVote === "up")  setUpvotes(n => n - 1); }
+    // Optimistic counts: take the old vote off, put the new one on.
+    persistVote(next);
+    if (prevVote === "up")   setUpvotes(n => Math.max(0, n - 1));
+    if (prevVote === "down") setDownvotes(n => Math.max(0, n - 1));
+    if (next === "up")       setUpvotes(n => n + 1);
+    if (next === "down")     setDownvotes(n => n + 1);
 
     setVoting(true);
     try {
-      const res = await ReportService.voteReport(report.id, v);
+      const res = await ReportService.voteReport(report.id, next ?? "clear");
       setUpvotes(res.upvotes);
       setDownvotes(res.downvotes);
+      persistVote(res.my_vote);
+      onVoted?.(report.id, res);
+      // The community voted it down: nothing left to show.
+      if (res.status === "dismissed") dismiss();
     } catch {
       persistVote(prevVote);
       setUpvotes(prevUp);
@@ -213,9 +218,7 @@ export default function ReportDetailCard({ report, clusterCount = 1, onClose }: 
         <View style={s.body}>
           {/* Header */}
           <View style={s.headerRow}>
-            <View style={[s.iconBubble, { backgroundColor: meta.color + "1C" }]}>
-              <Ionicons name={meta.icon} size={26} color={meta.color} />
-            </View>
+            <ReportTypeIcon type={report.type} size={52} />
 
             <View style={s.headerText}>
               <Text style={[s.catLabel, { color: txt }]}>{meta.label}</Text>
@@ -269,14 +272,17 @@ export default function ReportDetailCard({ report, clusterCount = 1, onClose }: 
             <Text style={[s.votePrompt, { color: muted }]}>Still accurate?</Text>
 
             <View style={s.voteBtns}>
-              {/* Disabled once voted up — user can switch to down but not retract */}
+              {/* Tap again to take your vote back */}
               <Pressable
                 onPress={() => handleVote("up")}
-                disabled={userVote === "up" || voting}
+                disabled={voting}
+                accessibilityRole="button"
+                accessibilityState={{ selected: userVote === "up" }}
+                accessibilityLabel={`Still there, ${upvotes} confirmations`}
                 style={[
                   s.voteBtn,
                   userVote === "up"
-                    ? { backgroundColor: GREEN + "1C", borderColor: GREEN + "50", borderWidth: 1, opacity: 0.72 }
+                    ? { backgroundColor: GREEN + "1C", borderColor: GREEN + "50", borderWidth: 1 }
                     : { backgroundColor: cardBg },
                 ]}
               >
@@ -290,11 +296,14 @@ export default function ReportDetailCard({ report, clusterCount = 1, onClose }: 
 
               <Pressable
                 onPress={() => handleVote("down")}
-                disabled={userVote === "down" || voting}
+                disabled={voting}
+                accessibilityRole="button"
+                accessibilityState={{ selected: userVote === "down" }}
+                accessibilityLabel={`Not there anymore, ${downvotes} reports`}
                 style={[
                   s.voteBtn,
                   userVote === "down"
-                    ? { backgroundColor: RED + "1C", borderColor: RED + "50", borderWidth: 1, opacity: 0.72 }
+                    ? { backgroundColor: RED + "1C", borderColor: RED + "50", borderWidth: 1 }
                     : { backgroundColor: cardBg },
                 ]}
               >
@@ -331,7 +340,7 @@ export default function ReportDetailCard({ report, clusterCount = 1, onClose }: 
 
               <Text style={[s.wallTitle, { color: txt }]}>Join the conversation</Text>
               <Text style={[s.wallSub, { color: muted }]}>
-                Sign in to vote on reports and help Nairobi commuters know what's actually happening on the road.
+                Sign in to vote on reports and help Nairobi commuters know what&apos;s actually happening on the road.
               </Text>
 
               {/* Sign In */}

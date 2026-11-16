@@ -1,156 +1,171 @@
 // components/map/ReportLayer.tsx
+//
+// Crowdsourced reports on the map, drawn natively by Mapbox:
+//   - each report is a 3D pin (pre-rendered PNG, same artwork as ReportSheet)
+//     anchored at its tip, newest drawn on top
+//   - nearby reports merge into a count bubble via Mapbox clustering
+//
+// Replaces one <PointAnnotation> per report: those are React views
+// snapshotted into bitmaps, which is unreliable on the new architecture
+// (pins rendered blank when the icon font wasn't loaded yet) and only fire
+// onSelected once until deselected, so tapping a pin a second time did nothing.
 import type { TransitReport } from "@/services/report";
-import { Ionicons } from "@expo/vector-icons";
-import { PointAnnotation } from "@rnmapbox/maps";
-import React, { forwardRef, memo, useImperativeHandle, useMemo } from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
+import { REPORT_TYPES } from "@/components/icons/reportIcons";
+import { Images, ShapeSource, SymbolLayer, CircleLayer } from "@rnmapbox/maps";
 import type { MapView } from "@rnmapbox/maps";
+import React, {
+  forwardRef,
+  memo,
+  useCallback,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+} from "react";
 
-// Must stay in sync with ReportSheet CATS and ReportDetailCard CAT
-const CAT: Record<string, { icon: keyof typeof Ionicons.glyphMap; color: string }> = {
-  traffic_jam:   { icon: "car-outline",          color: "#FF6F00" },
-  accident:      { icon: "alert-circle-outline", color: "#FF3B30" },
-  road_blocked:  { icon: "close-circle-outline", color: "#FF2D55" },
-  stage_queue:   { icon: "people-outline",       color: "#FF9500" },
-  police_check:  { icon: "shield-outline",       color: "#007AFF" },
-  flooded_route: { icon: "water-outline",        color: "#5856D6" },
-  breakdown:     { icon: "build-outline",        color: "#AF52DE" },
-  security:      { icon: "alert-outline",        color: "#D32F2F" },
-  fare_hike:     { icon: "trending-up-outline",  color: "#30B050" },
-};
-
-const PIN = 34; // pin diameter
-const WRAP = 44; // touch target
 const MIN_ZOOM_VISIBILITY = 11.5;
+const CLUSTER_COLOR = "#FF6F00";
 
-const CLUSTER_DEG = 30 / 111_320;
-
-interface Group { primary: TransitReport; count: number }
-
-function clusterReports(reports: TransitReport[]): Group[] {
-  const sorted = [...reports].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  );
-  const used = new Set<string>();
-  const groups: Group[] = [];
-
-  for (const r of sorted) {
-    if (used.has(r.id)) continue;
-    used.add(r.id);
-    let count = 1;
-    for (const other of sorted) {
-      if (used.has(other.id)) continue;
-      if (
-        Math.abs(r.lat - other.lat) < CLUSTER_DEG &&
-        Math.abs(r.lng - other.lng) < CLUSTER_DEG
-      ) {
-        used.add(other.id);
-        count++;
-      }
-    }
-    groups.push({ primary: r, count });
-  }
-
-  return groups;
-}
+/** One pin image per type; regenerate the PNGs when reportIcons.ts changes. */
+const REPORT_PIN_IMAGES = {
+  "report-traffic_jam":   require("@/assets/images/reports/report-traffic_jam.png"),
+  "report-accident":      require("@/assets/images/reports/report-accident.png"),
+  "report-road_blocked":  require("@/assets/images/reports/report-road_blocked.png"),
+  "report-stage_queue":   require("@/assets/images/reports/report-stage_queue.png"),
+  "report-police_check":  require("@/assets/images/reports/report-police_check.png"),
+  "report-flooded_route": require("@/assets/images/reports/report-flooded_route.png"),
+  "report-breakdown":     require("@/assets/images/reports/report-breakdown.png"),
+  "report-security":      require("@/assets/images/reports/report-security.png"),
+  "report-fare_hike":     require("@/assets/images/reports/report-fare_hike.png"),
+} as const;
 
 export interface ReportLayerHandle {
-  project(): void; 
+  /** Kept for compatibility with map.tsx; native layers need no projection. */
+  project(): void;
 }
 
 interface ReportLayerProps {
-  reports:  TransitReport[];
-  mapRef:   React.RefObject<MapView | null>;
-  viewZoom?: number; 
-  onPress:  (report: TransitReport, count: number) => void;
+  reports:   TransitReport[];
+  mapRef:    React.RefObject<MapView | null>;
+  viewZoom?: number;
+  onPress:   (report: TransitReport, count: number) => void;
 }
+
+const NativeShapeSource = ShapeSource as unknown as React.ComponentType<any>;
+const NativeSymbolLayer = SymbolLayer as unknown as React.ComponentType<any>;
+const NativeCircleLayer = CircleLayer as unknown as React.ComponentType<any>;
+const NativeImages = Images as unknown as React.ComponentType<any>;
+
+const isCluster = ["has", "point_count"];
 
 export const ReportLayer = memo(forwardRef<ReportLayerHandle, ReportLayerProps>(
   function ReportLayer({ reports, viewZoom = 13, onPress }, ref) {
-    
     useImperativeHandle(ref, () => ({ project: () => {} }), []);
+    const sourceRef = useRef<any>(null);
 
-    const groups = useMemo(() => clusterReports(reports), [reports]);
+    const byId = useMemo(() => {
+      const m = new Map<string, TransitReport>();
+      for (const r of reports) m.set(r.id, r);
+      return m;
+    }, [reports]);
 
-    if (viewZoom < MIN_ZOOM_VISIBILITY || groups.length === 0) return null;
+    const shape = useMemo<GeoJSON.FeatureCollection>(() => ({
+      type: "FeatureCollection",
+      features: reports
+        // Never hand Mapbox a bad coordinate: it crashes natively.
+        .filter((r) => Number.isFinite(r.lat) && Number.isFinite(r.lng))
+        .map((r) => ({
+          type: "Feature",
+          id: r.id,
+          geometry: { type: "Point", coordinates: [r.lng, r.lat] },
+          properties: {
+            id: r.id,
+            icon: r.type in REPORT_TYPES ? `report-${r.type}` : "report-breakdown",
+            // Seconds, so newer reports sort (and draw) above older ones.
+            ts: Math.floor(new Date(r.created_at).getTime() / 1000) || 0,
+          },
+        })),
+    }), [reports]);
+
+    const handlePress = useCallback(async (e: any) => {
+      const feature = e?.features?.[0];
+      if (!feature) return;
+
+      const count = feature.properties?.point_count;
+      if (!count) {
+        const report = byId.get(feature.properties?.id);
+        if (report) onPress(report, 1);
+        return;
+      }
+
+      // A cluster: open its newest report, with the cluster size.
+      try {
+        const leaves = await sourceRef.current?.getClusterLeaves(feature, 100, 0);
+        const newest = [...(leaves?.features ?? [])].sort(
+          (a: any, b: any) => (b.properties?.ts ?? 0) - (a.properties?.ts ?? 0)
+        )[0];
+        const report = newest && byId.get(newest.properties?.id);
+        if (report) onPress(report, count);
+      } catch {
+        // Leaves unavailable (e.g. the source just updated): ignore the tap.
+      }
+    }, [byId, onPress]);
+
+    if (viewZoom < MIN_ZOOM_VISIBILITY || shape.features.length === 0) return null;
 
     return (
       <>
-        {groups.map((g) => (
-          <ReportPin
-            key={g.primary.id}
-            report={g.primary}
-            count={g.count}
-            onPress={() => onPress(g.primary, g.count)}
+        <NativeImages images={REPORT_PIN_IMAGES} />
+        <NativeShapeSource
+          ref={sourceRef}
+          id="reports"
+          shape={shape}
+          cluster
+          clusterRadius={42}
+          clusterMaxZoomLevel={15}
+          hitbox={{ width: 30, height: 30 }}
+          onPress={handlePress}
+        >
+          {/* Layers must be direct children of ShapeSource (no fragments). */}
+          <NativeCircleLayer
+            id="reports-cluster"
+            filter={isCluster}
+            style={{
+              circleColor: CLUSTER_COLOR,
+              circleRadius: ["step", ["get", "point_count"], 15, 5, 18, 15, 22],
+              circleStrokeWidth: 3,
+              circleStrokeColor: "#FFFFFF",
+              circlePitchAlignment: "viewport",
+            }}
           />
-        ))}
+          <NativeSymbolLayer
+            id="reports-cluster-count"
+            filter={isCluster}
+            style={{
+              textField: ["get", "point_count_abbreviated"],
+              textSize: 13,
+              textColor: "#FFFFFF",
+              textAllowOverlap: true,
+              textIgnorePlacement: true,
+            }}
+          />
+          <NativeSymbolLayer
+            id="reports-pin"
+            filter={["!", isCluster]}
+            style={{
+              iconImage: ["get", "icon"],
+              iconAnchor: "bottom",
+              // The image ends with a ground shadow below the tail; shift it
+              // down so the tail tip, not the shadow, marks the location.
+              iconOffset: [0, 4],
+              iconSize: ["interpolate", ["linear"], ["zoom"], 11.5, 0.72, 16, 1],
+              iconAllowOverlap: true,
+              iconIgnorePlacement: true,
+              iconPitchAlignment: "viewport",
+              symbolSortKey: ["get", "ts"],
+            }}
+          />
+        </NativeShapeSource>
       </>
     );
   }
 ));
-
-const ReportPin = memo(function ReportPin({
-  report, count, onPress,
-}: {
-  report: TransitReport; count: number; onPress: () => void;
-}) {
-  // 🛠️ FIX 3: Absolute safety guard against Mapbox native crashes
-  if (typeof report.lng !== "number" || typeof report.lat !== "number" || isNaN(report.lng) || isNaN(report.lat)) {
-    return null;
-  }
-
-  const meta = CAT[report.type] ?? { icon: "warning-outline" as const, color: "#FF9500" };
-  
-  return (
-    <PointAnnotation
-      id={`report-${report.id}`}
-      coordinate={[report.lng, report.lat]}
-      onSelected={onPress}
-      // Ensure zIndex keeps it above map layers
-      style={{ zIndex: 10 }}
-    >
-      <View style={s.pinWrap}>
-        <View style={[s.pin, { backgroundColor: meta.color }]}>
-          <Ionicons name={meta.icon} size={15} color="#fff" />
-        </View>
-        {count > 1 && (
-          <View style={[s.badge, { borderColor: meta.color }]}>
-            <Text style={[s.badgeText, { color: meta.color }]}>
-              {count > 9 ? "9+" : String(count)}
-            </Text>
-          </View>
-        )}
-      </View>
-    </PointAnnotation>
-  );
-});
-
-const s = StyleSheet.create({
-  pinWrap: {
-    width: WRAP, height: WRAP,
-    alignItems: "center", justifyContent: "center",
-  },
-  pin: {
-    width: PIN, height: PIN, borderRadius: PIN / 2,
-    alignItems: "center", justifyContent: "center",
-    borderWidth: 2.5, borderColor: "#FFFFFF",
-    ...Platform.select({
-      ios: {
-        shadowColor:   "#000",
-        shadowOpacity: 0.22,
-        shadowRadius:  4,
-        shadowOffset:  { width: 0, height: 2 },
-      },
-      android: { elevation: 5 },
-    }),
-  },
-  badge: {
-    position: "absolute", top: 2, right: 2,
-    minWidth: 18, height: 18, borderRadius: 9,
-    backgroundColor: "#FFFFFF", borderWidth: 1.5,
-    alignItems: "center", justifyContent: "center",
-    paddingHorizontal: 3,
-    ...Platform.select({ android: { elevation: 6 } }),
-  },
-  badgeText: { fontSize: 9, fontWeight: "800", lineHeight: 11 },
-});

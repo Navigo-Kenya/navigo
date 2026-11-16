@@ -1,4 +1,6 @@
 import { ReportCategory, ReportService } from "@/services/report";
+import { REPORT_TYPES, REPORT_TYPE_ORDER } from "@/components/icons/reportIcons";
+import { ReportTypeIcon } from "@/components/icons/ReportTypeIcon";
 import { useAuthStore } from "@/store/authStore";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -22,25 +24,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 const { width: SW, height: SH } = Dimensions.get("window");
 const SHEET_H = Math.min(580, Math.max(440, SH * 0.72));
 
+// Report types in display order (most common / most urgent first, fare hike
+// last as the wide card). Labels, colours and icons: components/icons/reportIcons.
 const CATS: {
   id:    ReportCategory;
   label: string;
   desc:  string;
-  icon:  keyof typeof Ionicons.glyphMap;
   color: string;
-}[] = [
-  // ── Most common / high urgency first ─────────────────────────────────────
-  { id: "traffic_jam",  label: "Traffic Jam",   desc: "Heavy congestion",          icon: "car-outline",           color: "#FF6F00" },
-  { id: "accident",     label: "Accident",       desc: "Crash or collision",        icon: "alert-circle-outline",  color: "#FF3B30" },
-  { id: "road_blocked", label: "Road Blocked",   desc: "Road closed or barricaded", icon: "close-circle-outline",  color: "#FF2D55" },
-  { id: "stage_queue",  label: "Long Queue",     desc: "Long wait at the stage",    icon: "people-outline",        color: "#FF9500" },
-  { id: "police_check", label: "Police Check",   desc: "NTSA / traffic police",     icon: "shield-outline",        color: "#007AFF" },
-  { id: "flooded_route",label: "Flooded Road",   desc: "Road impassable",           icon: "water-outline",         color: "#5856D6" },
-  { id: "breakdown",    label: "Breakdown",      desc: "Vehicle blocking the road", icon: "build-outline",         color: "#AF52DE" },
-  { id: "security",     label: "Insecurity",     desc: "Robbery or safety concern", icon: "alert-outline",         color: "#D32F2F" },
-  // ── Wide card (always last) ───────────────────────────────────────────────
-  { id: "fare_hike",    label: "Fare Hike",      desc: "Higher fares than usual",   icon: "trending-up-outline",   color: "#30B050" },
-];
+}[] = REPORT_TYPE_ORDER.map((id) => ({ id, ...REPORT_TYPES[id] }));
 
 // All but the last entry go into the 2-column grid; the last is the wide card.
 const GRID_CATS = CATS.slice(0, -1);
@@ -219,9 +210,7 @@ export default function ReportSheet({ onClose, userLat, userLng }: Props) {
         {selected && !busy && !done && (
           <View style={[s.footer, { borderTopColor: divider, backgroundColor: bg, paddingBottom: insets.bottom + 12 }]}>
             <View style={s.footerInner}>
-              <View style={[s.footerIconWrap, { backgroundColor: selected.color + "18" }]}>
-                <Ionicons name={selected.icon} size={18} color={selected.color} />
-              </View>
+              <ReportTypeIcon type={selected.id} size={34} />
               <Text style={[s.footerLabel, { color: txt }]} numberOfLines={1}>
                 {selected.label}
               </Text>
@@ -306,9 +295,7 @@ function CategoryCard({ cat, bg, txt, muted, isSelected, onPress }: CardProps) {
         },
       ]}
     >
-      <View style={[s.iconBox, { backgroundColor: cat.color + (isSelected ? "28" : "18") }]}>
-        <Ionicons name={cat.icon} size={22} color={cat.color} />
-      </View>
+      <ReportTypeIcon type={cat.id} size={46} />
       <View style={s.cardText}>
         <Text style={[s.cardLabel, { color: txt }]} numberOfLines={1}>{cat.label}</Text>
         <Text style={[s.cardDesc,  { color: muted }]} numberOfLines={2}>{cat.desc}</Text>
@@ -330,9 +317,7 @@ function WideCard({ cat, bg, txt, muted, isSelected, onPress }: CardProps) {
         },
       ]}
     >
-      <View style={[s.iconBox, { backgroundColor: cat.color + (isSelected ? "28" : "18") }]}>
-        <Ionicons name={cat.icon} size={22} color={cat.color} />
-      </View>
+      <ReportTypeIcon type={cat.id} size={46} />
       <View style={{ flex: 1 }}>
         <Text style={[s.cardLabel, { color: txt }]}>{cat.label}</Text>
         <Text style={[s.cardDesc,  { color: muted }]}>{cat.desc}</Text>
