@@ -20,6 +20,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { StopService, type StopDeparturesResponse } from "@/services/stop";
+import { formatEta } from "@/utils/mapHelpers";
 
 interface IntermStopInfoCardProps {
   stop: IntermediateStop;
@@ -129,7 +130,7 @@ export function IntermStopInfoCard({
             {nextArrival && (
               <View style={s.liveEtaPill}>
                 <Text style={s.liveEtaText}>
-                  {nextArrival.eta_label} ({nextArrival.crowding})
+                  {formatEta(nextArrival.eta_seconds)} ({nextArrival.crowding})
                 </Text>
               </View>
             )}

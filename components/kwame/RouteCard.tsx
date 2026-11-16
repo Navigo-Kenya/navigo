@@ -11,6 +11,7 @@ import { usePrefsStore, formatDist } from '../../store/prefsStore';
 import { useSavedStore } from '../../store/savedStore'; 
 import { useJourneyStore } from '../../store/journeyStore';
 import { renderMarkdownText } from '../../utils/markdown';
+import { sToMin } from '../../utils/mapHelpers';
 
 interface Props {
   route: any;
@@ -235,7 +236,7 @@ export default function RouteCard({ route, index, C }: Props) {
             ) : null}
             <View style={[styles.badge, { backgroundColor: C.border }]}>
               <Ionicons name="time-outline" size={13} color={ORANGE} style={{ marginRight: 4 }} />
-              <Text style={[styles.badgeText, { color: ORANGE }]}>{Math.round(route.total_duration / 60)} min</Text>
+              <Text style={[styles.badgeText, { color: ORANGE }]}>{sToMin(route.total_duration)}</Text>
             </View>
           </View>
         </View>

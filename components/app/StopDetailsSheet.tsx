@@ -14,6 +14,7 @@ import {
   type StopRouteBoardItem,
 } from "@/services/stop";
 import { useAuthStore } from "@/store/authStore";
+import { formatEta } from "@/utils/mapHelpers";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as Location from "expo-location";
@@ -1690,7 +1691,7 @@ export default function StopDetailsSheet({
                               numberOfLines={1}
                             >
                               <Text style={s.arrivalRedText}>
-                                {arr.eta_label}
+                                {formatEta(arr.eta_seconds)}
                               </Text>{" "}
                               <Text style={{ color: C.sub, fontSize: 11.5 }}>
                                 ({arr.stops_away} stops left, {arr.crowding})

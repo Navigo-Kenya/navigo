@@ -7,6 +7,7 @@ import {
   maneuverIcon,
   mToNice,
   sToMin,
+  formatEta,
 } from "@/utils/mapHelpers";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -453,7 +454,7 @@ function TransitSection({
 
           {nextDep && (
             <View style={ts.liveNextRow}>
-              <Text style={ts.liveNextRed}>{nextDep.eta_label}</Text>
+              <Text style={ts.liveNextRed}>{formatEta(nextDep.eta_seconds)}</Text>
               <Text style={ts.liveNextMeta}>
                 ({nextDep.stops_away} stops away · {nextDep.crowding})
               </Text>
