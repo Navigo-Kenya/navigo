@@ -1,6 +1,9 @@
 // app/(tabs)/map.tsx
 import { IntermStopInfoCard }    from "@/components/map/IntermStopInfoCard";
 import { MapLayersSheet }        from "@/components/map/MapLayersSheet";
+import { PoiLayer, type TappedPoi } from "@/components/map/PoiLayer";
+import { poiCategoryMeta }       from "@/components/icons/poiCategories";
+import { useExploreSearchStore } from "@/store/exploreSearchStore";
 import { OfflineNotice }         from "@/components/map/OfflineNotice";
 import { ReportLayer }           from "@/components/map/ReportLayer";
 import type { ReportLayerHandle } from "@/components/map/ReportLayer";
@@ -687,6 +690,24 @@ export default function MapScreen() {
     return () => clearInterval(id);
   }, [isNavigationMode, followMe, camera, nativeFollowPref]);
 
+  // Tapping one of our POIs opens the place sheet (same sheet as search).
+  const handlePoiPress = useCallback((poi: TappedPoi) => {
+    const place = {
+      id: `poi:${poi.id}`,
+      name: poi.name,
+      address: "",
+      category: poiCategoryMeta(poi.category).label,
+      lat: poi.lat,
+      lng: poi.lng,
+    };
+    useExploreSearchStore.getState().startSearch({
+      query: poi.name,
+      activeTab: "place",
+      places: [place],
+      selectedPlace: place,
+    });
+  }, []);
+
   const handleReportPress = useCallback((r: TransitReport, count: number) => {
     setReportSheetOpen(false);
     setSelectedReport({ report: r, count });
@@ -1284,6 +1305,14 @@ export default function MapScreen() {
                   )}
                </NativeShapeSource>
             )}
+
+            {/* Our POIs (Overture + console), below routes, stops and reports. */}
+            <PoiLayer
+              visible={!isNavigationMode}
+              standardStyle={activeStyleURL === process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL}
+              dark={dark}
+              onPress={handlePoiPress}
+            />
 
             <RouteOverlay
               walkLegs={walkLegs}

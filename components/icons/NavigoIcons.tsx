@@ -354,3 +354,138 @@ export function StopTypeGlyph({
     </Svg>
   );
 }
+
+// ─── POI categories (map markers) ────────────────────────────────────────────
+// Keys match the API's config/pois.php categories. Several reuse the place
+// glyphs above; the rest are drawn here in the same style.
+
+export type PoiCategory =
+  | "health" | "fuel" | "lodging" | "mall" | "attraction"
+  | "food" | "cafe" | "nightlife" | "grocery" | "pharmacy" | "bank"
+  | "education" | "worship" | "government" | "parking"
+  | "shopping" | "services";
+
+/** Shopping bag (malls). */
+function MallGlyph({ color }: { color: string }) {
+  return (
+    <>
+      <Path d="M5 8.5h14l-1.1 11a2 2 0 0 1-2 1.8H8.1a2 2 0 0 1-2-1.8Z" {...tinted(color)} />
+      <Path d="M9 10.5V7.2a3 3 0 0 1 6 0v3.3" {...line(color)} />
+    </>
+  );
+}
+
+/** Shopping basket (groceries, supermarkets). */
+function GroceryGlyph({ color }: { color: string }) {
+  return (
+    <>
+      <Path d="M3.5 9.5h17l-1.7 9a2 2 0 0 1-2 1.6H7.2a2 2 0 0 1-2-1.6Z" {...tinted(color)} />
+      <Path d="M8 9.5 11 4M16 9.5 13 4M9.5 13v3.6M14.5 13v3.6" {...line(color)} />
+    </>
+  );
+}
+
+/** Bed (hotels, lodging). */
+function LodgingGlyph({ color }: { color: string }) {
+  return (
+    <>
+      <Path d="M11 14v-3.6h6.6a3.4 3.4 0 0 1 3.4 3.4v.2Z" {...tinted(color)} />
+      <Rect x={5.2} y={10.4} width={4} height={3.2} rx={1.1} {...tinted(color)} />
+      <Path d="M3 6.5v12.5M3 14h18v5" {...line(color)} />
+    </>
+  );
+}
+
+/** Cocktail glass (bars, lounges, clubs). */
+function NightlifeGlyph({ color }: { color: string }) {
+  return (
+    <>
+      <Path d="M5 4.5h14l-7 7.8Z" {...tinted(color)} />
+      <Path d="M12 12.3v7.2M8.4 20h7.2M15.8 3l1.6-1.2" {...line(color)} />
+    </>
+  );
+}
+
+/** Graduation cap (schools, universities). */
+function EducationGlyph({ color }: { color: string }) {
+  return (
+    <>
+      <Path d="M12 4.2 2.6 9 12 13.8 21.4 9Z" {...tinted(color)} />
+      <Path d="M6.4 11.2v4.4c0 1.5 2.5 2.9 5.6 2.9s5.6-1.4 5.6-2.9v-4.4M21.4 9v5.2" {...line(color)} />
+    </>
+  );
+}
+
+/** Domed building with a finial: a neutral place of worship. */
+function WorshipGlyph({ color }: { color: string }) {
+  return (
+    <>
+      <Path d="M7 12a5 5 0 0 1 10 0Z" {...tinted(color)} />
+      <Path d="M12 3.4V7M5 12h14v8H5ZM10.5 20v-3.3a1.5 1.5 0 0 1 3 0V20" {...line(color)} />
+    </>
+  );
+}
+
+/** Columned building (government offices, police, post). */
+function GovernmentGlyph({ color }: { color: string }) {
+  return (
+    <>
+      <Path d="M3 9.2 12 4.2l9 5Z" {...tinted(color)} />
+      <Path d="M6 11.6v6.4M10 11.6v6.4M14 11.6v6.4M18 11.6v6.4M3.4 20.2h17.2" {...line(color)} />
+    </>
+  );
+}
+
+/** Star (attractions, historic sites, parks). */
+function AttractionGlyph({ color }: { color: string }) {
+  return (
+    <Path
+      d="m12 3.6 2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.2 6.9 19l1.1-5.6L3.8 9.5l5.7-.7Z"
+      {...tinted(color)}
+    />
+  );
+}
+
+/** Briefcase (offices and services). */
+function ServicesGlyph({ color }: { color: string }) {
+  return (
+    <>
+      <Rect x={3.5} y={7.5} width={17} height={12} rx={2.6} {...tinted(color)} />
+      <Path d="M9 7.5V6a1.6 1.6 0 0 1 1.6-1.6h2.8A1.6 1.6 0 0 1 15 6v1.5M3.5 12.8h17" {...line(color)} />
+    </>
+  );
+}
+
+const POI_GLYPHS: Record<PoiCategory, React.FC<{ color: string }>> = {
+  health: HospitalGlyph,
+  fuel: GasGlyph,
+  lodging: LodgingGlyph,
+  mall: MallGlyph,
+  attraction: AttractionGlyph,
+  food: RestaurantGlyph,
+  cafe: CafeGlyph,
+  nightlife: NightlifeGlyph,
+  grocery: GroceryGlyph,
+  pharmacy: PharmacyGlyph,
+  bank: AtmGlyph,
+  education: EducationGlyph,
+  worship: WorshipGlyph,
+  government: GovernmentGlyph,
+  parking: ParkingGlyph,
+  shopping: StoreGlyph,
+  services: ServicesGlyph,
+};
+
+/** Glyph for a POI category. White on a coloured badge by default. */
+export function PoiCategoryGlyph({
+  category,
+  color = "#FFFFFF",
+  size = 16,
+}: Partial<IconProps> & { category: string }) {
+  const Glyph = POI_GLYPHS[category as PoiCategory] ?? ServicesGlyph;
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Glyph color={color} />
+    </Svg>
+  );
+}
