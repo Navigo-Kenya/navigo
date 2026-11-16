@@ -56,6 +56,40 @@ export async function fetchPoiDetails(id: string): Promise<PoiDetails> {
   return res.data;
 }
 
+export interface NearbyPoi {
+  id: string;
+  name: string;
+  category: string;
+  subcategory: string | null;
+  importance: number;
+  address: string | null;
+  locality: string | null;
+  brand: string | null;
+  lat: number;
+  lng: number;
+  /** From the search centre (not necessarily the user). */
+  distance_m: number;
+}
+
+/** Nearest POIs of one category around a point (our data, no Google). */
+export async function fetchNearbyPois(
+  category: string,
+  lat: number,
+  lng: number,
+  opts: { radius?: number; limit?: number } = {}
+): Promise<NearbyPoi[]> {
+  const res = await fetchApi<{ data: NearbyPoi[] }>("/pois/nearby", {
+    params: {
+      category,
+      lat: lat.toFixed(5),
+      lng: lng.toFixed(5),
+      radius: opts.radius ?? 3000,
+      limit: opts.limit ?? 40,
+    },
+  });
+  return res.data ?? [];
+}
+
 /** Image URL for a Google photo; the API redirects to Google (key stays server-side). */
 export function poiPhotoUrl(photoName: string, width = 600): string {
   return `${BASE_URL}/pois/photo?w=${width}&name=${encodeURIComponent(photoName)}`;

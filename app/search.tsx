@@ -25,7 +25,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useStopSearch } from "@/hooks/useStopSearch";
 import { MapService, type PlacePrediction } from "@/services/map";
 import { StopService, type MobilitySearchRouteItem } from "@/services/stop";
-import { runExploreSearch } from "@/services/exploreSearch";
+import { runCategorySearch, runExploreSearch } from "@/services/exploreSearch";
 import { useSavedStore } from "@/store/savedStore";
 import { UnifiedLocation } from "@/store/journeyStore";
 import { useExploreSearchStore } from "@/store/exploreSearchStore";
@@ -438,7 +438,14 @@ export default function PlaceAndTransitSearchScreen() {
           {QUICK_CATEGORIES.map((cat) => (
             <PressableScale
               key={cat.key}
-              onPress={() => searchOnMap(cat.label)}
+              onPress={() => {
+                Keyboard.dismiss();
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.replace("/(tabs)/map" as any);
+                runCategorySearch(cat.poi, cat.label, near).catch(() =>
+                  useExploreSearchStore.getState().setLoading(false)
+                );
+              }}
               style={[s.catChip, { backgroundColor: C.chip }]}
               accessibilityRole="button"
             >

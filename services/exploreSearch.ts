@@ -2,10 +2,14 @@
 //
 // One search for the map's results sheet: places (Google text search, real
 // ratings / open-now / photos in a single call) and our own stops + lines,
-// in parallel. Shared by the search screen and the category chips.
+// in parallel. Used by the search screen. Category chips use our own POIs
+// instead (runCategorySearch).
 import { MapService } from "./map";
 import { StopService } from "./stop";
+import { fetchNearbyPois } from "./poi";
 import { useExploreSearchStore } from "@/store/exploreSearchStore";
+import { poiCategoryMeta } from "@/components/icons/poiCategories";
+import type { PoiCategory } from "@/components/icons/NavigoIcons";
 
 /** Nairobi CBD, used before the first location fix. */
 const FALLBACK = { lat: -1.2864, lng: 36.8172 };
@@ -51,6 +55,45 @@ export async function runExploreSearch(
     })),
     stops: mobility.stops,
     routes: mobility.routes,
+  });
+}
+
+/**
+ * Category chip (Restaurant, Fuel, ...): the nearest of our POIs of that
+ * category around `center` (camera centre or user), shown in the results
+ * sheet and as pins on the map. Re-run with a new centre for "Search this area".
+ */
+export async function runCategorySearch(
+  category: PoiCategory,
+  label: string,
+  center: { lat?: number | null; lng?: number | null }
+): Promise<void> {
+  const lat = center.lat ?? FALLBACK.lat;
+  const lng = center.lng ?? FALLBACK.lng;
+  const id = ++lastRequest;
+  const store = useExploreSearchStore.getState();
+  store.startSearch({
+    query: label,
+    activeTab: "place",
+    poiCategory: category,
+    searchCenter: { lat, lng },
+  });
+  store.setLoading(true);
+
+  const pois = await fetchNearbyPois(category, lat, lng).catch(() => []);
+  if (id !== lastRequest) return;
+  const meta = poiCategoryMeta(category);
+  useExploreSearchStore.getState().setResults({
+    places: pois.map((p) => ({
+      id: `poi:${p.id}`,
+      name: p.name,
+      address: p.address || p.locality || "",
+      category: meta.label,
+      lat: p.lat,
+      lng: p.lng,
+    })),
+    stops: [],
+    routes: [],
   });
 }
 

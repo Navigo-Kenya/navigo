@@ -3,7 +3,11 @@ import { IntermStopInfoCard }    from "@/components/map/IntermStopInfoCard";
 import { MapLayersSheet }        from "@/components/map/MapLayersSheet";
 import { PoiLayer, type TappedPoi } from "@/components/map/PoiLayer";
 import { poiCategoryMeta }       from "@/components/icons/poiCategories";
-import { useExploreSearchStore } from "@/store/exploreSearchStore";
+import { useExploreSearchStore, type ExplorePlaceItem } from "@/store/exploreSearchStore";
+import { PoiResultsLayer }       from "@/components/map/PoiResultsLayer";
+import { useTopUiBottom }        from "@/components/app/mapSheetInsets";
+import type { PoiCategory }      from "@/components/icons/NavigoIcons";
+import * as Haptics              from "expo-haptics";
 import { OfflineNotice }         from "@/components/map/OfflineNotice";
 import { ReportLayer }           from "@/components/map/ReportLayer";
 import type { ReportLayerHandle } from "@/components/map/ReportLayer";
@@ -702,36 +706,101 @@ export default function MapScreen() {
   }, [isNavigationMode, followMe, camera, nativeFollowPref]);
 
   // Tapping one of our POIs opens the place sheet (same sheet as search).
-  const handlePoiPress = useCallback((poi: TappedPoi) => {
-    // Glide to the POI so it sits in the middle of the map area left visible
-    // above the place sheet (330 px peek). The centre is shifted south rather
-    // than using camera padding, which would stick to later camera moves.
+  // Glide to a place so it sits in the middle of the map area left visible
+  // above the place sheet (330 px peek). The centre is shifted south rather
+  // than using camera padding, which would stick to later camera moves.
+  const glideToPlace = useCallback((lat: number, lng: number) => {
     setFollowMe(false);
     const zoom = Math.max(viewZoom, 16);
-    const metersPerPx = (78271.517 * Math.cos((poi.lat * Math.PI) / 180)) / Math.pow(2, zoom);
+    const metersPerPx = (78271.517 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, zoom);
     const shiftDeg = (POI_SHEET_PEEK / 2) * metersPerPx / 111_320;
     camera.animateTo({
-      center: { latitude: poi.lat - shiftDeg, longitude: poi.lng },
+      center: { latitude: lat - shiftDeg, longitude: lng },
       zoom,
       duration: 650,
       mode: "easeTo",
     });
+  }, [viewZoom, camera]);
 
+  const handlePoiPress = useCallback((poi: TappedPoi) => {
+    glideToPlace(poi.lat, poi.lng);
+    const store = useExploreSearchStore.getState();
+    const id = `poi:${poi.id}`;
+    // During a search, open the place over the results (closing it returns
+    // to the list); otherwise start a one-place search.
+    if (store.active) {
+      store.selectPlace(
+        store.places.find((p) => p.id === id) ?? {
+          id,
+          name: poi.name,
+          address: "",
+          category: poiCategoryMeta(poi.category).label,
+          lat: poi.lat,
+          lng: poi.lng,
+        }
+      );
+      return;
+    }
     const place = {
-      id: `poi:${poi.id}`,
+      id,
       name: poi.name,
       address: "",
       category: poiCategoryMeta(poi.category).label,
       lat: poi.lat,
       lng: poi.lng,
     };
-    useExploreSearchStore.getState().startSearch({
+    store.startSearch({
       query: poi.name,
       activeTab: "place",
       places: [place],
       selectedPlace: place,
     });
-  }, [viewZoom, camera]);
+  }, [glideToPlace]);
+
+  // Category search (chips): results drawn as pins, the POI layer narrowed
+  // to that category, and the camera fitted to the nearest results once.
+  const searchActive   = useExploreSearchStore((s) => s.active);
+  const poiCategory    = useExploreSearchStore((s) => s.poiCategory);
+  const searchPlaces   = useExploreSearchStore((s) => s.places);
+  const searchLoading  = useExploreSearchStore((s) => s.loading);
+  const searchCenter   = useExploreSearchStore((s) => s.searchCenter);
+  const selectedPlace  = useExploreSearchStore((s) => s.selectedPlace);
+  const categoryActive = searchActive && !!poiCategory;
+  const resultPlaces = useMemo(
+    () => (categoryActive ? searchPlaces.filter((p) => p.id.startsWith("poi:")) : []),
+    [categoryActive, searchPlaces]
+  );
+  const resultPoiIds = useMemo(() => resultPlaces.map((p) => p.id.slice(4)), [resultPlaces]);
+
+  const handleResultPress = useCallback((place: ExplorePlaceItem) => {
+    Haptics.selectionAsync();
+    glideToPlace(place.lat, place.lng);
+    useExploreSearchStore.getState().selectPlace(place);
+  }, [glideToPlace]);
+
+  const topUiBottom = useTopUiBottom();
+  const lastFitKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!categoryActive || searchLoading || selectedPlace || !resultPlaces.length || !searchCenter) return;
+    const key = `${poiCategory}:${searchCenter.lat}:${searchCenter.lng}`;
+    if (lastFitKeyRef.current === key) return;
+    lastFitKeyRef.current = key;
+    setFollowMe(false);
+    const nearest = resultPlaces.slice(0, 12);
+    if (nearest.length === 1) {
+      glideToPlace(nearest[0].lat, nearest[0].lng);
+      return;
+    }
+    // Keep the pins clear of the top bar and the results sheet (half screen).
+    camera.fitCoordinates(
+      nearest.map((p) => ({ latitude: p.lat, longitude: p.lng })),
+      { top: topUiBottom + 24, right: 56, bottom: Math.round(SH * 0.5) + 28, left: 40 },
+      700
+    );
+  }, [categoryActive, searchLoading, selectedPlace, resultPlaces, searchCenter, poiCategory, camera, glideToPlace, topUiBottom]);
+  useEffect(() => {
+    if (!categoryActive) lastFitKeyRef.current = null;
+  }, [categoryActive]);
 
   const handleReportPress = useCallback((r: TransitReport, count: number) => {
     setReportSheetOpen(false);
@@ -1333,9 +1402,20 @@ export default function MapScreen() {
             <PoiLayer
               visible
               navigating={isNavigationMode}
+              focusCategory={categoryActive && !activeJourney ? poiCategory : null}
+              excludeIds={resultPoiIds}
               standardStyle={activeStyleURL === process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL}
               dark={dark}
               onPress={handlePoiPress}
+            />
+
+            {/* Category-search results as pins (always mounted: no source churn). */}
+            <PoiResultsLayer
+              places={categoryActive && !activeJourney ? resultPlaces : []}
+              category={(poiCategory ?? "services") as PoiCategory}
+              selectedId={selectedPlace?.id ?? null}
+              dark={dark}
+              onPress={handleResultPress}
             />
 
             <RouteOverlay
@@ -1548,13 +1628,7 @@ export default function MapScreen() {
           userLat={meLat}
           userLng={meLng}
           onSelectStopOnMap={handleSelectStop}
-          onFocusCoords={(lat, lng) =>
-            camera.animateTo({
-              center: { latitude: lat, longitude: lng },
-              zoom: 16.5,
-              duration: 500,
-            })
-          }
+          onFocusCoords={glideToPlace}
           onSelectCorridorRoute={handleSelectCorridorRoute}
         />
       )}
