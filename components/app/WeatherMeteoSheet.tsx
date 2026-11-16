@@ -85,6 +85,33 @@ async function getJson(url: string): Promise<any> {
   return res.json();
 }
 
+// ─── Cache ────────────────────────────────────────────────────────────────────
+// One entry per ~5 km cell (0.05°). Fresh for 10 minutes; concurrent requests
+// for the same cell share one network call. Failures are not cached.
+const METEO_TTL_MS = 10 * 60 * 1000;
+const meteoCache = new Map<string, { at: number; data: LiveWeatherData }>();
+const meteoInFlight = new Map<string, Promise<LiveWeatherData>>();
+const cellKey = (lat: number, lng: number) =>
+  `${Math.round(lat * 20) / 20},${Math.round(lng * 20) / 20}`;
+
+/** Cached weather for the ~5 km cell around (lat, lng). */
+export function fetchLiveMeteo(lat = -1.2864, lng = 36.8172): Promise<LiveWeatherData> {
+  const key = cellKey(lat, lng);
+  const hit = meteoCache.get(key);
+  if (hit && Date.now() - hit.at < METEO_TTL_MS) return Promise.resolve(hit.data);
+  const pending = meteoInFlight.get(key);
+  if (pending) return pending;
+  const [cLat, cLng] = key.split(",").map(Number);
+  const p = fetchLiveMeteoUncached(cLat, cLng)
+    .then((data) => {
+      meteoCache.set(key, { at: Date.now(), data });
+      return data;
+    })
+    .finally(() => meteoInFlight.delete(key));
+  meteoInFlight.set(key, p);
+  return p;
+}
+
 /**
  * Live weather + air quality from Open-Meteo (open-meteo.com, CC BY 4.0).
  *
@@ -93,9 +120,9 @@ async function getJson(url: string): Promise<any> {
  * quality is optional: if that request fails, PM values are N/A.
  * Times are the location's local time (timezone=auto), not the phone's.
  */
-export async function fetchLiveMeteo(
-  lat = -1.2864,
-  lng = 36.8172
+async function fetchLiveMeteoUncached(
+  lat: number,
+  lng: number
 ): Promise<LiveWeatherData> {
   const [w, aqi] = await Promise.all([
     getJson(

@@ -1430,6 +1430,8 @@ export default function MapScreen() {
         paused={tripPaused}
         onResume={resumeNavigation}
         showAR={isNavigationMode && !isVehicleMode && navState?.currentSegmentMode === "WALK"}
+        areaLat={viewCenter?.lat ?? meLat}
+        areaLng={viewCenter?.lng ?? meLng}
         onOpenAR={() => setArOpen(true)}
       />
 

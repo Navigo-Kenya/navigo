@@ -113,6 +113,9 @@ export interface MapFloatingUIProps {
   onOpenAR: () => void;
   userLat?: number | null;
   userLng?: number | null;
+  /** Centre of the map camera: weather describes the area being looked at. */
+  areaLat?: number | null;
+  areaLng?: number | null;
 }
 
 export default function MapFloatingUI({
@@ -149,6 +152,8 @@ export default function MapFloatingUI({
   onOpenAR,
   userLat,
   userLng,
+  areaLat,
+  areaLng,
 }: MapFloatingUIProps) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -168,10 +173,11 @@ export default function MapFloatingUI({
     clearSearch,
   } = useExploreSearchStore();
 
-  // Weather barely changes over a few km: refetch per ~5 km cell, not on
-  // every GPS fix.
-  const meteoLat = Math.round((userLat ?? FALLBACK_LAT) * 20) / 20;
-  const meteoLng = Math.round((userLng ?? FALLBACK_LNG) * 20) / 20;
+  // Weather for the area on screen (camera centre), falling back to the
+  // user's position. Snapped to ~5 km cells: panning within a neighbourhood
+  // doesn't refetch, and fetchLiveMeteo caches each cell for 10 minutes.
+  const meteoLat = Math.round((areaLat ?? userLat ?? FALLBACK_LAT) * 20) / 20;
+  const meteoLng = Math.round((areaLng ?? userLng ?? FALLBACK_LNG) * 20) / 20;
   useEffect(() => {
     let alive = true;
     fetchLiveMeteo(meteoLat, meteoLng)
@@ -836,8 +842,8 @@ export default function MapFloatingUI({
       <WeatherMeteoSheet
         visible={weatherOpen}
         onClose={() => setWeatherOpen(false)}
-        userLat={userLat}
-        userLng={userLng}
+        userLat={areaLat ?? userLat}
+        userLng={areaLng ?? userLng}
         onWeatherLoaded={setLiveMeteo}
       />
     </View>
