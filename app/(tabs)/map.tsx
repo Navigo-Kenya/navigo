@@ -121,6 +121,8 @@ function headingArcGeoJson(
 const { height: SH } = Dimensions.get("window");
 
 const MODEL_TILT_X = 0;
+/** Visible height of the place sheet when it opens (MapSearchContextSheet). */
+const POI_SHEET_PEEK = 330;
 
 function DroppedPin({ coord, name }: { coord: { latitude: number; longitude: number }; name: string }) {
   const [frozenName, setFrozenName] = useState<string | null>(null);
@@ -692,6 +694,20 @@ export default function MapScreen() {
 
   // Tapping one of our POIs opens the place sheet (same sheet as search).
   const handlePoiPress = useCallback((poi: TappedPoi) => {
+    // Glide to the POI so it sits in the middle of the map area left visible
+    // above the place sheet (330 px peek). The centre is shifted south rather
+    // than using camera padding, which would stick to later camera moves.
+    setFollowMe(false);
+    const zoom = Math.max(viewZoom, 16);
+    const metersPerPx = (78271.517 * Math.cos((poi.lat * Math.PI) / 180)) / Math.pow(2, zoom);
+    const shiftDeg = (POI_SHEET_PEEK / 2) * metersPerPx / 111_320;
+    camera.animateTo({
+      center: { latitude: poi.lat - shiftDeg, longitude: poi.lng },
+      zoom,
+      duration: 650,
+      mode: "easeTo",
+    });
+
     const place = {
       id: `poi:${poi.id}`,
       name: poi.name,
@@ -706,7 +722,7 @@ export default function MapScreen() {
       places: [place],
       selectedPlace: place,
     });
-  }, []);
+  }, [viewZoom, camera]);
 
   const handleReportPress = useCallback((r: TransitReport, count: number) => {
     setReportSheetOpen(false);
