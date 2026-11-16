@@ -1492,6 +1492,8 @@ export default function MapScreen() {
 
       {!activeJourney && !corridorData && (
         <MapSearchContextSheet
+          userLat={meLat}
+          userLng={meLng}
           onSelectStopOnMap={handleSelectStop}
           onFocusCoords={(lat, lng) =>
             camera.animateTo({

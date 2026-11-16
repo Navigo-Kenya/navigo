@@ -16,6 +16,8 @@ export interface ExplorePlaceItem {
   distanceM?: number;
   photos?: string[];
   phone?: string;
+  /** From Google; undefined when unknown (never assume open). */
+  openNow?: boolean;
 }
 
 interface ExploreSearchState {

@@ -1,10 +1,15 @@
 // components/app/MapSearchContextSheet.tsx
-import { useStaticSheetTop } from "./mapSheetInsets";
-import React, { useMemo } from "react";
+//
+// Search results over the map (KakaoMap-style), on MapSheet:
+//   - results sheet: drag down to its lowest snap for the map view, up for the
+//     list; "Best match" / "Nearest" sorting; sections in "All"
+//   - place sheet: details of the selected place with From / To
+// Only real data is shown: ratings / open-now only when Google returns them,
+// distances computed from the user's position.
+import React, { useMemo, useRef } from "react";
 import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
+  Animated,
+  Dimensions,
   ScrollView,
   Share,
   StyleSheet,
@@ -14,7 +19,6 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import {
@@ -22,1001 +26,578 @@ import {
   type ExplorePlaceItem,
 } from "@/store/exploreSearchStore";
 import { useSavedStore } from "@/store/savedStore";
+import type { MobilitySearchRouteItem } from "@/services/stop";
 import type { Stop } from "@/utils/mapHelpers";
+import { distanceM, formatDistance } from "@/services/exploreSearch";
+import { StopTypeGlyph } from "@/components/icons/NavigoIcons";
+import { PressableScale } from "@/components/ui/PressableScale";
+import { resolveStopCategory } from "./StopsLayer";
+import { MapSheet, type MapSheetHandle } from "./MapSheet";
 
 const ORANGE = "#FF6F00";
 const BLUE = "#2563EB";
+const GREEN = "#16A34A";
+const RED = "#DC2626";
+const { height: SH } = Dimensions.get("window");
+
+type Props = {
+  onSelectStopOnMap: (stop: Stop) => void;
+  onFocusCoords: (lat: number, lng: number) => void;
+  onSelectCorridorRoute?: (routeId: string) => void;
+  userLat?: number | null;
+  userLng?: number | null;
+};
 
 function mapboxStaticPhoto(lng: number, lat: number, zoom = 16): string {
   const token = process.env.EXPO_PUBLIC_MAPBOX_TOKEN ?? "";
   return `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/pin-s+FF6F00(${lng},${lat})/${lng},${lat},${zoom},0,35/400x240@2x?access_token=${token}`;
 }
 
-function mapboxSatellitePhoto(lng: number, lat: number): string {
-  const token = process.env.EXPO_PUBLIC_MAPBOX_TOKEN ?? "";
-  return `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static/${lng},${lat},17,0,45/400x240@2x?access_token=${token}`;
+function palette(dark: boolean) {
+  return {
+    text: dark ? "#F4F4F5" : "#111827",
+    sub: dark ? "#A1A1AA" : "#6B7280",
+    chip: dark ? "#27272A" : "#F1F5F9",
+    line: dark ? "#27272A" : "#EEF0F3",
+    skeleton: dark ? "#27272A" : "#EEF0F3",
+    seg: dark ? "#27272A" : "#F1F5F9",
+    segOn: dark ? "#3F3F46" : "#FFFFFF",
+  };
 }
 
-export default function MapSearchContextSheet({
+export default function MapSearchContextSheet(props: Props) {
+  const { active, selectedPlace } = useExploreSearchStore();
+  if (!active) return null;
+  return selectedPlace ? (
+    <PlaceSheet key={selectedPlace.id} place={selectedPlace} {...props} />
+  ) : (
+    <ResultsSheet {...props} />
+  );
+}
+
+// ─── Results ─────────────────────────────────────────────────────────────────
+
+type Row =
+  | { kind: "header"; key: string; title: string; count: number }
+  | { kind: "place"; key: string; item: ExplorePlaceItem }
+  | { kind: "route"; key: string; item: MobilitySearchRouteItem }
+  | { kind: "stop"; key: string; item: Stop & Record<string, any> };
+
+function ResultsSheet({
   onSelectStopOnMap,
   onFocusCoords,
   onSelectCorridorRoute,
-}: {
-  onSelectStopOnMap: (stop: Stop) => void;
-  onFocusCoords: (lat: number, lng: number) => void;
-  onSelectCorridorRoute?: (routeId: string) => void;
-}) {
-  const insets = useSafeAreaInsets();
-  const router = useRouter();
+  userLat,
+  userLng,
+}: Props) {
   const dark = useColorScheme() === "dark";
-
+  const C = palette(dark);
+  const router = useRouter();
+  const sheet = useRef<MapSheetHandle>(null);
   const {
-    active,
+    query,
     activeTab,
     sortBy,
-    minimizedToMap,
     places,
     stops,
     routes,
-    selectedPlace,
     loading,
     setSortBy,
     setMinimizedToMap,
     selectPlace,
     clearSearch,
   } = useExploreSearchStore();
+  const { addPlace } = useSavedStore();
 
-  const { places: savedPlaces, addPlace } = useSavedStore();
+  const hasUser = userLat != null && userLng != null;
+  const distOf = (lat: number, lng: number, known?: number | null) =>
+    known ?? (hasUser ? distanceM(userLat!, userLng!, lat, lng) : undefined);
 
-  const combinedRows = useMemo(() => {
-    const out: any[] = [];
-    if (activeTab === "all" || activeTab === "place") {
-      places.forEach((p) => out.push({ _kind: "place", item: p, key: `pl-${p.id}` }));
-    }
-    if (activeTab === "all" || activeTab === "bus") {
-      routes.forEach((r) =>
-        out.push({ _kind: "route", item: r, key: `rt-${r.route_id}` })
-      );
-    }
-    if (activeTab === "all" || activeTab === "stop") {
-      stops.forEach((st) =>
-        out.push({ _kind: "stop", item: st, key: `st-${st.id}` })
-      );
-    }
+  const rows = useMemo<Row[]>(() => {
+    const nearest = sortBy === "location" && hasUser;
+    const sortByDist = <T,>(arr: T[], d: (x: T) => number | undefined) =>
+      nearest ? [...arr].sort((a, b) => (d(a) ?? Infinity) - (d(b) ?? Infinity)) : arr;
+
+    const placeRows = sortByDist(places, (p) => distOf(p.lat, p.lng, p.distanceM));
+    const stopRows = sortByDist(stops as any[], (s) => distOf(s.lat, s.lng, s.distance_m));
+
+    const out: Row[] = [];
+    const section = (title: string, items: Row[]) => {
+      if (!items.length) return;
+      if (activeTab === "all") out.push({ kind: "header", key: `h-${title}`, title, count: items.length });
+      out.push(...items);
+    };
+    if (activeTab === "all" || activeTab === "place")
+      section("Places", placeRows.map((p) => ({ kind: "place" as const, key: `pl-${p.id}`, item: p })));
+    if (activeTab === "all" || activeTab === "bus")
+      section("Lines", routes.map((r) => ({ kind: "route" as const, key: `rt-${r.route_id}`, item: r })));
+    if (activeTab === "all" || activeTab === "stop")
+      section("Stops", stopRows.map((s) => ({ kind: "stop" as const, key: `st-${s.id}`, item: s })));
     return out;
-  }, [activeTab, places, routes, stops]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, sortBy, places, stops, routes, userLat, userLng]);
 
-  // Floating map controls sit above whichever variant of this sheet is showing.
-  const onSheetLayout = useStaticSheetTop(active);
+  const count = rows.filter((r) => r.kind !== "header").length;
 
-  if (!active) return null;
-
-  const sheetBg = dark ? "#18181B" : "#FFFFFF";
-  const textPrimary = dark ? "#F9FAFB" : "#111827";
-  const textMuted = dark ? "#9CA3AF" : "#6B7280";
-  const borderCol = dark ? "#27272A" : "#E5E7EB";
-  const pillBg = dark ? "#27272A" : "#F3F4F6";
-
-  const goToRoutePlanner = (
-    role: "from" | "to",
-    target: { id?: string; name: string; lat: number; lng: number }
-  ) => {
+  const goToRoute = (role: "from" | "to", t: { name: string; lat: number; lng: number }) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const params =
       role === "from"
-        ? {
-            fLat: String(target.lat),
-            fLng: String(target.lng),
-            fName: target.name,
-          }
-        : {
-            tLat: String(target.lat),
-            tLng: String(target.lng),
-            tName: target.name,
-          };
+        ? { fLat: String(t.lat), fLng: String(t.lng), fName: t.name }
+        : { tLat: String(t.lat), tLng: String(t.lng), tName: t.name };
     router.push({ pathname: "/route" as any, params });
   };
 
-  // ── 1. SELECTED PLACE FLOATING CARD (Matches KakaoMap's IMT Motel Screen)[cite: 2] ──
-  if (selectedPlace) {
-    const isBookmarked = savedPlaces.some(
-      (sp) => sp.place_id === selectedPlace.id
-    );
-    const distKm =
-      selectedPlace.distanceM != null
-        ? selectedPlace.distanceM >= 1000
-          ? `${(selectedPlace.distanceM / 1000).toFixed(1)}km`
-          : `${Math.round(selectedPlace.distanceM)}m`
-        : "Nearby";
-
-    const photos =
-      selectedPlace.photos && selectedPlace.photos.length > 0
-        ? selectedPlace.photos
-        : [
-            mapboxStaticPhoto(selectedPlace.lng, selectedPlace.lat),
-            mapboxSatellitePhoto(selectedPlace.lng, selectedPlace.lat),
-          ];
-
-    return (
-      <View
-        onLayout={onSheetLayout}
-        style={[
-          s.placeSheet,
-          {
-            backgroundColor: sheetBg,
-            paddingBottom: Math.max(insets.bottom, 16),
-          },
-        ]}
-      >
-        <View style={s.handleWrap}>
-          <View
-            style={[
-              s.handle,
-              { backgroundColor: dark ? "#3F3F46" : "#D1D5DB" },
-            ]}
-          />
-        </View>
-
-        {/* Title + Category + Close */}
-        <View style={s.placeHeader}>
-          <View style={{ flex: 1 }}>
-            <View style={s.placeTitleRow}>
-              <Text
-                style={[s.placeTitle, { color: textPrimary }]}
-                numberOfLines={1}
-              >
-                {selectedPlace.name}
-              </Text>
-              <Text style={[s.placeCategory, { color: textMuted }]}>
-                {selectedPlace.category}
-              </Text>
-            </View>
-
-            {/* Rating Stars + Review Count[cite: 2] */}
-            <View style={s.ratingRow}>
-              <Text style={s.ratingScore}>
-                {(selectedPlace.rating ?? 4.4).toFixed(1)}
-              </Text>
-              <View style={s.starsWrap}>
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <Ionicons
-                    key={n}
-                    name={
-                      n <= Math.round(selectedPlace.rating ?? 4.4)
-                        ? "star"
-                        : "star-outline"
-                    }
-                    size={13}
-                    color="#EF4444"
-                  />
-                ))}
-              </View>
-              <Text style={[s.reviewCount, { color: textMuted }]}>
-                ({selectedPlace.reviewCount ?? 24}) &gt;
-              </Text>
-            </View>
-
-            {/* Distance + Address[cite: 2] */}
-            <Text
-              style={[s.placeAddress, { color: textMuted }]}
-              numberOfLines={1}
-            >
-              {distKm} · {selectedPlace.address}
-            </Text>
-          </View>
-
-          <Pressable
-            onPress={() => selectPlace(null)}
-            style={[s.closeBtn, { backgroundColor: pillBg }]}
-          >
-            <Ionicons name="close" size={18} color={textPrimary} />
-          </Pressable>
-        </View>
-
-        {/* Horizontal Photo Strip[cite: 2] */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={s.photoStrip}
-        >
-          {photos.map((uri, idx) => (
-            <Image
-              key={idx}
-              source={{ uri }}
-              style={s.placePhoto}
-              contentFit="cover"
-            />
-          ))}
-        </ScrollView>
-
-        {/* Bottom Action Row: Bookmark, Share, Call + [From] [To][cite: 2] */}
-        <View style={s.placeFooter}>
-          <View style={s.leftIconGroup}>
-            <Pressable
+  const header = (
+    <View style={s.resHeader}>
+      <View style={{ flex: 1 }}>
+        <Text style={[s.resTitle, { color: C.text }]} numberOfLines={1}>
+          {loading ? "Searching…" : count === 0 ? "No results" : `${count} result${count === 1 ? "" : "s"}`}
+        </Text>
+        <Text style={[s.resSub, { color: C.sub }]} numberOfLines={1}>
+          for “{query}”
+        </Text>
+      </View>
+      <View style={[s.segment, { backgroundColor: C.seg }]}>
+        {(
+          [
+            { key: "map", label: "Best match" },
+            { key: "location", label: "Nearest" },
+          ] as const
+        ).map((o) => {
+          const on = sortBy === o.key;
+          const disabled = o.key === "location" && !hasUser;
+          return (
+            <PressableScale
+              key={o.key}
+              disabled={disabled}
               onPress={() => {
                 Haptics.selectionAsync();
-                addPlace({
-                  name: selectedPlace.name,
-                  lat: selectedPlace.lat,
-                  lng: selectedPlace.lng,
-                  type: "location",
-                  place_id: selectedPlace.id,
-                  pin: null,
-                  list: "favorites",
-                  category: selectedPlace.category,
-                  note: null,
-                }).catch(() => {});
+                setSortBy(o.key);
               }}
-              style={[s.roundActionBtn, { backgroundColor: pillBg }]}
+              style={[s.segBtn, on && { backgroundColor: C.segOn }, disabled && { opacity: 0.4 }]}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: on, disabled }}
             >
-              <Ionicons
-                name={isBookmarked ? "bookmark" : "bookmark-outline"}
-                size={18}
-                color={isBookmarked ? ORANGE : BLUE}
-              />
-            </Pressable>
-
-            <Pressable
-              onPress={() => {
-                Share.share({
-                  message: `${selectedPlace.name} (${selectedPlace.address})\nhttps://navigo.co.ke/route?tLat=${selectedPlace.lat}&tLng=${selectedPlace.lng}&tName=${encodeURIComponent(
-                    selectedPlace.name
-                  )}`,
-                }).catch(() => {});
-              }}
-              style={[s.roundActionBtn, { backgroundColor: pillBg }]}
-            >
-              <Ionicons name="share-outline" size={18} color={BLUE} />
-            </Pressable>
-          </View>
-
-          <View style={s.fromToGroup}>
-            <Pressable
-              onPress={() => goToRoutePlanner("from", selectedPlace)}
-              style={s.fromBtn}
-            >
-              <Text style={s.fromToText}>From</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => goToRoutePlanner("to", selectedPlace)}
-              style={s.toBtn}
-            >
-              <Text style={s.fromToText}>To</Text>
-            </Pressable>
-          </View>
-        </View>
+              <Text style={[s.segText, { color: on ? C.text : C.sub }]}>{o.label}</Text>
+            </PressableScale>
+          );
+        })}
       </View>
-    );
-  }
+    </View>
+  );
 
-  // ── 2. MINIMIZED MAP-PINS MODE: Floating "[:= View List]" Pill + Bottom [Sort ⌄] Bar[cite: 12] ──
-  if (minimizedToMap) {
-    return (
-      <>
-        <View
-          pointerEvents="box-none"
-          style={[
-            s.minimizedWrap,
-            { bottom: Math.max(insets.bottom, 12) + 70 },
-          ]}
-        >
-          <Pressable
-            onPress={() => {
-              Haptics.selectionAsync();
-              setMinimizedToMap(false);
-            }}
-            style={[
-              s.viewListFloatingPill,
-              { backgroundColor: sheetBg, borderColor: borderCol },
-            ]}
-          >
-            <Ionicons name="list" size={16} color={textPrimary} />
-            <Text style={[s.viewListText, { color: textPrimary }]}>
-              View List
-            </Text>
-          </Pressable>
-        </View>
-
-        <View
-          onLayout={onSheetLayout}
-          style={[
-            s.minimizedBottomBar,
-            {
-              backgroundColor: sheetBg,
-              paddingBottom: Math.max(insets.bottom, 12),
-            },
-          ]}
-        >
-          <View style={s.handleWrap}>
-            <View
-              style={[
-                s.handle,
-                { backgroundColor: dark ? "#3F3F46" : "#D1D5DB" },
-              ]}
-            />
-          </View>
-          <View style={{ paddingHorizontal: 16, paddingBottom: 6 }}>
-            <Pressable
-              onPress={() =>
-                setSortBy(sortBy === "location" ? "map" : "location")
-              }
-              style={[
-                s.sortPill,
-                {
-                  borderColor: borderCol,
-                  borderWidth: 1,
-                  alignSelf: "flex-start",
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 4,
-                },
-              ]}
-            >
-              <Text style={[s.sortPillText, { color: textPrimary }]}>
-                Sort ⌄
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </>
-    );
-  }
-
-  // ── 3. DRAGGABLE SEARCH RESULTS SHEET (KakaoMap IMG_6284.PNG)[cite: 5] ──
   return (
-    <View
-      onLayout={onSheetLayout}
-      style={[
-        s.resultsSheet,
-        {
-          backgroundColor: sheetBg,
-          paddingBottom: Math.max(insets.bottom, 16),
-        },
-      ]}
+    <MapSheet
+      ref={sheet}
+      snapPoints={[150, SH * 0.5, SH * 0.88]}
+      initialSnap={1}
+      onSnapChange={(i) => setMinimizedToMap(i === 0)}
+      onClose={clearSearch}
+      header={header}
     >
-      {/* Drag Handle — Tap to minimize into Map Pins view */}
-      <Pressable
-        onPress={() => setMinimizedToMap(true)}
-        style={s.handleWrap}
-      >
-        <View
-          style={[
-            s.handle,
-            { backgroundColor: dark ? "#3F3F46" : "#D1D5DB" },
-          ]}
-        />
-      </Pressable>
-
-      {/* Filter Bar: [Map] [My Location] on Left + "View Map Pins" on Right[cite: 5] */}
-      <View style={[s.filterBar, { borderBottomColor: borderCol }]}>
-        <View style={s.sortPillsRow}>
-          <Pressable
-            onPress={() => setSortBy("map")}
-            style={[
-              s.sortPill,
-              sortBy === "map"
-                ? [s.sortPillActive, { borderColor: textPrimary }]
-                : { backgroundColor: pillBg },
-            ]}
-          >
-            <Text
-              style={[
-                s.sortPillText,
-                { color: sortBy === "map" ? textPrimary : textMuted },
-              ]}
-            >
-              Map
-            </Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => setSortBy("location")}
-            style={[
-              s.sortPill,
-              sortBy === "location"
-                ? [s.sortPillActive, { borderColor: textPrimary }]
-                : { backgroundColor: pillBg },
-            ]}
-          >
-            <Text
-              style={[
-                s.sortPillText,
-                { color: sortBy === "location" ? textPrimary : textMuted },
-              ]}
-            >
-              My Location
-            </Text>
-          </Pressable>
-        </View>
-
-        <Pressable
-          onPress={() => setMinimizedToMap(true)}
-          style={s.hideListBtn}
-        >
-          <Ionicons name="map-outline" size={14} color={ORANGE} />
-          <Text style={s.hideListText}>Map View</Text>
-        </Pressable>
-      </View>
-
       {loading ? (
-        <View style={s.loadingBox}>
-          <ActivityIndicator size="small" color={ORANGE} />
-          <Text style={{ color: textMuted, fontSize: 13 }}>
-            Searching nearby mobility results…
-          </Text>
-        </View>
-      ) : combinedRows.length === 0 ? (
-        <View style={s.loadingBox}>
-          <Text style={{ color: textMuted, fontSize: 13 }}>
-            No matching places, routes, or stops found.
+        <SkeletonRows color={C.skeleton} />
+      ) : count === 0 ? (
+        <View style={s.empty}>
+          <View style={[s.emptyDisc, { backgroundColor: C.chip }]}>
+            <Ionicons name="search-outline" size={26} color={C.sub} />
+          </View>
+          <Text style={[s.emptyTitle, { color: C.text }]}>Nothing found for “{query}”</Text>
+          <Text style={[s.emptySub, { color: C.sub }]}>
+            Check the spelling, try a broader word (“pharmacy”, “Westlands”), or switch tabs above.
           </Text>
         </View>
       ) : (
-        <FlatList
-          data={combinedRows}
-          keyExtractor={(item) => item.key}
-          style={{ maxHeight: 280 }}
-          showsVerticalScrollIndicator={false}
-          renderItem={({ item }) => {
-            if (item._kind === "stop") {
-              const st = item.item;
-              const code =
-                st.stop_code ?? st.id.slice(-5).toUpperCase();
-              const distLabel =
-                st.distance_m != null
-                  ? st.distance_m >= 1000
-                    ? `${(st.distance_m / 1000).toFixed(1)}km`
-                    : `${st.distance_m}m`
-                  : null;
-
-              return (
-                <Pressable
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    clearSearch();
-                    onSelectStopOnMap(st);
-                  }}
-                  style={[s.resultRow, { borderBottomColor: borderCol }]}
-                >
-                  <View style={{ flex: 1, gap: 3 }}>
-                    <Text
-                      style={[s.rowTitle, { color: textPrimary }]}
-                      numberOfLines={1}
-                    >
-                      {st.name}
-                    </Text>
-                    <Text
-                      style={[s.rowSub, { color: textMuted }]}
-                      numberOfLines={1}
-                    >
-                      {code}
-                      {st.direction_label ? ` · ${st.direction_label}` : ""}
-                    </Text>
-                    <View style={s.badgesWrap}>
-                      {distLabel && (
-                        <Text style={[s.distText, { color: textMuted }]}>
-                          {distLabel}
-                        </Text>
-                      )}
-                      <View
-                        style={[
-                          s.modeTag,
-                          { backgroundColor: st.badge_color ?? BLUE },
-                        ]}
-                      >
-                        <Text style={s.modeTagText}>
-                          {st.mode_badge ?? "Bus"}
-                        </Text>
-                      </View>
-                      {st.route_nams && (
-                        <Text
-                          style={[s.routesInline, { color: textMuted }]}
-                          numberOfLines={1}
-                        >
-                          {st.route_nams}
-                        </Text>
-                      )}
-                    </View>
-                  </View>
-
-                  <View style={s.rowActions}>
-                    <Pressable
-                      onPress={() =>
-                        addPlace({
-                          name: st.name,
-                          lat: st.lat,
-                          lng: st.lng,
-                          type: "stop",
-                          place_id: st.id,
-                          pin: null,
-                          list: "favorites",
-                          category: "Transit Stop",
-                          note: null,
-                        }).catch(() => {})
-                      }
-                      style={[s.rowActionCircle, { backgroundColor: pillBg }]}
-                    >
-                      <Ionicons
-                        name="bookmark-outline"
-                        size={16}
-                        color={BLUE}
-                      />
-                    </Pressable>
-                    <Pressable
-                      onPress={() => goToRoutePlanner("to", st)}
-                      style={[s.rowActionCircle, { backgroundColor: pillBg }]}
-                    >
-                      <Ionicons
-                        name="return-up-forward"
-                        size={16}
-                        color={BLUE}
-                      />
-                    </Pressable>
-                  </View>
-                </Pressable>
-              );
-            }
-
-            if (item._kind === "route") {
-              const rt = item.item;
-              return (
-                <Pressable
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    onSelectCorridorRoute?.(rt.route_id);
-                  }}
-                  style={[s.resultRow, { borderBottomColor: borderCol }]}
-                >
-                  <View style={{ flex: 1, gap: 3 }}>
-                    <View style={s.badgesWrap}>
-                      <View
-                        style={[
-                          s.modeTag,
-                          { backgroundColor: rt.route_color || ORANGE },
-                        ]}
-                      >
-                        <Text style={s.modeTagText}>{rt.mode_badge}</Text>
-                      </View>
-                      <Text style={[s.rowTitle, { color: textPrimary }]}>
-                        Line {rt.route_short_name}
-                      </Text>
-                    </View>
-                    <Text
-                      style={[s.rowSub, { color: textMuted }]}
-                      numberOfLines={1}
-                    >
-                      {rt.route_long_name}
-                      {rt.agency_name ? ` · ${rt.agency_name}` : ""}
-                    </Text>
-                  </View>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={18}
-                    color={textMuted}
-                  />
-                </Pressable>
-              );
-            }
-
-            const pl = item.item as ExplorePlaceItem;
-            const thumbUri =
-              pl.photos?.[0] ?? mapboxStaticPhoto(pl.lng, pl.lat, 15);
-            const distText =
-              pl.distanceM != null
-                ? pl.distanceM >= 1000
-                  ? `${(pl.distanceM / 1000).toFixed(1)}km`
-                  : `${Math.round(pl.distanceM)}m`
-                : "Nearby";
-
+        rows.map((row) => {
+          if (row.kind === "header") {
             return (
-              <Pressable
+              <Text key={row.key} style={[s.section, { color: C.sub }]}>
+                {row.title.toUpperCase()} · {row.count}
+              </Text>
+            );
+          }
+
+          if (row.kind === "place") {
+            const pl = row.item;
+            const dist = formatDistance(distOf(pl.lat, pl.lng, pl.distanceM));
+            return (
+              <PressableScale
+                key={row.key}
+                pressedScale={0.98}
                 onPress={() => {
                   Haptics.selectionAsync();
                   onFocusCoords(pl.lat, pl.lng);
                   selectPlace(pl);
                 }}
-                style={[s.resultRow, { borderBottomColor: borderCol }]}
+                style={[s.row, { borderBottomColor: C.line }]}
+                accessibilityRole="button"
+                accessibilityLabel={pl.name}
               >
-                <View style={{ flex: 1, gap: 3 }}>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "baseline",
-                      gap: 6,
-                    }}
-                  >
-                    <Text
-                      style={[s.rowTitle, { color: textPrimary }]}
-                      numberOfLines={1}
-                    >
-                      {pl.name}
-                    </Text>
-                    <Text style={{ fontSize: 12, color: textMuted }}>
-                      {pl.category}
-                    </Text>
-                  </View>
-
-                  <Text style={{ fontSize: 12, color: "#16A34A", fontWeight: "600" }}>
-                    Open
+                <View style={{ flex: 1, gap: 3, minWidth: 0 }}>
+                  <Text style={[s.rowTitle, { color: C.text }]} numberOfLines={1}>
+                    {pl.name}
                   </Text>
-
-                  <Text
-                    style={[s.rowSub, { color: textMuted }]}
-                    numberOfLines={1}
-                  >
-                    {distText} · {pl.address}
+                  <PlaceFacts place={pl} sub={C.sub} />
+                  <Text style={[s.rowSub, { color: C.sub }]} numberOfLines={1}>
+                    {[dist, pl.address].filter(Boolean).join(" · ")}
                   </Text>
-
-                  {/* 4 Circular Light-Blue Action Buttons: Bookmark, Share, Focus Pin, Route[cite: 15] */}
-                  <View style={[s.rowActions, { marginTop: 8 }]}>
-                    <Pressable
-                      onPress={() =>
-                        addPlace({
-                          name: pl.name,
-                          lat: pl.lat,
-                          lng: pl.lng,
-                          type: "location",
-                          place_id: pl.id,
-                          pin: null,
-                          list: "favorites",
-                          category: pl.category,
-                          note: null,
-                        }).catch(() => {})
-                      }
-                      style={[
-                        s.rowActionCircle,
-                        { backgroundColor: "rgba(37, 99, 235, 0.1)" },
-                      ]}
-                    >
-                      <Ionicons
-                        name="bookmark-outline"
-                        size={16}
-                        color={BLUE}
-                      />
-                    </Pressable>
-
-                    <Pressable
-                      onPress={() =>
-                        Share.share({
-                          message: `${pl.name} — ${pl.address}`,
-                        }).catch(() => {})
-                      }
-                      style={[
-                        s.rowActionCircle,
-                        { backgroundColor: "rgba(37, 99, 235, 0.1)" },
-                      ]}
-                    >
-                      <Ionicons name="share-outline" size={16} color={BLUE} />
-                    </Pressable>
-
-                    <Pressable
-                      onPress={() => {
-                        Haptics.selectionAsync();
-                        onFocusCoords(pl.lat, pl.lng);
-                        setMinimizedToMap(true);
-                      }}
-                      style={[
-                        s.rowActionCircle,
-                        { backgroundColor: "rgba(37, 99, 235, 0.1)" },
-                      ]}
-                    >
-                      <Ionicons
-                        name="location-outline"
-                        size={16}
-                        color={BLUE}
-                      />
-                    </Pressable>
-
-                    <Pressable
-                      onPress={() => goToRoutePlanner("to", pl)}
-                      style={[
-                        s.rowActionCircle,
-                        { backgroundColor: "rgba(37, 99, 235, 0.1)" },
-                      ]}
-                    >
-                      <Ionicons
-                        name="return-up-forward"
-                        size={16}
-                        color={BLUE}
-                      />
-                    </Pressable>
+                  <View style={[s.actions, { marginTop: 6 }]}>
+                    <RoundAction icon="bookmark-outline" label="Save" bg={C.chip} onPress={() =>
+                      addPlace({
+                        name: pl.name, lat: pl.lat, lng: pl.lng, type: "location", place_id: pl.id,
+                        pin: null, list: "favorites", category: pl.category, note: null,
+                      }).catch(() => {})} />
+                    <RoundAction icon="share-outline" label="Share" bg={C.chip} onPress={() =>
+                      Share.share({ message: `${pl.name} · ${pl.address}` }).catch(() => {})} />
+                    <RoundAction icon="navigate" label="Directions" bg={BLUE} fg="#FFFFFF"
+                      onPress={() => goToRoute("to", pl)} />
                   </View>
                 </View>
-
-                {/* Right Rounded Thumbnail[cite: 15] */}
                 <Image
-                  source={{ uri: thumbUri }}
-                  style={{
-                    width: 74,
-                    height: 74,
-                    borderRadius: 12,
-                    backgroundColor: pillBg,
-                  }}
+                  source={{ uri: pl.photos?.[0] ?? mapboxStaticPhoto(pl.lng, pl.lat, 15) }}
+                  style={[s.thumb, { backgroundColor: C.chip }]}
                   contentFit="cover"
+                  transition={180}
                 />
-              </Pressable>
+              </PressableScale>
             );
+          }
+
+          if (row.kind === "route") {
+            const rt = row.item;
+            return (
+              <PressableScale
+                key={row.key}
+                pressedScale={0.98}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  onSelectCorridorRoute?.(rt.route_id);
+                }}
+                style={[s.row, { borderBottomColor: C.line }]}
+                accessibilityRole="button"
+                accessibilityLabel={`Line ${rt.route_short_name}`}
+              >
+                <View style={[s.modeTag, { backgroundColor: rt.route_color || ORANGE }]}>
+                  <Text style={s.modeTagText}>{rt.mode_badge}</Text>
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={[s.rowTitle, { color: C.text }]} numberOfLines={1}>
+                    Line {rt.route_short_name}
+                  </Text>
+                  <Text style={[s.rowSub, { color: C.sub }]} numberOfLines={1}>
+                    {[rt.route_long_name, rt.agency_name].filter(Boolean).join(" · ")}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={C.sub} />
+              </PressableScale>
+            );
+          }
+
+          const st = row.item;
+          const meta = resolveStopCategory(st as any);
+          const dist = formatDistance(distOf(st.lat, st.lng, st.distance_m));
+          return (
+            <PressableScale
+              key={row.key}
+              pressedScale={0.98}
+              onPress={() => {
+                Haptics.selectionAsync();
+                clearSearch();
+                onSelectStopOnMap(st);
+              }}
+              style={[s.row, { borderBottomColor: C.line }]}
+              accessibilityRole="button"
+              accessibilityLabel={st.name}
+            >
+              <View style={[s.stopBadge, { backgroundColor: meta.color }]}>
+                <StopTypeGlyph category={meta.category} size={17} />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[s.rowTitle, { color: C.text }]} numberOfLines={1}>
+                  {st.name}
+                </Text>
+                <Text style={[s.rowSub, { color: C.sub }]} numberOfLines={1}>
+                  {[dist, st.stop_code, st.direction_label, st.route_nams].filter(Boolean).join(" · ")}
+                </Text>
+              </View>
+              <RoundAction icon="navigate" label="Directions" bg={C.chip} fg={BLUE}
+                onPress={() => goToRoute("to", st)} />
+            </PressableScale>
+          );
+        })
+      )}
+    </MapSheet>
+  );
+}
+
+// ─── Selected place ──────────────────────────────────────────────────────────
+
+function PlaceSheet({ place, onFocusCoords, userLat, userLng }: Props & { place: ExplorePlaceItem }) {
+  const dark = useColorScheme() === "dark";
+  const C = palette(dark);
+  const router = useRouter();
+  const sheet = useRef<MapSheetHandle>(null);
+  const { selectPlace } = useExploreSearchStore();
+  const { places: saved, addPlace } = useSavedStore();
+  const isSaved = saved.some((p) => p.place_id === place.id);
+
+  const dist = formatDistance(
+    place.distanceM ??
+      (userLat != null && userLng != null ? distanceM(userLat, userLng, place.lat, place.lng) : undefined)
+  );
+  const photos = place.photos?.length ? place.photos : [mapboxStaticPhoto(place.lng, place.lat)];
+
+  const go = (role: "from" | "to") => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const params =
+      role === "from"
+        ? { fLat: String(place.lat), fLng: String(place.lng), fName: place.name }
+        : { tLat: String(place.lat), tLng: String(place.lng), tName: place.name };
+    router.push({ pathname: "/route" as any, params });
+  };
+
+  const header = (
+    <View style={s.placeHeader}>
+      <View style={{ flex: 1, gap: 3 }}>
+        <Text style={[s.placeTitle, { color: C.text }]} numberOfLines={2}>
+          {place.name}
+        </Text>
+        <PlaceFacts place={place} sub={C.sub} showCategory />
+        <Text style={[s.rowSub, { color: C.sub }]} numberOfLines={1}>
+          {[dist, place.address].filter(Boolean).join(" · ")}
+        </Text>
+      </View>
+      <PressableScale
+        onPress={() => sheet.current?.close()}
+        hitSlop={12}
+        style={[s.roundBtn, { backgroundColor: C.chip }]}
+        accessibilityRole="button"
+        accessibilityLabel="Back to results"
+      >
+        <Ionicons name="close" size={16} color={C.sub} />
+      </PressableScale>
+    </View>
+  );
+
+  const footer = (
+    <View style={s.footerRow}>
+      <PressableScale containerStyle={{ flex: 1 }} onPress={() => go("from")} style={[s.bigBtn, { backgroundColor: C.chip }]}>
+        <Text style={[s.bigBtnText, { color: C.text }]}>From here</Text>
+      </PressableScale>
+      <PressableScale containerStyle={{ flex: 1.4 }} onPress={() => go("to")} style={[s.bigBtn, { backgroundColor: ORANGE }]}>
+        <Ionicons name="navigate" size={16} color="#FFFFFF" />
+        <Text style={[s.bigBtnText, { color: "#FFFFFF" }]}>Directions</Text>
+      </PressableScale>
+    </View>
+  );
+
+  return (
+    <MapSheet
+      ref={sheet}
+      snapPoints={[330, SH * 0.66]}
+      onClose={() => selectPlace(null)}
+      header={header}
+      footer={footer}
+    >
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.photoStrip}>
+        {photos.map((uri, i) => (
+          <Image
+            key={i}
+            source={{ uri }}
+            style={[s.photo, { backgroundColor: C.chip }]}
+            contentFit="cover"
+            transition={200}
+          />
+        ))}
+      </ScrollView>
+
+      <View style={[s.actions, s.placeActions]}>
+        <RoundAction
+          icon={isSaved ? "bookmark" : "bookmark-outline"}
+          label={isSaved ? "Saved" : "Save"}
+          bg={C.chip}
+          fg={isSaved ? ORANGE : C.text}
+          withLabel
+          onPress={() => {
+            if (isSaved) return;
+            Haptics.selectionAsync();
+            addPlace({
+              name: place.name, lat: place.lat, lng: place.lng, type: "location", place_id: place.id,
+              pin: null, list: "favorites", category: place.category, note: null,
+            }).catch(() => {});
           }}
         />
-      )}
+        <RoundAction
+          icon="share-outline"
+          label="Share"
+          bg={C.chip}
+          fg={C.text}
+          withLabel
+          onPress={() =>
+            Share.share({
+              message: `${place.name} (${place.address})\nhttps://navigo.co.ke/route?tLat=${place.lat}&tLng=${place.lng}&tName=${encodeURIComponent(place.name)}`,
+            }).catch(() => {})
+          }
+        />
+        <RoundAction
+          icon="locate-outline"
+          label="Show on map"
+          bg={C.chip}
+          fg={C.text}
+          withLabel
+          onPress={() => {
+            onFocusCoords(place.lat, place.lng);
+            sheet.current?.snapTo(0);
+          }}
+        />
+      </View>
+    </MapSheet>
+  );
+}
+
+// ─── Small parts ─────────────────────────────────────────────────────────────
+
+/** Category, rating and open status, each only when we actually know it. */
+function PlaceFacts({ place, sub, showCategory }: { place: ExplorePlaceItem; sub: string; showCategory?: boolean }) {
+  const bits: React.ReactNode[] = [];
+  if (showCategory && place.category) {
+    bits.push(<Text key="c" style={[s.fact, { color: sub }]}>{place.category}</Text>);
+  }
+  if (place.rating != null) {
+    bits.push(
+      <View key="r" style={s.ratingWrap}>
+        <Ionicons name="star" size={12} color="#F59E0B" />
+        <Text style={[s.fact, { color: sub }]}>
+          <Text style={s.ratingNum}>{place.rating.toFixed(1)}</Text>
+          {place.reviewCount != null ? ` (${place.reviewCount.toLocaleString()})` : ""}
+        </Text>
+      </View>
+    );
+  }
+  if (place.openNow != null) {
+    bits.push(
+      <Text key="o" style={[s.fact, { color: place.openNow ? GREEN : RED, fontWeight: "700" }]}>
+        {place.openNow ? "Open now" : "Closed"}
+      </Text>
+    );
+  }
+  if (!bits.length) return null;
+  return (
+    <View style={s.factsRow}>
+      {bits.map((b, i) => (
+        <React.Fragment key={i}>
+          {i > 0 && <Text style={[s.fact, { color: sub }]}>·</Text>}
+          {b}
+        </React.Fragment>
+      ))}
     </View>
   );
 }
 
+function RoundAction({
+  icon, label, bg, fg = BLUE, withLabel, onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  bg: string;
+  fg?: string;
+  withLabel?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <PressableScale onPress={onPress} hitSlop={6} accessibilityRole="button" accessibilityLabel={label} style={s.roundActionWrap}>
+      <View style={[s.roundAction, { backgroundColor: bg }]}>
+        <Ionicons name={icon} size={16} color={fg} />
+      </View>
+      {withLabel && <Text style={[s.roundActionLabel, { color: fg === "#FFFFFF" ? BLUE : fg }]}>{label}</Text>}
+    </PressableScale>
+  );
+}
+
+/** Pulsing placeholders while results load (smoother than a spinner). */
+function SkeletonRows({ color }: { color: string }) {
+  const pulse = useRef(new Animated.Value(0.45)).current;
+  React.useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 650, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.45, duration: 650, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+  return (
+    <Animated.View style={{ opacity: pulse }}>
+      {[0, 1, 2].map((i) => (
+        <View key={i} style={s.skelRow}>
+          <View style={{ flex: 1, gap: 8 }}>
+            <View style={[s.skelLine, { width: "62%", backgroundColor: color }]} />
+            <View style={[s.skelLine, { width: "40%", backgroundColor: color }]} />
+            <View style={[s.skelLine, { width: "78%", backgroundColor: color }]} />
+          </View>
+          <View style={[s.thumb, { backgroundColor: color }]} />
+        </View>
+      ))}
+    </Animated.View>
+  );
+}
+
 const s = StyleSheet.create({
-  resultsSheet: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    shadowColor: "#000",
-    shadowOpacity: 0.18,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: -5 },
-    elevation: 20,
-    zIndex: 14,
-  },
-  placeSheet: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: -5 },
-    elevation: 22,
-    zIndex: 14,
-  },
-  handleWrap: {
-    alignItems: "center",
-    paddingTop: 10,
-    paddingBottom: 6,
-  },
-  handle: {
-    width: 38,
-    height: 4,
-    borderRadius: 2,
-  },
-  filterBar: {
+  resHeader: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 18, paddingBottom: 12 },
+  resTitle: { fontSize: 18, fontWeight: "800", letterSpacing: -0.3 },
+  resSub: { fontSize: 12.5, marginTop: 1 },
+  segment: { flexDirection: "row", padding: 3, borderRadius: 12, gap: 2 },
+  segBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 9 },
+  segText: { fontSize: 12, fontWeight: "700" },
+
+  section: { fontSize: 11, fontWeight: "800", letterSpacing: 0.6, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 4 },
+
+  row: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  sortPillsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  sortPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 18,
-  },
-  sortPillActive: {
-    backgroundColor: "transparent",
-    borderWidth: 1.5,
-  },
-  sortPillText: {
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  hideListBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  hideListText: {
-    color: ORANGE,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  loadingBox: {
-    height: 110,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 8,
-  },
-  resultRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    gap: 12,
     paddingHorizontal: 18,
     paddingVertical: 13,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 12,
   },
-  rowTitle: {
-    fontSize: 16,
-    fontWeight: "700",
+  rowTitle: { fontSize: 15.5, fontWeight: "700" },
+  rowSub: { fontSize: 12.5 },
+  thumb: { width: 76, height: 76, borderRadius: 14 },
+  factsRow: { flexDirection: "row", alignItems: "center", gap: 5, flexWrap: "wrap" },
+  fact: { fontSize: 12.5 },
+  ratingWrap: { flexDirection: "row", alignItems: "center", gap: 3 },
+  ratingNum: { fontWeight: "800" },
+
+  modeTag: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, minWidth: 38, alignItems: "center" },
+  modeTagText: { color: "#FFFFFF", fontSize: 10.5, fontWeight: "800" },
+  stopBadge: {
+    width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center",
+    borderWidth: 2, borderColor: "#FFFFFF",
   },
-  rowSub: {
-    fontSize: 12.5,
-  },
-  badgesWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginTop: 2,
-  },
-  distText: {
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  modeTag: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  modeTagText: {
-    color: "#FFFFFF",
-    fontSize: 10,
-    fontWeight: "800",
-  },
-  routesInline: {
-    fontSize: 12,
-    flex: 1,
-  },
-  rowActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  rowActionCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  minimizedWrap: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    alignItems: "center",
-    zIndex: 14,
-  },
-  viewListFloatingPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 24,
-    borderWidth: 1,
-    shadowColor: "#000",
-    shadowOpacity: 0.16,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 10,
-  },
-  viewListText: {
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  placeHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    paddingHorizontal: 18,
-    paddingBottom: 10,
-    gap: 12,
-  },
-  placeTitleRow: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    gap: 8,
-    flexWrap: "wrap",
-  },
-  placeTitle: {
-    fontSize: 19,
-    fontWeight: "800",
-    letterSpacing: -0.3,
-  },
-  placeCategory: {
-    fontSize: 12,
-    fontWeight: "500",
-  },
-  ratingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    marginTop: 4,
-  },
-  ratingScore: {
-    color: "#EF4444",
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  starsWrap: {
-    flexDirection: "row",
-    gap: 1,
-  },
-  reviewCount: {
-    fontSize: 12,
-  },
-  placeAddress: {
-    fontSize: 12.5,
-    marginTop: 3,
-  },
-  closeBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  photoStrip: {
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    gap: 10,
-  },
-  placePhoto: {
-    width: 170,
-    height: 112,
-    borderRadius: 12,
-  },
-  placeFooter: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 18,
-    paddingTop: 8,
-  },
-  leftIconGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  roundActionBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  fromToGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  fromBtn: {
-    backgroundColor: BLUE,
-    paddingHorizontal: 18,
-    paddingVertical: 9,
-    borderRadius: 20,
-  },
-  toBtn: {
-    backgroundColor: ORANGE,
-    paddingHorizontal: 22,
-    paddingVertical: 9,
-    borderRadius: 20,
-  },
-  fromToText: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  minimizedBottomBar: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    shadowColor: "#000",
-    shadowOpacity: 0.14,
-    shadowRadius: 14,
-    elevation: 16,
-    zIndex: 13,
-  },
+
+  actions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  roundActionWrap: { alignItems: "center", gap: 4 },
+  roundAction: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  roundActionLabel: { fontSize: 11.5, fontWeight: "700" },
+
+  empty: { alignItems: "center", paddingHorizontal: 30, paddingTop: 24, gap: 8 },
+  emptyDisc: { width: 62, height: 62, borderRadius: 31, alignItems: "center", justifyContent: "center", marginBottom: 4 },
+  emptyTitle: { fontSize: 16, fontWeight: "800", textAlign: "center" },
+  emptySub: { fontSize: 13, lineHeight: 19, textAlign: "center" },
+
+  skelRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 18, paddingVertical: 14 },
+  skelLine: { height: 11, borderRadius: 6 },
+
+  placeHeader: { flexDirection: "row", alignItems: "flex-start", gap: 12, paddingHorizontal: 18, paddingBottom: 12 },
+  placeTitle: { fontSize: 20, fontWeight: "800", letterSpacing: -0.4 },
+  roundBtn: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
+  photoStrip: { paddingHorizontal: 18, gap: 10 },
+  photo: { width: 200, height: 128, borderRadius: 14 },
+  placeActions: { justifyContent: "space-around", paddingHorizontal: 18, paddingTop: 16 },
+
+  footerRow: { flexDirection: "row", gap: 10 },
+  bigBtn: { height: 50, borderRadius: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
+  bigBtnText: { fontSize: 15, fontWeight: "800" },
 });

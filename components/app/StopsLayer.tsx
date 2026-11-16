@@ -42,7 +42,7 @@ const STOP_LABEL_COLORS_DARK: Record<StopCategory, string> = {
   bus: "#60A5FA",
 };
 
-const STOP_COLORS: Record<StopCategory, string> = {
+export const STOP_COLORS: Record<StopCategory, string> = {
   rail: "#16A34A",
   metro: "#7C3AED",
   brt: "#DC2626",
@@ -99,7 +99,7 @@ type Props = {
   onPress: (stop: Stop) => void;
 };
 
-function resolveStopCategory(s: Stop): {
+export function resolveStopCategory(s: Stop): {
   category: StopCategory;
   color: string;
   isMajor: boolean;
