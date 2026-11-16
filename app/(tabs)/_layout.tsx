@@ -1,4 +1,5 @@
 // app/(tabs)/_layout.tsx
+import { useReportSheetTop } from "@/components/app/mapSheetInsets";
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs, useRouter } from "expo-router";
 import React, { useRef, useState, useEffect } from "react";
@@ -71,6 +72,8 @@ function DraggableSheet({
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const currentY        = useRef(SNAP_Y);
   const [isMinimized, setIsMinimized] = useState(false);
+  // Floating map controls follow this sheet's top edge.
+  useReportSheetTop(translateY, visible);
 
   useEffect(() => {
     if (visible) {

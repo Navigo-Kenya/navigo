@@ -1,4 +1,5 @@
 // components/app/StopDetailsSheet.tsx
+import { useReportSheetTop } from "./mapSheetInsets";
 import {
   ContributionService,
   StopPhoto,
@@ -1206,6 +1207,8 @@ export default function StopDetailsSheet({
 }): React.JSX.Element | null {
   const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(SCREEN_H)).current;
+  // Floating map controls follow this sheet's top edge.
+  useReportSheetTop(translateY);
   const currentY = useRef(PEEK_Y);
   const [snapState, setSnapState] = useState<"peek" | "half" | "full">("peek");
 

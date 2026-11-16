@@ -1,4 +1,5 @@
 // components/map/RouteCorridorOverlay.tsx
+import { useStaticSheetTop } from "@/components/app/mapSheetInsets";
 import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -254,6 +255,8 @@ export function RouteCorridorSheet({
   const router = useRouter();
   const dark = useColorScheme() === "dark";
   const [minimized, setMinimized] = useState(false);
+  // Floating map controls sit above this sheet.
+  const onSheetLayout = useStaticSheetTop(!!corridor || loading);
 
   if (!corridor && !loading) return null;
 
@@ -271,6 +274,7 @@ export function RouteCorridorSheet({
 
   return (
     <View
+      onLayout={onSheetLayout}
       style={[
         s.sheet,
         {

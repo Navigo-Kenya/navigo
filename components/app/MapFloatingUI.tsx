@@ -1,6 +1,8 @@
 // components/app/MapFloatingUI.tsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
+  Dimensions,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,6 +12,12 @@ import {
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  MapLayersIcon,
+  PlaceCategoryIcon,
+  ReportIcon,
+  type PlaceCategoryKey,
+} from "@/components/icons/NavigoIcons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import type { Step } from "@/utils/mapHelpers";
@@ -25,63 +33,44 @@ import WeatherMeteoSheet, {
   fetchLiveMeteo,
   type LiveWeatherData,
 } from "./WeatherMeteoSheet";
+import {
+  fadeWhenSheetAbove,
+  floatAboveSheet,
+  setTopUiBottom,
+  useSheetAccessoryHeight,
+  useSheetTop,
+} from "./mapSheetInsets";
 
 const ORANGE = "#FF6F00";
+const WINDOW_H = Dimensions.get("window").height;
 
-export const QUICK_CATEGORIES = [
-  { key: "restaurant", label: "Restaurant", icon: "restaurant", color: "#EA580C" },
-  { key: "cafe",       label: "Cafe",       icon: "cafe",       color: "#B45309" },
-  { key: "gas",        label: "Gas Station",icon: "car",        color: "#2563EB" },
-  { key: "hospital",   label: "Hospital",   icon: "medkit",     color: "#DC2626" },
-  { key: "parking",    label: "Parking",    icon: "pricetag",   color: "#0284C7" },
-  { key: "store",      label: "24h Store",  icon: "storefront", color: "#7C3AED" },
-  { key: "pharmacy",   label: "Pharmacy",   icon: "bandage",    color: "#16A34A" },
-  { key: "atm",        label: "ATM / Bank", icon: "card",       color: "#0D9488" },
-] as const;
+// Geometry shared by the layout maths below and the stylesheet.
+const FAB = 44;
+const STACK_GAP = 10;
+const STACK_STEP = FAB + STACK_GAP;
+const SHEET_GAP = 12;
+const BOARD_CHIP_H = 40;
+/** Clearance above the floating tab bar when no sheet is open. */
+const TAB_BAR_CLEARANCE = 74;
+/** Nairobi CBD, used until the first GPS fix. */
+const FALLBACK_LAT = -1.2864;
+const FALLBACK_LNG = 36.8172;
 
-/**
- * Custom Original Navigo Map Layer Icon:
- * Isometric 3-deck diamond stack blending Navigo Orange (#FF6F00) with a warm highlight plate.
- */
-function NavigoOriginalLayersIcon({ dark }: { dark: boolean }) {
-  return (
-    <View style={styles.customLayerIconWrap}>
-      {/* Bottom Deck (Muted Slate/Amber) */}
-      <View
-        style={[
-          styles.layerDiamond,
-          {
-            top: 15,
-            backgroundColor: dark ? "#3F3F46" : "#FED7AA",
-            borderColor: ORANGE,
-          },
-        ]}
-      />
-      {/* Middle Deck (Warm Orange) */}
-      <View
-        style={[
-          styles.layerDiamond,
-          {
-            top: 10,
-            backgroundColor: "#FB923C",
-            borderColor: "#FFFFFF",
-          },
-        ]}
-      />
-      {/* Top Primary Deck (Signature #FF6F00 Orange) */}
-      <View
-        style={[
-          styles.layerDiamond,
-          {
-            top: 5,
-            backgroundColor: ORANGE,
-            borderColor: "#FFFFFF",
-          },
-        ]}
-      />
-    </View>
-  );
-}
+/** Quick-search chips. Icons come from PlaceCategoryIcon, keyed by `key`. */
+export const QUICK_CATEGORIES: readonly {
+  key: PlaceCategoryKey;
+  label: string;
+  color: string;
+}[] = [
+  { key: "restaurant", label: "Restaurant",  color: "#EA580C" },
+  { key: "cafe",       label: "Cafe",        color: "#B45309" },
+  { key: "gas",        label: "Gas Station", color: "#2563EB" },
+  { key: "hospital",   label: "Hospital",    color: "#DC2626" },
+  { key: "parking",    label: "Parking",     color: "#0284C7" },
+  { key: "store",      label: "24h Store",   color: "#7C3AED" },
+  { key: "pharmacy",   label: "Pharmacy",    color: "#16A34A" },
+  { key: "atm",        label: "ATM / Bank",  color: "#0D9488" },
+];
 
 export interface MapFloatingUIProps {
   onRecenter: () => void;
@@ -122,7 +111,6 @@ export interface MapFloatingUIProps {
   onResume: () => void;
   showAR: boolean;
   onOpenAR: () => void;
-  bottomOffset?: number;
   userLat?: number | null;
   userLng?: number | null;
 }
@@ -159,7 +147,6 @@ export default function MapFloatingUI({
   onResume,
   showAR,
   onOpenAR,
-  bottomOffset = 0,
   userLat,
   userLng,
 }: MapFloatingUIProps) {
@@ -181,11 +168,110 @@ export default function MapFloatingUI({
     clearSearch,
   } = useExploreSearchStore();
 
+  // Weather barely changes over a few km: refetch per ~5 km cell, not on
+  // every GPS fix.
+  const meteoLat = Math.round((userLat ?? FALLBACK_LAT) * 20) / 20;
+  const meteoLng = Math.round((userLng ?? FALLBACK_LNG) * 20) / 20;
   useEffect(() => {
-    fetchLiveMeteo(userLat ?? -1.2864, userLng ?? 36.8172)
-      .then(setLiveMeteo)
+    let alive = true;
+    fetchLiveMeteo(meteoLat, meteoLng)
+      .then((m) => {
+        if (alive) setLiveMeteo(m);
+      })
       .catch(() => {});
-  }, [userLat, userLng]);
+    return () => {
+      alive = false;
+    };
+  }, [meteoLat, meteoLng]);
+
+  // ─── Layout: everything is derived from two measured edges ───
+  //   topEdge  – bottom of the top bar (search + chips, or the nav banner)
+  //   sheetTop – top of whichever bottom sheet is open, tracked live
+  const sheetTop = useSheetTop();
+  const [screenH, setScreenH] = useState(WINDOW_H);
+  const [topBarBottom, setTopBarBottom] = useState(0);
+  const [leftWidgetH, setLeftWidgetH] = useState(62);
+
+  const hasTopBar = !activeJourney || navigating;
+  const topEdge = !hasTopBar
+    ? insets.top + 4
+    : topBarBottom || insets.top + 118;
+
+  useEffect(() => {
+    setTopUiBottom(topEdge);
+  }, [topEdge]);
+
+  const showCompass = Math.abs(cameraHeading) > 2 || navigating;
+  const stackTop = topEdge + STACK_GAP;
+  const restBottom = Math.max(insets.bottom, 12) + TAB_BAR_CLEARANCE;
+
+  // A card riding on the sheet (intermediate-stop info) reserves its height;
+  // bottom controls follow this "lifted" edge so they sit above the card, and
+  // glide back down when it closes (the reserved height is animated too).
+  const accessoryH = useSheetAccessoryHeight();
+  const liftedTop = useMemo(
+    () => Animated.subtract(sheetTop, accessoryH),
+    [sheetTop, accessoryH]
+  );
+
+  // Recenter is the control people reach for most, so it gets priority: it
+  // may rise into the right stack's column, and stack buttons give way
+  // (bottom-most first) once it needs their space.
+  const stackYieldY = (i: number) =>
+    stackTop + i * STACK_STEP + FAB + STACK_GAP + FAB + SHEET_GAP;
+
+  const anim = useMemo(() => {
+    const restTop = (h: number) => screenH - restBottom - h;
+    const ride = (height: number, rest: number) =>
+      floatAboveSheet(liftedTop, {
+        height,
+        restTop: rest,
+        minTop: stackTop,
+        gap: SHEET_GAP,
+      });
+    return {
+      // The top bar fades when the sheet itself reaches it.
+      topBar: fadeWhenSheetAbove(sheetTop, topEdge - 24),
+      stack: [0, 1, 2, 3].map((i) =>
+        fadeWhenSheetAbove(liftedTop, stackYieldY(i))
+      ),
+      recenter: ride(FAB, restTop(FAB)),
+      left: ride(leftWidgetH, restTop(leftWidgetH)),
+      board: ride(BOARD_CHIP_H, restTop(BOARD_CHIP_H) - 6),
+    };
+    // stackYieldY only depends on stackTop
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheetTop, liftedTop, screenH, restBottom, topEdge, stackTop, leftWidgetH]);
+
+  // Faded controls must not keep catching taps. Opacity runs on the native
+  // driver; these listeners only flip state when a threshold is crossed.
+  // The last positions survive re-subscription (a sheet handoff or a taller
+  // nav banner), so state is re-evaluated against where things really are.
+  const [topCovered, setTopCovered] = useState(false);
+  const [stackVisible, setStackVisible] = useState(4);
+  const lastSheetY = useRef(Number.POSITIVE_INFINITY);
+  const lastLiftedY = useRef(Number.POSITIVE_INFINITY);
+  useEffect(() => {
+    const applyTop = (y: number) => {
+      lastSheetY.current = y;
+      setTopCovered(y < topEdge - 30);
+    };
+    const applyStack = (y: number) => {
+      lastLiftedY.current = y;
+      let visible = 0;
+      while (visible < 4 && y >= stackYieldY(visible) - 6) visible++;
+      setStackVisible(visible);
+    };
+    applyTop(lastSheetY.current);
+    applyStack(lastLiftedY.current);
+    const a = sheetTop.addListener(({ value }) => applyTop(value));
+    const b = liftedTop.addListener(({ value }) => applyStack(value));
+    return () => {
+      sheetTop.removeListener(a);
+      liftedTop.removeListener(b);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheetTop, liftedTop, topEdge, stackTop]);
 
   const handleCategoryPress = async (label: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -196,13 +282,13 @@ export default function MapFloatingUI({
       const [preds, mobility] = await Promise.all([
         MapService.placesAutocomplete(
           label,
-          userLat ?? -1.2864,
-          userLng ?? 36.8172
+          userLat ?? FALLBACK_LAT,
+          userLng ?? FALLBACK_LNG
         ),
         StopService.searchMobility(
           label,
-          userLat ?? -1.2864,
-          userLng ?? 36.8172
+          userLat ?? FALLBACK_LAT,
+          userLng ?? FALLBACK_LNG
         ),
       ]);
 
@@ -238,16 +324,109 @@ export default function MapFloatingUI({
   const textMuted = dark ? "#9CA3AF" : "#6B7280";
   const borderCol = dark ? "rgba(63, 63, 70, 0.7)" : "rgba(229, 231, 235, 0.9)";
 
-  const effectiveBottom =
-    bottomOffset > 0
-      ? bottomOffset + Math.max(insets.bottom, 12)
-      : searchContextActive
-      ? 310 + Math.max(insets.bottom, 12)
-      : Math.max(insets.bottom, 12) + 74;
+  // Right-side stack, top to bottom. Built as a list so each button knows its
+  // slot and can yield individually when a sheet rises.
+  const stackButtons: { key: string; node: React.ReactNode }[] = [
+    {
+      key: "report",
+      node: (
+        <Pressable
+          onPress={() => {
+            Haptics.selectionAsync();
+            onOpenReport();
+          }}
+          style={[
+            styles.circleFab,
+            { backgroundColor: cardBg, borderColor: borderCol },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Report transit issue"
+        >
+          <ReportIcon color={textPrimary} />
+        </Pressable>
+      ),
+    },
+    {
+      key: "layers",
+      node: (
+        <Pressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            onOpenLayers();
+          }}
+          style={[
+            styles.circleFab,
+            { backgroundColor: cardBg, borderColor: borderCol },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Map layers"
+        >
+          <MapLayersIcon color={textPrimary} />
+        </Pressable>
+      ),
+    },
+  ];
+  if (showCompass) {
+    stackButtons.push({
+      key: "compass",
+      node: (
+        <Pressable
+          onPress={() => {
+            Haptics.selectionAsync();
+            onResetNorth();
+          }}
+          style={[
+            styles.circleFab,
+            { backgroundColor: cardBg, borderColor: borderCol },
+          ]}
+          accessibilityLabel="Compass / Toggle 3D heading"
+        >
+          <Ionicons
+            name={headingUp ? "navigate" : "compass-outline"}
+            size={20}
+            color={headingUp ? ORANGE : textPrimary}
+          />
+        </Pressable>
+      ),
+    });
+  }
+  if (showAR) {
+    stackButtons.push({
+      key: "ar",
+      node: (
+        <Pressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            onOpenAR();
+          }}
+          style={[
+            styles.circleFab,
+            { backgroundColor: ORANGE, borderColor: ORANGE },
+          ]}
+          accessibilityLabel="Open AR Walk View"
+        >
+          <Ionicons name="camera-outline" size={20} color="#FFFFFF" />
+        </Pressable>
+      ),
+    });
+  }
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      {/* ─── 1. TOP BAR ─── */}
+    <View
+      style={StyleSheet.absoluteFill}
+      pointerEvents="box-none"
+      onLayout={(e) => setScreenH(Math.round(e.nativeEvent.layout.height))}
+    >
+      {/* ─── 1. TOP BAR (fades out when a sheet is dragged over it) ─── */}
+      {hasTopBar && (
+      <Animated.View
+        pointerEvents={topCovered ? "none" : "box-none"}
+        style={{ opacity: anim.topBar }}
+        onLayout={(e) => {
+          const { y, height } = e.nativeEvent.layout;
+          setTopBarBottom(Math.round(y + height));
+        }}
+      >
       {!activeJourney ? (
         searchContextActive ? (
           /* KakaoMap Active Search Context Header on Map (< query X + Place | Bus | Bus Stop tabs)[cite: 5, 12] */
@@ -408,9 +587,9 @@ export default function MapFloatingUI({
                     { backgroundColor: cardBg, borderColor: borderCol },
                   ]}
                 >
-                  <Ionicons
-                    name={cat.icon as any}
-                    size={14}
+                  <PlaceCategoryIcon
+                    category={cat.key}
+                    size={16}
                     color={cat.color}
                   />
                   <Text style={[styles.modeChipText, { color: textPrimary }]}>
@@ -509,88 +688,42 @@ export default function MapFloatingUI({
           </View>
         </View>
       ) : null}
+      </Animated.View>
+      )}
 
-      {/* ─── 2. RIGHT-SIDE FLOATING STACK (Report + Original Orange Map Layers + Compass)[cite: 9] ─── */}
+      {/* ─── 2. RIGHT-SIDE STACK: anchored under the measured top bar.
+           Buttons yield bottom-first when a sheet (and Recenter riding on
+           it) needs the space. ─── */}
       <View
         pointerEvents="box-none"
-        style={[
-          styles.rightStack,
-          { top: insets.top + (activeJourney ? 135 : 118) },
-        ]}
+        style={[styles.rightStack, { top: stackTop }]}
       >
-        <Pressable
-          onPress={() => {
-            Haptics.selectionAsync();
-            onOpenReport();
-          }}
-          style={[
-            styles.circleFab,
-            { backgroundColor: cardBg, borderColor: borderCol },
-          ]}
-          accessibilityLabel="Report transit issue"
-        >
-          <Ionicons name="megaphone-outline" size={20} color={textPrimary} />
-        </Pressable>
-
-        {/* Original Navigo Orange Isometric Layer Button */}
-        <Pressable
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            onOpenLayers();
-          }}
-          style={[
-            styles.circleFab,
-            {
-              backgroundColor: cardBg,
-              borderColor: "rgba(255, 111, 0, 0.45)",
-            },
-          ]}
-          accessibilityLabel="Map layers"
-        >
-          <NavigoOriginalLayersIcon dark={dark} />
-        </Pressable>
-
-        {(Math.abs(cameraHeading) > 2 || navigating) && (
-          <Pressable
-            onPress={() => {
-              Haptics.selectionAsync();
-              onResetNorth();
-            }}
-            style={[
-              styles.circleFab,
-              { backgroundColor: cardBg, borderColor: borderCol },
-            ]}
-            accessibilityLabel="Compass / Toggle 3D heading"
+        {stackButtons.map((b, i) => (
+          <Animated.View
+            key={b.key}
+            pointerEvents={i < stackVisible ? "box-none" : "none"}
+            style={{ opacity: anim.stack[i] }}
           >
-            <Ionicons
-              name={headingUp ? "navigate" : "compass-outline"}
-              size={20}
-              color={headingUp ? ORANGE : textPrimary}
-            />
-          </Pressable>
-        )}
-
-        {showAR && (
-          <Pressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              onOpenAR();
-            }}
-            style={[
-              styles.circleFab,
-              { backgroundColor: ORANGE, borderColor: ORANGE },
-            ]}
-            accessibilityLabel="Open AR Walk View"
-          >
-            <Ionicons name="camera-outline" size={20} color="#FFFFFF" />
-          </Pressable>
-        )}
+            {b.node}
+          </Animated.View>
+        ))}
       </View>
 
-      {/* ─── 3. BOTTOM-LEFT: Interactive Meteo & PM10 Pill OR Speedometer[cite: 1, 9] ─── */}
-      <View
+      {/* ─── 3. BOTTOM-LEFT: Meteo & PM10 pill, or speedometer while
+           navigating. Rides on top of the open sheet. ─── */}
+      <Animated.View
         pointerEvents="box-none"
-        style={[styles.bottomLeftAnchor, { bottom: effectiveBottom }]}
+        onLayout={(e) => {
+          const h = Math.round(e.nativeEvent.layout.height);
+          if (h > 0) setLeftWidgetH(h);
+        }}
+        style={[
+          styles.bottomLeftAnchor,
+          {
+            opacity: anim.left.opacity,
+            transform: [{ translateY: anim.left.translateY }],
+          },
+        ]}
       >
         {navigating && currentSpeedKph !== undefined ? (
           <View
@@ -641,13 +774,19 @@ export default function MapFloatingUI({
             </View>
           </Pressable>
         ) : null}
-      </View>
+      </Animated.View>
 
       {/* ─── 4. BOTTOM-CENTER: "I'm On Board" Quick Trigger ─── */}
       {(canBoardTransit || waitingForBus) && (
-        <View
+        <Animated.View
           pointerEvents="box-none"
-          style={[styles.boardChipWrap, { bottom: effectiveBottom + 6 }]}
+          style={[
+            styles.boardChipWrap,
+            {
+              opacity: anim.board.opacity,
+              transform: [{ translateY: anim.board.translateY }],
+            },
+          ]}
         >
           <Pressable
             onPress={() => {
@@ -657,15 +796,22 @@ export default function MapFloatingUI({
             style={styles.boardChip}
           >
             <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
-            <Text style={styles.boardChipText}>I'm on board</Text>
+            <Text style={styles.boardChipText}>I&apos;m on board</Text>
           </Pressable>
-        </View>
+        </Animated.View>
       )}
 
-      {/* ─── 5. BOTTOM-RIGHT: Recenter Crosshair Button[cite: 1, 9] ─── */}
-      <View
+      {/* ─── 5. BOTTOM-RIGHT: Recenter. Always reachable: follows the sheet
+           up and takes over the right stack's column if it has to. ─── */}
+      <Animated.View
         pointerEvents="box-none"
-        style={[styles.bottomRightAnchor, { bottom: effectiveBottom }]}
+        style={[
+          styles.bottomRightAnchor,
+          {
+            opacity: anim.recenter.opacity,
+            transform: [{ translateY: anim.recenter.translateY }],
+          },
+        ]}
       >
         <Pressable
           onPress={() => {
@@ -687,7 +833,7 @@ export default function MapFloatingUI({
             color={followMe ? ORANGE : textPrimary}
           />
         </Pressable>
-      </View>
+      </Animated.View>
 
       {/* Interactive Meteo & Air Quality Modal Sheet */}
       <WeatherMeteoSheet
@@ -824,20 +970,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
   },
-  customLayerIconWrap: {
-    width: 26,
-    height: 26,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  layerDiamond: {
-    position: "absolute",
-    width: 15,
-    height: 15,
-    borderRadius: 4,
-    borderWidth: 1.5,
-    transform: [{ rotate: "45deg" }, { scaleY: 0.72 }],
-  },
   navBanner: {
     backgroundColor: "#111827",
     borderRadius: 18,
@@ -930,12 +1062,12 @@ const styles = StyleSheet.create({
   rightStack: {
     position: "absolute",
     right: 14,
-    gap: 10,
+    gap: STACK_GAP,
   },
   circleFab: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: FAB,
+    height: FAB,
+    borderRadius: FAB / 2,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
@@ -945,8 +1077,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 8,
   },
+  // The three bottom anchors sit at top: 0 and are placed by translateY, so
+  // they can follow the open sheet on the native driver.
   bottomLeftAnchor: {
     position: "absolute",
+    top: 0,
     left: 14,
   },
   weatherPill: {
@@ -997,6 +1132,7 @@ const styles = StyleSheet.create({
   },
   boardChipWrap: {
     position: "absolute",
+    top: 0,
     left: 0,
     right: 0,
     alignItems: "center",
@@ -1007,7 +1143,7 @@ const styles = StyleSheet.create({
     gap: 6,
     backgroundColor: "#16A34A",
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    height: BOARD_CHIP_H,
     borderRadius: 24,
     shadowColor: "#16A34A",
     shadowOpacity: 0.35,
@@ -1022,6 +1158,7 @@ const styles = StyleSheet.create({
   },
   bottomRightAnchor: {
     position: "absolute",
+    top: 0,
     right: 14,
   },
 });

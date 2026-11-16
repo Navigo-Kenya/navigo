@@ -24,6 +24,7 @@ import { useSavedStore } from "@/store/savedStore";
 import { UnifiedLocation } from "@/store/journeyStore";
 import { useExploreSearchStore } from "@/store/exploreSearchStore";
 import { QUICK_CATEGORIES } from "@/components/app/MapFloatingUI";
+import { PlaceCategoryIcon } from "@/components/icons/NavigoIcons";
 
 const ORANGE = "#FF6F00";
 
@@ -328,7 +329,7 @@ export default function PlaceAndTransitSearchScreen() {
               onPress={() => handleExecuteSearchToMap(cat.label)}
               style={s.catItem}
             >
-              <Ionicons name={cat.icon as any} size={15} color={cat.color} />
+              <PlaceCategoryIcon category={cat.key} size={16} color={cat.color} />
               <Text style={[s.catLabel, { color: textPrimary }]}>
                 {cat.label}
               </Text>

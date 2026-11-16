@@ -1,7 +1,21 @@
 // components/map/IntermStopInfoCard.tsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type { IntermediateStop } from "@/components/map/types";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Animated,
+  Dimensions,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  floatAboveSheet,
+  setSheetAccessoryHeight,
+  useSheetTop,
+  useTopUiBottom,
+} from "@/components/app/mapSheetInsets";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
@@ -54,8 +68,45 @@ export function IntermStopInfoCard({
   ) ?? board?.routes?.[0];
   const nextArrival = matchedRoute?.arrivals?.[0];
 
+  // Ride on top of the journey sheet wherever it is dragged, instead of a
+  // fixed offset that only matched the sheet's peek height.
+  const insets = useSafeAreaInsets();
+  const sheetTop = useSheetTop();
+  const topUi = useTopUiBottom();
+  const [cardH, setCardH] = useState(150);
+  const float = useMemo(
+    () =>
+      floatAboveSheet(sheetTop, {
+        height: cardH,
+        restTop: WINDOW_H - 356 - cardH,
+        minTop: (topUi || insets.top + 120) + 8,
+        gap: CARD_GAP,
+      }),
+    [sheetTop, cardH, topUi, insets.top]
+  );
+
+  // Reserve our height so the floating map buttons stack above this card.
+  useEffect(() => {
+    setSheetAccessoryHeight(cardH + CARD_GAP);
+    return () => setSheetAccessoryHeight(0);
+  }, [cardH]);
+
   return (
-    <View style={[s.card, { backgroundColor: bg, borderColor: border }]}>
+    <Animated.View
+      onLayout={(e) => {
+        const h = Math.round(e.nativeEvent.layout.height);
+        if (h > 0) setCardH(h);
+      }}
+      style={[
+        s.card,
+        {
+          backgroundColor: bg,
+          borderColor: border,
+          opacity: float.opacity,
+          transform: [{ translateY: float.translateY }],
+        },
+      ]}
+    >
       <View style={s.cardInner}>
         {/* Top Row: Route Pill + Live Arrival Countdown + Close */}
         <View style={s.topRow}>
@@ -157,25 +208,31 @@ export function IntermStopInfoCard({
           </View>
         </View>
       </View>
-    </View>
+    </Animated.View>
   );
 }
+
+const WINDOW_H = Dimensions.get("window").height;
+const CARD_GAP = 12;
 
 const s = StyleSheet.create({
   card: {
     position: "absolute",
+    // Placed by translateY (see floatAboveSheet) so it follows the sheet.
+    top: 0,
     left: 14,
     right: 14,
-    // Sits cleanly above JourneyDetailsSheet peek height (340px) with zIndex: 45
-    bottom: 356,
     borderRadius: 20,
     borderWidth: 1,
     shadowColor: "#000",
     shadowOpacity: 0.22,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 32,
-    zIndex: 45,
+    // Kept just under the journey sheet (zIndex 20 / elevation 22): if the
+    // sheet is dragged over the card it covers it, rather than leaving an
+    // invisible card catching taps on top of the sheet.
+    elevation: 18,
+    zIndex: 19,
   },
   cardInner: { padding: 15, gap: 10 },
   topRow: {
