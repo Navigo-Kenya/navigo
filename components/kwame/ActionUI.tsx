@@ -15,9 +15,11 @@ interface Props {
 }
 
 export default function ActionUI({ msg, C, router, onSelectPlace }: Props) {
+  // Hooks before any early return: React needs the same hook order on every
+  // render, or it crashes once a message gains an action while on screen.
+  const [selectedIdx, setSelectedIdx] = useState(0);
   if (!msg.actionRequired) return null;
   const action = msg.actionRequired;
-  const [selectedIdx, setSelectedIdx] = useState(0);
 
   if (!action.isAuthenticated) {
     return (
@@ -53,7 +55,7 @@ export default function ActionUI({ msg, C, router, onSelectPlace }: Props) {
       ]}
     >
       <Text style={[styles.actionCardTitle, { color: C.text }]}>
-        Where should "{action.unresolvedName}" resolve to?
+        Where should &ldquo;{action.unresolvedName}&rdquo; resolve to?
       </Text>
 
       {action.savedPlaces.length === 0 ? (

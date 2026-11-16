@@ -935,7 +935,6 @@ export default function KwameScreen() {
                             suggestions={msg.suggestions}
                             C={C}
                             disabled={isProcessing}
-                            questionText={msg.text}
                             onPress={(sug) => handleSendText(sug)}
                           />
                         )}
@@ -1180,7 +1179,7 @@ export default function KwameScreen() {
                       <TouchableOpacity
                         style={styles.plusBtn}
                         disabled={isProcessing}
-                        onPress={() => router.push('/settings')}
+                        onPress={() => router.push('/kwame-settings')}
                       >
                         <Ionicons name="add" size={24} color={C.text} />
                       </TouchableOpacity>
@@ -1295,7 +1294,7 @@ export default function KwameScreen() {
                   style={styles.drawerMenuItem}
                   onPress={() => {
                     setDrawerOpen(false);
-                    router.push('/settings');
+                    router.push('/kwame-settings');
                   }}
                 >
                   <Ionicons name="bookmarks-outline" size={20} color={C.text} />
@@ -1390,7 +1389,7 @@ export default function KwameScreen() {
                   style={styles.userAvatarBadge}
                   onPress={() => {
                     setDrawerOpen(false);
-                    router.push('/settings');
+                    router.push('/kwame-settings');
                   }}
                 >
                   <Text style={styles.userAvatarText}>AB</Text>
