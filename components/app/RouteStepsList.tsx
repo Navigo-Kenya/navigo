@@ -9,6 +9,7 @@ import {
   sToMin,
   formatEta,
 } from "@/utils/mapHelpers";
+import { departureMeta } from "@/utils/departures";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef, useState } from "react";
@@ -455,9 +456,9 @@ function TransitSection({
           {nextDep && (
             <View style={ts.liveNextRow}>
               <Text style={ts.liveNextRed}>{formatEta(nextDep.eta_seconds)}</Text>
-              <Text style={ts.liveNextMeta}>
-                ({nextDep.stops_away} stops away · {nextDep.crowding})
-              </Text>
+              {!!departureMeta(nextDep) && (
+                <Text style={ts.liveNextMeta}>{departureMeta(nextDep)}</Text>
+              )}
             </View>
           )}
 

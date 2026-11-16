@@ -50,9 +50,14 @@ export interface StopArrivalCountdown {
   departure_time: string;
   eta_seconds: number;
   eta_label: string;
-  stops_away: number;
-  crowding: "Empty" | "Comfy" | "Busy";
+  /** Stops the trip still serves before this one (null for headway-based trips). */
+  stops_away: number | null;
+  /** No occupancy feed yet: always null for now, never invented. */
+  crowding: "Empty" | "Comfy" | "Busy" | null;
   headsign?: string | null;
+  /** Set for headway-based trips ("every 15 min"). */
+  headway_secs?: number | null;
+  source?: "schedule" | "frequency";
 }
 
 export interface StopRouteBoardItem {
@@ -68,6 +73,8 @@ export interface StopRouteBoardItem {
   direction_id: number;
   headsign: string;
   arrivals: StopArrivalCountdown[];
+  /** Why `arrivals` is empty (older API builds omit it). */
+  arrivals_status?: "scheduled" | "ended" | "terminates_here" | "not_running_today";
 }
 
 export interface StopDeparturesResponse {

@@ -15,6 +15,8 @@ import {
 } from "@/services/stop";
 import { useAuthStore } from "@/store/authStore";
 import { formatEta } from "@/utils/mapHelpers";
+import { departureMeta } from "@/utils/departures";
+import { LineNoDepartures, NoDeparturesState } from "./DepartureEmpty";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as Location from "expo-location";
@@ -1691,11 +1693,10 @@ export default function StopDetailsSheet({
                     </Text>
                   </View>
                 ) : (board?.routes?.length ?? 0) === 0 ? (
-                  <View style={s.loadingBox}>
-                    <Text style={{ color: C.sub, fontSize: 13 }}>
-                      No scheduled routes found for this stop right now.
-                    </Text>
-                  </View>
+                  <NoDeparturesState
+                    actionLabel="Suggest edits"
+                    onAction={() => setActiveSheet("edit")}
+                  />
                 ) : (
                   board!.routes.map((r: StopRouteBoardItem, idx: number) => (
                     <Pressable
@@ -1737,9 +1738,7 @@ export default function StopDetailsSheet({
 
                       <View style={s.arrivalsRightCol}>
                         {r.arrivals.length === 0 ? (
-                          <Text style={{ color: C.sub, fontSize: 12 }}>
-                            No Data
-                          </Text>
+                          <LineNoDepartures status={r.arrivals_status} />
                         ) : (
                           r.arrivals.map((arr, aIdx) => (
                             <Text
@@ -1750,9 +1749,11 @@ export default function StopDetailsSheet({
                               <Text style={s.arrivalRedText}>
                                 {formatEta(arr.eta_seconds)}
                               </Text>{" "}
-                              <Text style={{ color: C.sub, fontSize: 11.5 }}>
-                                ({arr.stops_away} stops left, {arr.crowding})
-                              </Text>
+                              {!!departureMeta(arr) && (
+                                <Text style={{ color: C.sub, fontSize: 11.5 }}>
+                                  {departureMeta(arr)}
+                                </Text>
+                              )}
                             </Text>
                           ))
                         )}

@@ -36,6 +36,7 @@ import { usePrefsStore } from "@/store/prefsStore";
 import { UnifiedLocation, useJourneyStore } from "@/store/journeyStore";
 import { extractFares, formatDurationParts, formatEta, getRouteColor, sToShort } from "@/utils/mapHelpers";
 import { rankRoutes, type RouteRanking } from "@/utils/rankRoutes";
+import { departureMeta } from "@/utils/departures";
 
 const NativeShapeSource = ShapeSource as unknown as React.ComponentType<any>;
 const NativeLineLayer = LineLayer as unknown as React.ComponentType<any>;
@@ -875,9 +876,11 @@ export default function MultiModalRoutePlannerScreen() {
                             {leg.route_name}
                           </Text>
                           <Text style={s.depRedEta}>{formatEta(dep.eta_seconds)}</Text>
-                          <Text style={[s.depCrowding, { color: textMuted }]}>
-                            · {dep.crowding}
-                          </Text>
+                          {!!departureMeta(dep) && (
+                            <Text style={[s.depCrowding, { color: textMuted }]}>
+                              · {departureMeta(dep)}
+                            </Text>
+                          )}
                         </View>
                       ))
                     ) : (
