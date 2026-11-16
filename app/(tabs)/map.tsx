@@ -1,6 +1,9 @@
 // app/(tabs)/map.tsx
 import { IntermStopInfoCard }    from "@/components/map/IntermStopInfoCard";
 import { MapLayersSheet }        from "@/components/map/MapLayersSheet";
+import { PoiLayer, type TappedPoi } from "@/components/map/PoiLayer";
+import { poiCategoryMeta }       from "@/components/icons/poiCategories";
+import { useExploreSearchStore } from "@/store/exploreSearchStore";
 import { OfflineNotice }         from "@/components/map/OfflineNotice";
 import { ReportLayer }           from "@/components/map/ReportLayer";
 import type { ReportLayerHandle } from "@/components/map/ReportLayer";
@@ -118,6 +121,8 @@ function headingArcGeoJson(
 const { height: SH } = Dimensions.get("window");
 
 const MODEL_TILT_X = 0;
+/** Visible height of the place sheet when it opens (MapSearchContextSheet). */
+const POI_SHEET_PEEK = 330;
 
 function DroppedPin({ coord, name }: { coord: { latitude: number; longitude: number }; name: string }) {
   const [frozenName, setFrozenName] = useState<string | null>(null);
@@ -686,6 +691,38 @@ export default function MapScreen() {
 
     return () => clearInterval(id);
   }, [isNavigationMode, followMe, camera, nativeFollowPref]);
+
+  // Tapping one of our POIs opens the place sheet (same sheet as search).
+  const handlePoiPress = useCallback((poi: TappedPoi) => {
+    // Glide to the POI so it sits in the middle of the map area left visible
+    // above the place sheet (330 px peek). The centre is shifted south rather
+    // than using camera padding, which would stick to later camera moves.
+    setFollowMe(false);
+    const zoom = Math.max(viewZoom, 16);
+    const metersPerPx = (78271.517 * Math.cos((poi.lat * Math.PI) / 180)) / Math.pow(2, zoom);
+    const shiftDeg = (POI_SHEET_PEEK / 2) * metersPerPx / 111_320;
+    camera.animateTo({
+      center: { latitude: poi.lat - shiftDeg, longitude: poi.lng },
+      zoom,
+      duration: 650,
+      mode: "easeTo",
+    });
+
+    const place = {
+      id: `poi:${poi.id}`,
+      name: poi.name,
+      address: "",
+      category: poiCategoryMeta(poi.category).label,
+      lat: poi.lat,
+      lng: poi.lng,
+    };
+    useExploreSearchStore.getState().startSearch({
+      query: poi.name,
+      activeTab: "place",
+      places: [place],
+      selectedPlace: place,
+    });
+  }, [viewZoom, camera]);
 
   const handleReportPress = useCallback((r: TransitReport, count: number) => {
     setReportSheetOpen(false);
@@ -1284,6 +1321,15 @@ export default function MapScreen() {
                   )}
                </NativeShapeSource>
             )}
+
+            {/* Our POIs (Overture + console), below routes, stops and reports. */}
+            <PoiLayer
+              visible
+              navigating={isNavigationMode}
+              standardStyle={activeStyleURL === process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL}
+              dark={dark}
+              onPress={handlePoiPress}
+            />
 
             <RouteOverlay
               walkLegs={walkLegs}
