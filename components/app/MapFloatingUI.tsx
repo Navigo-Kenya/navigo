@@ -167,6 +167,10 @@ export default function MapFloatingUI({
     query: searchContextQuery,
     activeTab: searchContextTab,
     setActiveTab: setSearchContextTab,
+    places: searchPlaces,
+    routes: searchRoutes,
+    stops: searchStops,
+    loading: searchLoading,
     startSearch,
     setResults,
     setLoading,
@@ -435,7 +439,7 @@ export default function MapFloatingUI({
       >
       {!activeJourney ? (
         searchContextActive ? (
-          /* KakaoMap Active Search Context Header on Map (< query X + Place | Bus | Bus Stop tabs)[cite: 5, 12] */
+          /* Search results header: back, the query (tap to edit, X clears), tabs with counts */
           <View
             pointerEvents="box-none"
             style={[
@@ -443,83 +447,93 @@ export default function MapFloatingUI({
               { paddingTop: insets.top + 8, backgroundColor: cardBg },
             ]}
           >
-            <View
-              style={[
-                styles.activeSearchBox,
-                { borderColor: borderCol, backgroundColor: dark ? "#27272A" : "#F9FAFB" },
-              ]}
-            >
+            <View style={styles.activeSearchRow}>
               <PressableScale
                 onPress={() => {
                   Haptics.selectionAsync();
                   onOpenSearch();
                 }}
-                hitSlop={10}
+                hitSlop={8}
+                style={[styles.headerCircle, { backgroundColor: dark ? "#27272A" : "#F4F4F5" }]}
+                accessibilityRole="button"
+                accessibilityLabel="Back to search"
               >
-                <Ionicons name="chevron-back" size={22} color={textPrimary} />
+                <Ionicons name="chevron-back" size={20} color={textPrimary} />
               </PressableScale>
+
               <PressableScale
+                containerStyle={{ flex: 1 }}
+                pressedScale={0.98}
                 onPress={onOpenSearch}
-                style={{ flex: 1, paddingHorizontal: 8 }}
+                style={[styles.activeSearchField, { backgroundColor: dark ? "#27272A" : "#F4F4F5" }]}
+                accessibilityRole="search"
+                accessibilityLabel={`Search: ${searchContextQuery}. Tap to edit`}
               >
+                <Ionicons name="search" size={17} color={ORANGE} />
                 <Text
                   style={[styles.activeSearchQueryText, { color: textPrimary }]}
                   numberOfLines={1}
                 >
                   {searchContextQuery}
                 </Text>
-              </PressableScale>
-              <PressableScale
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  clearSearch();
-                }}
-                hitSlop={10}
-              >
-                <Ionicons name="close" size={22} color={textPrimary} />
+                <PressableScale
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    clearSearch();
+                  }}
+                  hitSlop={10}
+                  style={[styles.clearBtn, { backgroundColor: dark ? "#3F3F46" : "#E4E4E7" }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search"
+                >
+                  <Ionicons name="close" size={14} color={textPrimary} />
+                </PressableScale>
               </PressableScale>
             </View>
 
-            {/* Place | Bus | Bus Stop Sub-Tabs[cite: 5] */}
-            <View style={styles.contextTabsRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.contextTabsRow}
+            >
               {(
                 [
-                  { id: "all", label: "All", icon: "apps" },
-                  { id: "place", label: "Place", icon: "location" },
-                  { id: "bus", label: "Bus / Rail", icon: "bus" },
-                  { id: "stop", label: "Bus Stop", icon: "radio-button-on" },
+                  { id: "all", label: "All", count: searchPlaces.length + searchRoutes.length + searchStops.length },
+                  { id: "place", label: "Places", count: searchPlaces.length },
+                  { id: "bus", label: "Lines", count: searchRoutes.length },
+                  { id: "stop", label: "Stops", count: searchStops.length },
                 ] as const
-              ).map((t) => {
-                const isSel = searchContextTab === t.id;
+              ).map((tab) => {
+                const isSel = searchContextTab === tab.id;
+                const empty = !searchLoading && tab.count === 0 && tab.id !== "all";
                 return (
                   <PressableScale
-                    key={t.id}
+                    key={tab.id}
                     onPress={() => {
                       Haptics.selectionAsync();
-                      setSearchContextTab(t.id as SearchTabFilter);
+                      setSearchContextTab(tab.id as SearchTabFilter);
                     }}
                     style={[
-                      styles.contextTabItem,
-                      isSel && styles.contextTabItemActive,
+                      styles.contextTab,
+                      { backgroundColor: isSel ? textPrimary : dark ? "#27272A" : "#F4F4F5" },
+                      empty && !isSel && { opacity: 0.5 },
                     ]}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: isSel }}
+                    accessibilityLabel={`${tab.label}, ${tab.count} results`}
                   >
-                    <Ionicons
-                      name={t.icon as any}
-                      size={14}
-                      color={isSel ? "#2563EB" : textMuted}
-                    />
-                    <Text
-                      style={[
-                        styles.contextTabLabel,
-                        { color: isSel ? "#2563EB" : textMuted },
-                      ]}
-                    >
-                      {t.label}
+                    <Text style={[styles.contextTabLabel, { color: isSel ? cardBg : textMuted }]}>
+                      {tab.label}
                     </Text>
+                    {!searchLoading && (
+                      <Text style={[styles.contextTabCount, { color: isSel ? cardBg : textMuted }]}>
+                        {tab.count}
+                      </Text>
+                    )}
                   </PressableScale>
                 );
               })}
-            </View>
+            </ScrollView>
           </View>
         ) : (
           /* Default Explore Map Top Search + Square [↱ Route] Button + Category Badges[cite: 9] */
@@ -930,48 +944,71 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   activeSearchHeader: {
-    paddingHorizontal: 14,
-    paddingBottom: 2,
-    borderBottomLeftRadius: 18,
-    borderBottomRightRadius: 18,
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+    gap: 10,
+    borderBottomLeftRadius: 22,
+    borderBottomRightRadius: 22,
     shadowColor: "#000",
     shadowOpacity: 0.12,
-    shadowRadius: 12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 4 },
     elevation: 10,
   },
-  activeSearchBox: {
+  activeSearchRow: {
     flexDirection: "row",
     alignItems: "center",
-    height: 46,
+    gap: 8,
+  },
+  headerCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  activeSearchField: {
+    height: 44,
+    borderRadius: 14,
+    paddingLeft: 12,
+    paddingRight: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  clearBtn: {
+    width: 24,
+    height: 24,
     borderRadius: 12,
-    borderWidth: 1,
-    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
   },
   activeSearchQueryText: {
+    flex: 1,
     fontSize: 16,
-    fontWeight: "600",
+    fontWeight: "700",
+    letterSpacing: -0.2,
   },
   contextTabsRow: {
+    gap: 8,
+    paddingHorizontal: 2,
+  },
+  contextTab: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-around",
-    paddingTop: 6,
-  },
-  contextTabItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderBottomWidth: 2,
-    borderBottomColor: "transparent",
-  },
-  contextTabItemActive: {
-    borderBottomColor: "#2563EB",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 18,
   },
   contextTabLabel: {
     fontSize: 13,
     fontWeight: "700",
+  },
+  contextTabCount: {
+    fontSize: 12,
+    fontWeight: "800",
+    opacity: 0.8,
   },
   navBanner: {
     backgroundColor: "#111827",
