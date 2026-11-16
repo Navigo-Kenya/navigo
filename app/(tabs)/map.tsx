@@ -178,7 +178,12 @@ export default function MapScreen() {
   const isOnline        = useNetworkStore((s) => s.isOnline);
   const offlinePack     = useOfflineMapStore((s) => s.pack);
 
-  const [styleLoaded, setStyleLoaded] = useState(false);
+  // The style URL that has finished loading. Overlays mount only once the
+  // *current* style is ready: a plain boolean stays true for one render after
+  // a style switch, and a short timer could fire before a slow style was
+  // ready, so sources and layers got added to a style that wasn't loaded
+  // ("Source 'stops' is not in style").
+  const [loadedStyleURL, setLoadedStyleURL] = useState<string | null>(null);
 
   const activeStyleURL = useMemo(() => {
     if (layers.mapType === "satellite") return "mapbox://styles/mapbox/satellite-streets-v12";
@@ -189,9 +194,13 @@ export default function MapScreen() {
       : (process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL ?? "mapbox://styles/mapbox/streets-v12");
   }, [layers.mapType, layers.traffic, dark]);
 
+  const activeStyleRef = useRef(activeStyleURL);
+  activeStyleRef.current = activeStyleURL;
+  const styleLoaded = loadedStyleURL === activeStyleURL;
+
+  // Fallback only, in case onDidFinishLoadingStyle never fires for a style.
   useEffect(() => {
-    setStyleLoaded(false);
-    const failsafeTimer = setTimeout(() => setStyleLoaded(true), 1200);
+    const failsafeTimer = setTimeout(() => setLoadedStyleURL(activeStyleURL), 5000);
     return () => clearTimeout(failsafeTimer);
   }, [activeStyleURL]);
 
@@ -1188,9 +1197,7 @@ export default function MapScreen() {
         onRegionIsChanging={handleRegionChange}         
         onRegionDidChange={onRegionChangeComplete}      
         onLongPress={handleLongPress}
-        onDidFinishLoadingStyle={() => {
-          setTimeout(() => setStyleLoaded(true), 150);
-        }} 
+        onDidFinishLoadingStyle={() => setLoadedStyleURL(activeStyleRef.current)}
       >
         <MapboxCamera
           ref={cameraRef}

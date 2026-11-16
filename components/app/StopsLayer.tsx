@@ -129,7 +129,7 @@ export function resolveStopCategory(s: Stop): {
   };
 }
 
-function StopsLayer({ allStops, viewZoom, selected, onPress }: Props) {
+function StopsLayer({ allStops, selected, onPress }: Props) {
   const dark = useColorScheme() === "dark";
   const stopsGeoJson = useMemo<GeoJSON.FeatureCollection>(
     () => ({
@@ -168,7 +168,10 @@ function StopsLayer({ allStops, viewZoom, selected, onPress }: Props) {
     [allStops, onPress]
   );
 
-  if (viewZoom < STOPS_MIN_ZOOM) return null;
+  // No early return below STOPS_MIN_ZOOM: every layer has its own
+  // minZoomLevel. Removing and re-adding the "stops" source while zooming in
+  // and out around the threshold raced on the native side ("Source 'stops'
+  // is not in style") and could crash the map.
 
   const NativeShapeSource = ShapeSource as unknown as React.ComponentType<any>;
   const NativeCircleLayer = CircleLayer as unknown as React.ComponentType<any>;
@@ -325,7 +328,6 @@ export default React.memo(
   StopsLayer,
   (prev, next) =>
     prev.allStops === next.allStops &&
-    prev.viewZoom === next.viewZoom &&
     prev.selected?.id === next.selected?.id &&
     prev.onPress === next.onPress
 );
