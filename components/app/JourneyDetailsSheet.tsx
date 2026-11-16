@@ -3,6 +3,7 @@ import { formatDist, usePrefsStore } from "@/store/prefsStore";
 import { extractFares, formatDurationParts } from "@/utils/mapHelpers";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useRef, useState } from "react";
+import { useReportSheetTop } from "./mapSheetInsets";
 import {
   ActivityIndicator,
   Alert,
@@ -79,6 +80,8 @@ export default function JourneyDetailsSheet({
 }: JourneyDetailsSheetProps): React.JSX.Element | null {
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const lastY = useRef(MIN_Y);
+  // Floating map controls follow this sheet's top edge.
+  useReportSheetTop(translateY, !!activeJourney);
   const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
 

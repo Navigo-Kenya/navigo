@@ -1,4 +1,5 @@
 // components/app/BusDetailsSheet.tsx
+import { useReportSheetTop } from "./mapSheetInsets";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -194,6 +195,8 @@ export default function BusDetailsSheet({ bus, following, onFollow, onDismiss }:
   const translateY = useRef(new Animated.Value(SCREEN_H)).current;
   const backdrop   = useRef(new Animated.Value(0)).current;
   const lastY      = useRef(MIN_Y);
+  // Floating map controls follow this sheet's top edge.
+  useReportSheetTop(translateY, !!bus);
 
   // ── Live ETA ticker ─────────────────────────────────────────────────────────
   useEffect(() => {

@@ -1,3 +1,4 @@
+import { useTopUiBottom } from "@/components/app/mapSheetInsets";
 import { Ionicons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -35,6 +36,10 @@ const COPY: Record<OfflineVariant, { title: string; body: string; cta?: string; 
 export function OfflineNotice({ variant, dark, onPress }: OfflineNoticeProps) {
   const insets = useSafeAreaInsets();
   const copy   = COPY[variant];
+  // Sit just below the map's top bar (search + chips, or the nav banner),
+  // whatever its current height, instead of at a fixed offset.
+  const topUi  = useTopUiBottom();
+  const top    = (topUi || (insets.top || 44) + 90) + 8;
 
   const bg   = dark ? "#1C1C1E" : "#FFFFFF";
   const text = dark ? "#FFFFFF" : "#1C1C1E";
@@ -43,7 +48,7 @@ export function OfflineNotice({ variant, dark, onPress }: OfflineNoticeProps) {
   // "active" is a compact pill; login/download are full cards with a CTA.
   if (variant === "active") {
     return (
-      <View style={[s.pill, { top: (insets.top || 44) + 96, backgroundColor: bg }]}>
+      <View style={[s.pill, { top, backgroundColor: bg }]}>
         <Ionicons name={copy.icon} size={14} color={ORANGE} />
         <Text style={[s.pillText, { color: text }]}>{copy.title}</Text>
       </View>
@@ -51,7 +56,7 @@ export function OfflineNotice({ variant, dark, onPress }: OfflineNoticeProps) {
   }
 
   return (
-    <View style={[s.card, { top: (insets.top || 44) + 90, backgroundColor: bg }]}>
+    <View style={[s.card, { top, backgroundColor: bg }]}>
       <View style={s.iconWrap}>
         <Ionicons name={copy.icon} size={20} color={ORANGE} />
       </View>
@@ -80,7 +85,8 @@ const s = StyleSheet.create({
   card: {
     position:          "absolute",
     left:              16,
-    right:             16,
+    // leaves the right-hand button column (14 + 44 px) clear
+    right:             68,
     flexDirection:     "row",
     alignItems:        "center",
     gap:               12,

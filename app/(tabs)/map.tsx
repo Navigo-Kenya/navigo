@@ -1420,14 +1420,6 @@ export default function MapScreen() {
         onResume={resumeNavigation}
         showAR={isNavigationMode && !isVehicleMode && navState?.currentSegmentMode === "WALK"}
         onOpenAR={() => setArOpen(true)}
-        bottomOffset={
-          activeJourney ? 190
-          : selectedBus ? 180
-          : nearestOpen ? 240
-          : selected && stopDetailsOpen ? 280
-          : selected ? 180
-          : 0
-        }
       />
 
       {selectedReport && (

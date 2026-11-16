@@ -1,3 +1,4 @@
+import { useStaticSheetTop } from "./mapSheetInsets";
 import { Ionicons } from "@expo/vector-icons";
 import { JSX } from "react";
 import {
@@ -35,10 +36,16 @@ export default function NearestStopsSheet({
     text: dark ? "#FFFFFF" : BLACK,
   };
 
+  // Floating map controls sit above this card.
+  const onSheetLayout = useStaticSheetTop(nearestOpen);
+
   if (!nearestOpen) return null;
 
   return (
-    <View style={[styles.sheet, { maxHeight: PANEL_MAX_H, backgroundColor: C.bg }]}>
+    <View
+      onLayout={onSheetLayout}
+      style={[styles.sheet, { maxHeight: PANEL_MAX_H, backgroundColor: C.bg }]}
+    >
       <View style={styles.sheetHeader}>
         <Text style={[styles.panelTitle, { color: C.text }]}>Nearest stages</Text>
         <Pressable onPress={() => setNearestOpen(false)}>

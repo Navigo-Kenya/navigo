@@ -1,14 +1,24 @@
 // services/stop.ts
 import api from "./apiClient";
 
+/**
+ * Stop types as stored in the API (`stops.stop_type`, see the api's
+ * ConsoleStopController::STOP_TYPES). Set from the stop's dominant route type
+ * on every GTFS import. `bus_terminal` is only ever inferred on the fly by
+ * MobilityExplorerController.
+ */
 export type StopPoiCategory =
+  | "bus_stop"
+  | "matatu_stage"
+  | "bus_terminal"
+  | "intermodal_hub"
+  | "brt_station"
   | "rail_station"
   | "metro_station"
   | "tram_stop"
-  | "brt_station"
   | "ferry_terminal"
-  | "bus_terminal"
-  | "bus_stop";
+  | "airport"
+  | "cable_station";
 
 export interface StopRoute {
   id: string;

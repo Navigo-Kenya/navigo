@@ -1,4 +1,5 @@
 // components/app/MapSearchContextSheet.tsx
+import { useStaticSheetTop } from "./mapSheetInsets";
 import React, { useMemo } from "react";
 import {
   ActivityIndicator,
@@ -85,6 +86,9 @@ export default function MapSearchContextSheet({
     return out;
   }, [activeTab, places, routes, stops]);
 
+  // Floating map controls sit above whichever variant of this sheet is showing.
+  const onSheetLayout = useStaticSheetTop(active);
+
   if (!active) return null;
 
   const sheetBg = dark ? "#18181B" : "#FFFFFF";
@@ -135,6 +139,7 @@ export default function MapSearchContextSheet({
 
     return (
       <View
+        onLayout={onSheetLayout}
         style={[
           s.placeSheet,
           {
@@ -313,6 +318,7 @@ export default function MapSearchContextSheet({
         </View>
 
         <View
+          onLayout={onSheetLayout}
           style={[
             s.minimizedBottomBar,
             {
@@ -359,6 +365,7 @@ export default function MapSearchContextSheet({
   // ── 3. DRAGGABLE SEARCH RESULTS SHEET (KakaoMap IMG_6284.PNG)[cite: 5] ──
   return (
     <View
+      onLayout={onSheetLayout}
       style={[
         s.resultsSheet,
         {
