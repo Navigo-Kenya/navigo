@@ -360,7 +360,8 @@ export function StopTypeGlyph({
 // glyphs above; the rest are drawn here in the same style.
 
 export type PoiCategory =
-  | "health" | "fuel" | "lodging" | "mall" | "attraction"
+  | "health" | "fuel" | "lodging" | "mall" | "attraction" | "park"
+  | "entertainment" | "sport"
   | "food" | "cafe" | "nightlife" | "grocery" | "pharmacy" | "bank"
   | "education" | "worship" | "government" | "parking"
   | "shopping" | "services";
@@ -446,6 +447,36 @@ function AttractionGlyph({ color }: { color: string }) {
   );
 }
 
+/** Tree (parks, gardens, nature). */
+function ParkGlyph({ color }: { color: string }) {
+  return (
+    <>
+      <Path d="M12 3.6c3.2 0 5.7 2.5 5.7 5.6a5.6 5.6 0 0 1-5.7 5.5 5.6 5.6 0 0 1-5.7-5.5c0-3.1 2.5-5.6 5.7-5.6Z" {...tinted(color)} />
+      <Path d="M12 14.7v5.7M8.9 20.4h6.2M12 12.3l2.2-2" {...line(color)} />
+    </>
+  );
+}
+
+/** Ticket (cinemas, theatres, music venues, casinos). */
+function EntertainmentGlyph({ color }: { color: string }) {
+  return (
+    <>
+      <Path d="M4 8.2A1.2 1.2 0 0 1 5.2 7h13.6A1.2 1.2 0 0 1 20 8.2v2a1.8 1.8 0 0 0 0 3.6v2a1.2 1.2 0 0 1-1.2 1.2H5.2A1.2 1.2 0 0 1 4 15.8v-2a1.8 1.8 0 0 0 0-3.6Z" {...tinted(color)} />
+      <Path d="M14.6 7.6v1.3M14.6 11.35v1.3M14.6 15.1v1.3" {...line(color)} />
+    </>
+  );
+}
+
+/** Ball (stadiums, gyms, sports clubs and fields). */
+function SportGlyph({ color }: { color: string }) {
+  return (
+    <>
+      <Circle cx={12} cy={12} r={8.4} {...tinted(color)} />
+      <Path d="M3.6 12h16.8M12 3.6v16.8M5.9 6.1c1.9 1.6 3 3.6 3 5.9s-1.1 4.3-3 5.9M18.1 6.1c-1.9 1.6-3 3.6-3 5.9s1.1 4.3 3 5.9" {...line(color)} />
+    </>
+  );
+}
+
 /** Briefcase (offices and services). */
 function ServicesGlyph({ color }: { color: string }) {
   return (
@@ -462,6 +493,9 @@ const POI_GLYPHS: Record<PoiCategory, React.FC<{ color: string }>> = {
   lodging: LodgingGlyph,
   mall: MallGlyph,
   attraction: AttractionGlyph,
+  park: ParkGlyph,
+  entertainment: EntertainmentGlyph,
+  sport: SportGlyph,
   food: RestaurantGlyph,
   cafe: CafeGlyph,
   nightlife: NightlifeGlyph,
