@@ -50,7 +50,7 @@ export interface TrafficSegment {
 }
 
 export interface RouteSegment {
-  mode: "WALK" | "BUS" | "BRT" | "TRAM" | "SUBWAY" | "RAIL" | "FERRY" | "BICYCLE" | "CAR";
+  mode: "WALK" | "BUS" | "BRT" | "TRAM" | "SUBWAY" | "RAIL" | "FERRY" | "BICYCLE" | "CAR" | "MOTORBIKE";
   route_type?: number | null;
   mode_badge?: string;
   duration: number;
@@ -100,7 +100,7 @@ export interface Route {
   polyline_encoding: "google";
   is_ai_derived?: boolean;
   type: "direct" | "transfer";
-  category?: "bus" | "rail" | "mixed" | "walk" | "bicycle" | "car";
+  category?: "bus" | "rail" | "mixed" | "walk" | "bicycle" | "car" | "motorbike";
   primary_modes?: string[];
   transfer_count?: number;
   departure_time?: string | null;
@@ -110,10 +110,18 @@ export interface Route {
   total_duration: number;
   total_walk_distance: number;
   total_distance: number;
+  /** Street modes: the option(s) this route answers ("Fastest · Safest", "No tolls"). */
   route_badge?: string | null;
+  route_options?: string[];
+  /** Cars on the Nairobi Expressway: estimated toll for the distance on it. */
+  toll?: { estimate_kes: number; distance_m: number | null } | null;
+  /** Boda boda: typical street fare range (negotiated, so an estimate). */
+  fare?: { currency: "KES"; min: number; max: number; typical: number; estimate: true } | null;
   segments: RouteSegment[];
   safety?: { score: number; safer: boolean };
 }
+
+export type JourneyMode = "transit" | "bus" | "rail" | "walk" | "bicycle" | "car" | "motorbike";
 
 function getLocalDate(): string {
   const d = new Date();
@@ -145,7 +153,7 @@ export const RouteService = {
     fromLoc: UnifiedLocation,
     toLoc: UnifiedLocation,
     maxWalkMeters?: number,
-    mode: "transit" | "bus" | "rail" | "walk" | "bicycle" | "car" = "transit",
+    mode: JourneyMode = "transit",
     customTime?: { date?: string; time?: string; arriveBy?: boolean }
   ): Promise<Route[]> {
     const payload: Record<string, unknown> = {

@@ -37,7 +37,8 @@ import { extractFares, formatDurationParts, formatEta, getRouteColor, sToShort }
 import { rankRoutes, type RouteRanking } from "@/utils/rankRoutes";
 import { departureMeta } from "@/utils/departures";
 import { Icon } from "@/components/icons/Icon";
-import { StopTypeBadge } from "@/components/app/StopTypeBadge";
+import { StopTypeBadge, modeIconName } from "@/components/app/StopTypeBadge";
+import { isStreetMode } from "@/utils/streetModes";
 
 const NativeShapeSource = ShapeSource as unknown as React.ComponentType<any>;
 const NativeLineLayer = LineLayer as unknown as React.ComponentType<any>;
@@ -49,7 +50,38 @@ const HEADER_BLUE = "#3B7BF6";
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 const CARD_W = SCREEN_W - 44;
 
-type TopPlannerMode = "transit" | "car" | "walk" | "bicycle";
+type TopPlannerMode = "transit" | "car" | "motorbike" | "walk" | "bicycle";
+
+/** Street modes: route line colour, and the words for the loading card. */
+const STREET_MODE_UI: Record<Exclude<TopPlannerMode, "transit">, { color: string; finding: string }> = {
+  car:       { color: "#16A34A", finding: "Finding driving routes…" },
+  motorbike: { color: "#EA580C", finding: "Finding boda routes…" },
+  walk:      { color: "#2563EB", finding: "Finding walking routes…" },
+  bicycle:   { color: "#0D9488", finding: "Finding cycling routes…" },
+};
+
+/** "≈ KES 130–190" for a boda fare range, "≈ KES 160" when it collapses. */
+function fareRange(f: NonNullable<Route["fare"]>): string {
+  return f.min === f.max ? `≈ KES ${f.min}` : `≈ KES ${f.min}–${f.max}`;
+}
+
+/**
+ * The second line of a street-route card: distance plus what really applies
+ * to that mode (toll on the Expressway, the boda fare). Nothing estimated
+ * without data: no taxi price, no calories.
+ */
+function streetCardFacts(rt: Route, mode: Exclude<TopPlannerMode, "transit">): string {
+  const km = rt.total_distance >= 10_000
+    ? `${Math.round(rt.total_distance / 1000)} km`
+    : `${(rt.total_distance / 1000).toFixed(1)} km`;
+  if (mode === "car") {
+    return rt.toll ? `${km} · Expressway toll ≈ KES ${rt.toll.estimate_kes}` : `${km} · No tolls`;
+  }
+  if (mode === "motorbike") {
+    return rt.fare ? `${km} · ${fareRange(rt.fare)} typical fare` : km;
+  }
+  return km;
+}
 type TransitSubTab = "all" | "bus" | "rail" | "mixed";
 const TRANSIT_TABS: TransitSubTab[] = ["all", "bus", "rail", "mixed"];
 
@@ -423,14 +455,7 @@ function ProportionalDurationBar({
             ? "#DC2626"
             : getRouteColor(seg.route_name ?? "Bus"));
 
-        const modeIcon =
-          seg.mode === "RAIL" || seg.mode === "SUBWAY" || seg.mode === "TRAM"
-            ? "train"
-            : seg.mode === "BICYCLE"
-            ? "bicycle"
-            : seg.mode === "CAR"
-            ? "car"
-            : "bus";
+        const modeIcon = modeIconName(seg.mode, seg.mode_badge);
 
         return (
           <View
@@ -604,6 +629,9 @@ export default function MultiModalRoutePlannerScreen() {
     setHeaderExpanded(false); // Shrink header into compact KakaoMap pill!
     setFetching(true);
     setSelectedMapRouteIdx(0);
+    setRoutes([]);
+    // Switching modes quickly: only the latest request may fill the list.
+    let stale = false;
 
     RouteService.calculateJourney(
       fromLoc,
@@ -619,11 +647,17 @@ export default function MultiModalRoutePlannerScreen() {
         : undefined
     )
       .then((res) => {
-        // For Car/Walk/Bike, if OTP returns 1 route, synthesize a 2nd alternative ("Shortest" vs "Main Roads") if only 1 exists
-        setRoutes(res);
+        if (!stale) setRoutes(res);
       })
-      .catch(() => setRoutes([]))
-      .finally(() => setFetching(false));
+      .catch(() => {
+        if (!stale) setRoutes([]);
+      })
+      .finally(() => {
+        if (!stale) setFetching(false);
+      });
+    return () => {
+      stale = true;
+    };
   }, [fromLoc, toLoc, topMode, prefs.maxWalkMeters, timeConfig]);
 
   const tabCounts = useMemo(() => {
@@ -643,9 +677,11 @@ export default function MultiModalRoutePlannerScreen() {
     return rankRoutes(base, sortBy);
   };
 
+  // Street modes keep the API's order: Fastest first, then the options that
+  // answer something else (Safer streets, No tolls…), labelled by route_badge.
   const activeMapRoutes = useMemo(
-    () => rankRoutes(routes, sortBy),
-    [routes, sortBy]
+    () => (topMode === "transit" ? rankRoutes(routes, sortBy) : routes),
+    [routes, sortBy, topMode]
   );
 
   // Fit Mapbox camera whenever selectedMapRouteIdx changes in Car/Walk/Bike mode
@@ -733,10 +769,7 @@ export default function MultiModalRoutePlannerScreen() {
     const durParts = formatDurationParts(route.total_duration);
     const distKm = (route.total_distance / 1000).toFixed(1);
     const fare = extractFares(route.segments ?? []);
-    const transitLegs = (route.segments ?? []).filter(
-      (seg) =>
-        seg.mode !== "WALK" && seg.mode !== "BICYCLE" && seg.mode !== "CAR"
-    );
+    const transitLegs = (route.segments ?? []).filter((seg) => !isStreetMode(seg.mode));
 
     const depTimeStr =
       route.departure_time ??
@@ -959,10 +992,11 @@ export default function MultiModalRoutePlannerScreen() {
           <View style={s.modeIconsCenter}>
             {(
               [
-                { id: "car", icon: "car" },
-                { id: "transit", icon: "bus" },
-                { id: "walk", icon: "walk" },
-                { id: "bicycle", icon: "bicycle" },
+                { id: "car", icon: "car", label: "Drive" },
+                { id: "transit", icon: "bus", label: "Transit" },
+                { id: "motorbike", icon: "motorbike", label: "Boda" },
+                { id: "walk", icon: "walk", label: "Walk" },
+                { id: "bicycle", icon: "bicycle", label: "Cycle" },
               ] as const
             ).map((m) => {
               const isAct = topMode === m.id;
@@ -974,6 +1008,9 @@ export default function MultiModalRoutePlannerScreen() {
                     setTopMode(m.id);
                   }}
                   style={[s.modeIconPill, isAct && s.modeIconPillActive]}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: isAct }}
+                  accessibilityLabel={m.label}
                 >
                   <Icon
                     name={m.icon as any}
@@ -1526,12 +1563,7 @@ export default function MultiModalRoutePlannerScreen() {
               const trafficSegs =
                 selRoute.segments?.[0]?.traffic_segments ?? [];
 
-              const primaryLineColor =
-                topMode === "car"
-                  ? "#16A34A"
-                  : topMode === "walk"
-                  ? "#2563EB"
-                  : "#0D9488";
+              const primaryLineColor = STREET_MODE_UI[topMode].color;
 
               const trafficFeatures: GeoJSON.Feature<GeoJSON.LineString>[] =
                 topMode === "car" && trafficSegs.length > 0
@@ -1655,7 +1687,7 @@ export default function MultiModalRoutePlannerScreen() {
               >
                 <ActivityIndicator size="large" color={ORANGE} />
                 <Text style={{ color: textMuted, marginTop: 8, fontSize: 13 }}>
-                  Finding best {topMode} routes…
+                  {STREET_MODE_UI[topMode].finding}
                 </Text>
               </View>
             ) : (
@@ -1680,30 +1712,31 @@ export default function MultiModalRoutePlannerScreen() {
                     setSelectedMapRouteIdx(idx);
                   }
                 }}
+                ListEmptyComponent={
+                  !fromLoc || !toLoc ? null : <View
+                    style={[
+                      s.mapSwipeCard,
+                      { backgroundColor: cardBg, width: CARD_W, alignItems: "center", gap: 6, paddingVertical: 22 },
+                    ]}
+                  >
+                    <Icon name={modeIconName(topMode.toUpperCase())} size={22} color={textMuted} />
+                    <Text style={{ color: textPrimary, fontSize: 15, fontWeight: "700" }}>
+                      No route found
+                    </Text>
+                    <Text style={{ color: textMuted, fontSize: 13, textAlign: "center" }}>
+                      Try moving the start or end point onto a road, or pick another mode.
+                    </Text>
+                  </View>
+                }
                 renderItem={({ item: rt, index }) => {
                   const durParts = formatDurationParts(rt.total_duration);
-                  const km = (rt.total_distance / 1000).toFixed(1);
-                  const kcal = Math.max(
-                    12,
-                    Math.round((rt.total_distance / 1000) * 48)
-                  );
-                  const taxiKes = Math.max(
-                    250,
-                    Math.round(150 + (rt.total_distance / 1000) * 65)
-                  );
                   const isSel = index === selectedMapRouteIdx;
-
-                  const badgeTitle =
-                    rt.route_badge ??
-                    (topMode === "car"
-                      ? index === 0
-                        ? "Recommended · Main Roads Priority"
-                        : index === 1
-                        ? "Free Roads Priority"
-                        : "Shortest"
-                      : index === 0
-                      ? "Shortest Route"
-                      : "Main Boulevard");
+                  // The API names each option; older payloads have none.
+                  const badgeTitle = rt.route_badge ?? (index === 0 ? "Fastest" : "Alternative");
+                  // Community reports (accidents, jams) colour parts of car routes.
+                  const reportsOnRoute = (rt.segments?.[0]?.traffic_segments ?? []).some(
+                    (ts) => ts.congestion !== "low"
+                  );
 
                   return (
                     <Pressable
@@ -1725,8 +1758,10 @@ export default function MultiModalRoutePlannerScreen() {
                           marginBottom: 4,
                         }}
                       >
-                        <Text style={s.mapCardBadgeText}>{badgeTitle}</Text>
-                        {topMode === "car" && (
+                        <Text style={[s.mapCardBadgeText, { flexShrink: 1 }]} numberOfLines={1}>
+                          {badgeTitle}
+                        </Text>
+                        {topMode === "car" && reportsOnRoute && (
                           <View
                             style={{
                               backgroundColor: dark
@@ -1744,7 +1779,7 @@ export default function MultiModalRoutePlannerScreen() {
                                 fontWeight: "700",
                               }}
                             >
-                              Live Traffic
+                              Traffic reports
                             </Text>
                           </View>
                         )}
@@ -1769,10 +1804,8 @@ export default function MultiModalRoutePlannerScreen() {
                         ) : null}
                       </Text>
 
-                      <Text style={[s.mapCardSub, { color: textMuted }]}>
-                        {topMode === "car"
-                          ? `${km}km · Toll: KES 0 · Taxi: ~KES ${taxiKes}`
-                          : `${km}km · ${kcal} kcal`}
+                      <Text style={[s.mapCardSub, { color: textMuted }]} numberOfLines={1}>
+                        {streetCardFacts(rt, topMode)}
                       </Text>
 
                       <Pressable
@@ -1821,7 +1854,7 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 12,
+    gap: 8,
     marginLeft: 24,
   },
   modeIconPill: {

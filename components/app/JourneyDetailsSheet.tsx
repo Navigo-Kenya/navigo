@@ -20,6 +20,15 @@ import {
   useColorScheme,
 } from "react-native";
 import { Icon } from "@/components/icons/Icon";
+import { modeIconName } from "@/components/app/StopTypeBadge";
+import { isStreetMode } from "@/utils/streetModes";
+
+const STREET_MODE_LABEL: Record<string, string> = {
+  WALK: "Walk",
+  BICYCLE: "Cycle",
+  CAR: "Drive",
+  MOTORBIKE: "Boda",
+};
 
 const ORANGE = "#FF6F00";
 const BLACK = "#111827";
@@ -176,9 +185,25 @@ export default function JourneyDetailsSheet({
   if (!activeJourney) return null;
 
   const segs: any[] = activeJourney.route?.segments ?? [];
-  const transitSegs = segs.filter((seg) => seg.mode !== "WALK");
+  // Street journeys (walk, bike, car, boda) have no transit legs or transfers.
+  const transitSegs = segs.filter((seg) => !isStreetMode(seg.mode));
+  const streetSeg = transitSegs.length === 0
+    ? segs.find((seg) => seg.mode !== "WALK") ?? segs[0]
+    : null;
   const transfers = Math.max(0, transitSegs.length - 1);
   const fare = prefs.showFares ? extractFares(segs) : null;
+  // Boda fare range / Expressway toll: not transit fares, but what the trip costs.
+  const routeFare = activeJourney.route?.fare;
+  const routeToll = activeJourney.route?.toll;
+  const streetCost = !prefs.showFares
+    ? null
+    : routeFare
+    ? routeFare.min === routeFare.max
+      ? `≈ KES ${routeFare.min}`
+      : `≈ KES ${routeFare.min}–${routeFare.max}`
+    : routeToll
+    ? `Toll ≈ KES ${routeToll.estimate_kes}`
+    : null;
   const totalDistStr = routeInfo?.distance
     ? formatDist(routeInfo.distance, prefs.units)
     : null;
@@ -217,12 +242,12 @@ export default function JourneyDetailsSheet({
   const activeDurationS = liveRemainS ?? routeInfo?.duration ?? 0;
   const durParts = formatDurationParts(activeDurationS);
 
-  const routeChainLabel =
-    transitSegs.length > 0
-      ? transitSegs
-          .map((s) => s.route_name || s.mode_badge || "Transit")
-          .join(" → ")
-      : "Walk only";
+  // Street journey: "Boda · Fastest", "Walk · Safer streets".
+  const streetLabel = streetSeg
+    ? [STREET_MODE_LABEL[String(streetSeg.mode).toUpperCase()] ?? "Walk", activeJourney.route?.route_badge]
+        .filter(Boolean)
+        .join(" · ")
+    : null;
 
   return (
     <Animated.View
@@ -265,14 +290,18 @@ export default function JourneyDetailsSheet({
                     ) : null}
                   </Text>
 
-                  {fare?.found && (
+                  {fare?.found ? (
                     <View style={s.farePill}>
                       <Text style={s.farePillText}>
                         {fare.confidence === "zone" ? "~" : ""}
                         {fare.currency} {fare.total}
                       </Text>
                     </View>
-                  )}
+                  ) : streetCost ? (
+                    <View style={s.farePill}>
+                      <Text style={s.farePillText}>{streetCost}</Text>
+                    </View>
+                  ) : null}
                 </View>
 
                 {routeInfo && (
@@ -340,17 +369,33 @@ export default function JourneyDetailsSheet({
         {!routeLoading && segs.length > 0 && (
           <View style={s.minimalMetaRow}>
             <View style={[s.minimalPill, { backgroundColor: C.light }]}>
-              <Icon
-                name={transitSegs.length > 0 ? "bus-outline" : "walk-outline"}
-                size={13}
-                color={ORANGE}
-              />
-              <Text
-                style={[s.minimalPillText, { color: C.text }]}
-                numberOfLines={1}
-              >
-                {routeChainLabel}
-              </Text>
+              {streetSeg ? (
+                <>
+                  <Icon name={modeIconName(streetSeg.mode)} size={14} color={ORANGE} />
+                  <Text style={[s.minimalPillText, { color: C.text, flexShrink: 1 }]} numberOfLines={1}>
+                    {streetLabel}
+                  </Text>
+                </>
+              ) : (
+                // One icon per ride, so a matatu → SGR trip shows both modes.
+                transitSegs.slice(0, 3).map((seg, i) => (
+                  <React.Fragment key={i}>
+                    {i > 0 && (
+                      <Icon name="chevron-forward" size={10} color={C.sub} />
+                    )}
+                    <Icon name={modeIconName(seg.mode, seg.mode_badge)} size={14} color={ORANGE} />
+                    <Text
+                      style={[s.minimalPillText, { color: C.text, flexShrink: 1 }]}
+                      numberOfLines={1}
+                    >
+                      {seg.route_name || seg.mode_badge || "Transit"}
+                    </Text>
+                  </React.Fragment>
+                ))
+              )}
+              {!streetSeg && transitSegs.length > 3 && (
+                <Text style={[s.minimalPillText, { color: C.sub }]}>+{transitSegs.length - 3}</Text>
+              )}
             </View>
 
             {transitSegs.length > 0 && (
@@ -361,7 +406,7 @@ export default function JourneyDetailsSheet({
               </Text>
             )}
 
-            {walkDistStr && (
+            {walkDistStr && !streetSeg && (
               <Text style={[s.minimalDotText, { color: C.sub }]}>
                 · {walkDistStr} walk
               </Text>

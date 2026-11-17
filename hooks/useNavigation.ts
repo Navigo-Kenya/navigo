@@ -24,6 +24,7 @@ import * as Location from "expo-location";
 import * as Linking from "expo-linking";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { asLandmark, progressAlong, withLandmark, PASSING_WINDOW_M } from "@/utils/landmarks";
+import { isStreetMode, streetVerb } from "@/utils/streetModes";
 import { AppState, AppStateStatus, DeviceEventEmitter } from "react-native";
 
 const EMA_LOC_WALK    = 0.25;
@@ -204,8 +205,8 @@ export function useNavigation() {
       // place being walked to; for rides, the stop to alight at. Both carry
       // their landmark ("Alight at Westlands, just after Oryx Energies").
       const nextSeg = segments[segIdx + 1];
-      const verb = seg.mode === "CAR" ? "Drive" : seg.mode === "BICYCLE" ? "Cycle" : "Walk";
-      const isStreet = seg.mode === "WALK" || seg.mode === "BICYCLE" || seg.mode === "CAR";
+      const verb = streetVerb(seg.mode);
+      const isStreet = isStreetMode(seg.mode);
       engineSteps.push({
         instruction: isStreet
           ? withLandmark(`${verb} to ${seg.to.name}`, nextSeg?.stops?.length ? asLandmark(nextSeg.from.landmark) : null)

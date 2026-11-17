@@ -9,13 +9,14 @@ import React, { memo } from "react";
 import type { StyleProp, ViewStyle } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import { Ionicons } from "@expo/vector-icons";
-import { resolveGlyph } from "./glyphs";
+import { resolveGlyph, type NavigoOnlyGlyph } from "./glyphs";
 
 const STROKE = 1.9;
 const DUOTONE = 0.18;
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
-export type IconName = IoniconName;
+/** Every Ionicons name, plus the glyphs only Navigo draws (e.g. "motorbike"). */
+export type IconName = IoniconName | NavigoOnlyGlyph | `${NavigoOnlyGlyph}-outline`;
 
 export interface IconProps {
   name: IconName;
@@ -35,7 +36,7 @@ export const Icon = memo(function Icon({ name, size = 24, color = "#111827", sty
       warned.add(String(name));
       console.warn(`[Icon] "${String(name)}" has no Navigo glyph yet, using Ionicons`);
     }
-    return <Ionicons name={name} size={size} color={color} style={style as any} accessibilityLabel={accessibilityLabel} testID={testID} />;
+    return <Ionicons name={name as IoniconName} size={size} color={color} style={style as any} accessibilityLabel={accessibilityLabel} testID={testID} />;
   }
   const { glyph, outline } = r;
   const solid = !outline && glyph.filled === "solid";
