@@ -5,6 +5,7 @@ import { PoiLayer, type TappedPoi } from "@/components/map/PoiLayer";
 import { poiCategoryMeta }       from "@/components/icons/poiCategories";
 import { useExploreSearchStore, type ExplorePlaceItem } from "@/store/exploreSearchStore";
 import { PoiResultsLayer }       from "@/components/map/PoiResultsLayer";
+import { SelectedPlaceLayer }    from "@/components/map/SelectedPlaceLayer";
 import { JourneyLandmarksLayer, journeyLandmarkIds } from "@/components/map/JourneyLandmarksLayer";
 import { asLandmark, progressAlong, rideCue } from "@/utils/landmarks";
 import { useTopUiBottom }        from "@/components/app/mapSheetInsets";
@@ -711,7 +712,10 @@ export default function MapScreen() {
   // Glide to a place so it sits in the middle of the map area left visible
   // above the place sheet (330 px peek). The centre is shifted south rather
   // than using camera padding, which would stick to later camera moves.
+  /** Where the camera last glided to ("lat,lng"), so a selection isn't animated twice. */
+  const lastGlideRef = useRef<string | null>(null);
   const glideToPlace = useCallback((lat: number, lng: number) => {
+    lastGlideRef.current = `${lat.toFixed(5)},${lng.toFixed(5)}`;
     setFollowMe(false);
     const zoom = Math.max(viewZoom, 16);
     const metersPerPx = (78271.517 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, zoom);
@@ -779,6 +783,19 @@ export default function MapScreen() {
     glideToPlace(place.lat, place.lng);
     useExploreSearchStore.getState().selectPlace(place);
   }, [glideToPlace]);
+
+  // Every selected place gets the camera glide, whatever selected it: a pin,
+  // a list row, a POI on the map, or the search screen (which switches to the
+  // map with the place already selected). Waits for the map style to load.
+  const glideRef = useRef(glideToPlace);
+  glideRef.current = glideToPlace;
+  useEffect(() => {
+    if (!selectedPlace || !styleLoaded) return;
+    const key = `${selectedPlace.lat.toFixed(5)},${selectedPlace.lng.toFixed(5)}`;
+    if (lastGlideRef.current === key) return;
+    const t = setTimeout(() => glideRef.current(selectedPlace.lat, selectedPlace.lng), 80);
+    return () => clearTimeout(t);
+  }, [selectedPlace, styleLoaded]);
 
   const topUiBottom = useTopUiBottom();
   const lastFitKeyRef = useRef<string | null>(null);
@@ -1435,6 +1452,9 @@ export default function MapScreen() {
               dark={dark}
               onPress={handleResultPress}
             />
+
+            {/* The place open in the place sheet: enlarged, ringed and named. */}
+            <SelectedPlaceLayer place={activeJourney ? null : selectedPlace} dark={dark} />
 
             {/* The journey's landmarks, named: board, get off after, pass, turn. */}
             {activeJourney?.route && (

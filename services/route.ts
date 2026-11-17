@@ -164,6 +164,9 @@ export const RouteService = {
       const data = await fetchApi<{ data: Route[] }>("/journey/calculate", {
         method: "POST",
         body: JSON.stringify(payload),
+        // Transit planning can take ~5-8 s cold (OTP + walk legs) and the
+        // late-night fallback runs a second search: 15 s was too tight.
+        timeout: 30000,
       });
       return data.data ?? [];
     } catch (error: any) {
