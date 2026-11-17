@@ -710,19 +710,18 @@ export default function MapScreen() {
 
   // Tapping one of our POIs opens the place sheet (same sheet as search).
   // Glide to a place so it sits in the middle of the map area left visible
-  // above the place sheet (330 px peek). The centre is shifted south rather
-  // than using camera padding, which would stick to later camera moves.
+  // above the place sheet (330 px peek). Bottom padding is screen-space, so
+  // this holds when the map is rotated (a latitude shift would push the place
+  // sideways); animateTo resets padding on every later move.
   /** Where the camera last glided to ("lat,lng"), so a selection isn't animated twice. */
   const lastGlideRef = useRef<string | null>(null);
   const glideToPlace = useCallback((lat: number, lng: number) => {
     lastGlideRef.current = `${lat.toFixed(5)},${lng.toFixed(5)}`;
     setFollowMe(false);
-    const zoom = Math.max(viewZoom, 16);
-    const metersPerPx = (78271.517 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, zoom);
-    const shiftDeg = (POI_SHEET_PEEK / 2) * metersPerPx / 111_320;
     camera.animateTo({
-      center: { latitude: lat - shiftDeg, longitude: lng },
-      zoom,
+      center: { latitude: lat, longitude: lng },
+      zoom: Math.max(viewZoom, 16),
+      padding: { bottom: POI_SHEET_PEEK },
       duration: 650,
       mode: "easeTo",
     });
@@ -733,7 +732,8 @@ export default function MapScreen() {
     const store = useExploreSearchStore.getState();
     const id = `poi:${poi.id}`;
     // During a search, open the place over the results (closing it returns
-    // to the list); otherwise start a one-place search.
+    // to the list). Otherwise just show that place: no search header, no
+    // results list, and closing it returns to the plain map.
     if (store.active) {
       store.selectPlace(
         store.places.find((p) => p.id === id) ?? {
@@ -747,19 +747,13 @@ export default function MapScreen() {
       );
       return;
     }
-    const place = {
+    store.selectPlace({
       id,
       name: poi.name,
       address: "",
       category: poiCategoryMeta(poi.category).label,
       lat: poi.lat,
       lng: poi.lng,
-    };
-    store.startSearch({
-      query: poi.name,
-      activeTab: "place",
-      places: [place],
-      selectedPlace: place,
     });
   }, [glideToPlace]);
 

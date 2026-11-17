@@ -1,6 +1,8 @@
 import Mapbox from "@rnmapbox/maps";
 import { useCallback, useMemo, type RefObject } from "react";
-import type { CameraOptions, EdgePadding, LatLng } from "@/providers/map/types";
+import { Dimensions } from "react-native";
+import type { EdgePadding, LatLng } from "@/providers/map/types";
+import { computeFit } from "@/utils/cameraFit";
 
 /**
  * Wraps the @rnmapbox/maps camera API in a stable interface.
@@ -21,6 +23,14 @@ export function useMapCamera(
         zoomLevel:          opts.zoom,
         ...(opts.heading !== undefined ? { heading: opts.heading } : {}),
         pitch:              opts.pitch ?? 0,
+        // Always set padding: the native camera keeps the last one (e.g. from
+        // fitBounds), which would push every later move off-centre.
+        padding: {
+          paddingTop:    opts.padding?.top ?? 0,
+          paddingRight:  opts.padding?.right ?? 0,
+          paddingBottom: opts.padding?.bottom ?? 0,
+          paddingLeft:   opts.padding?.left ?? 0,
+        },
         animationDuration:  opts.duration ?? 400,
         // Default to flyTo for flights, linearTo for tight loop tracking, allow manual override.
         animationMode:      opts.mode ?? ((opts.duration ?? 400) <= 250 ? "linearTo" : "flyTo"),
@@ -29,17 +39,34 @@ export function useMapCamera(
     [cameraRef],
   );
 
+  // Fit computed in JS (utils/cameraFit) rather than with Camera.fitBounds:
+  // on Android that counts the padding left by the previous fit, so every
+  // refit (new category, "Search this area") zoomed out further.
   const fitCoordinates = useCallback(
     (coords: LatLng[], padding: EdgePadding = {}, duration = 500) => {
       if (!cameraRef.current || coords.length === 0) return;
-      const lngs = coords.map((c) => c.longitude);
-      const lats  = coords.map((c) => c.latitude);
-      cameraRef.current.fitBounds(
-        [Math.min(...lngs), Math.min(...lats)],
-        [Math.max(...lngs), Math.max(...lats)],
-        [padding.top ?? 60, padding.right ?? 40, padding.bottom ?? 80, padding.left ?? 40],
-        duration,
+      const { width, height } = Dimensions.get("window");
+      const fit = computeFit(
+        coords,
+        { top: padding.top ?? 60, right: padding.right ?? 40, bottom: padding.bottom ?? 80, left: padding.left ?? 40 },
+        width,
+        height,
       );
+      if (!fit) return;
+      cameraRef.current.setCamera({
+        centerCoordinate:  fit.center,
+        zoomLevel:         fit.zoom,
+        heading:           0,
+        pitch:             0,
+        padding: {
+          paddingTop:    fit.padding.top,
+          paddingRight:  fit.padding.right,
+          paddingBottom: fit.padding.bottom,
+          paddingLeft:   fit.padding.left,
+        },
+        animationDuration: duration,
+        animationMode:     "easeTo",
+      });
     },
     [cameraRef],
   );
