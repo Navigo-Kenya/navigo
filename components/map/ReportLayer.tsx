@@ -81,7 +81,9 @@ export const ReportLayer = memo(forwardRef<ReportLayerHandle, ReportLayerProps>(
             id: r.id,
             icon: r.type in REPORT_TYPES ? `report-${r.type}` : "report-breakdown",
             // Seconds, so newer reports sort (and draw) above older ones.
+            // TomTom incidents have none (0): community reports stay on top.
             ts: Math.floor(new Date(r.created_at).getTime() / 1000) || 0,
+            tomtom: r.source === "tomtom",
           },
         })),
     }), [reports]);
@@ -157,7 +159,13 @@ export const ReportLayer = memo(forwardRef<ReportLayerHandle, ReportLayerProps>(
               // The image ends with a ground shadow below the tail; shift it
               // down so the tail tip, not the shadow, marks the location.
               iconOffset: [0, 4],
-              iconSize: ["interpolate", ["linear"], ["zoom"], 11.5, 0.72, 16, 1],
+              // TomTom incidents a little smaller than community reports.
+              // ["zoom"] must stay the top-level interpolate input.
+              iconSize: [
+                "interpolate", ["linear"], ["zoom"],
+                11.5, ["case", ["get", "tomtom"], 0.6, 0.72],
+                16, ["case", ["get", "tomtom"], 0.85, 1],
+              ],
               iconAllowOverlap: true,
               iconIgnorePlacement: true,
               iconPitchAlignment: "viewport",
