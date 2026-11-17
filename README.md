@@ -298,7 +298,8 @@ Test coverage:
 - `services/__tests__/navigationEngine.test.ts`, projection, off-route, dead reckoning, arrival (3 synthetic golden-trace fixtures)
 - `utils/__tests__/rankRoutes.test.ts`, route ranking criteria
 - `utils/__tests__/landmarks.test.ts`, landmark phrasing, progress along a leg, ride feed cues
-- `utils/__tests__/mapHelpers.test.ts`, ETA and duration formatting
+- `utils/__tests__/durations.test.ts`, ETA and duration formatting (70-minute rule)
+- `utils/__tests__/departures.test.ts`, departure metadata and no-departure copy
 
 ---
 
