@@ -90,7 +90,12 @@ export const PoiLayer = memo(function PoiLayer({
   onPress,
 }: Props) {
   const filter = useMemo(() => {
-    if (navigating) return LANDMARKS_ONLY;
+    if (navigating) {
+      // Journey landmarks are drawn (named) by JourneyLandmarksLayer.
+      return excludeIds?.length
+        ? ["all", LANDMARKS_ONLY, ["!", ["in", ["to-string", ["get", "id"]], ["literal", excludeIds]]]]
+        : LANDMARKS_ONLY;
+    }
     // Always a real filter: going back to `undefined` may not clear the
     // previous one on the native layer.
     if (!focusCategory) return ["has", "category"];

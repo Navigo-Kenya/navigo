@@ -5,6 +5,8 @@ import { PoiLayer, type TappedPoi } from "@/components/map/PoiLayer";
 import { poiCategoryMeta }       from "@/components/icons/poiCategories";
 import { useExploreSearchStore, type ExplorePlaceItem } from "@/store/exploreSearchStore";
 import { PoiResultsLayer }       from "@/components/map/PoiResultsLayer";
+import { JourneyLandmarksLayer, journeyLandmarkIds } from "@/components/map/JourneyLandmarksLayer";
+import { asLandmark, progressAlong, rideCue } from "@/utils/landmarks";
 import { useTopUiBottom }        from "@/components/app/mapSheetInsets";
 import type { PoiCategory }      from "@/components/icons/NavigoIcons";
 import * as Haptics              from "expo-haptics";
@@ -1178,6 +1180,22 @@ export default function MapScreen() {
     return humanizeStep(nextNextStep);
   }, [nextNextStep, prefs.navHints]);
 
+  // Live ride feed from the current segment (engine steps are 1:1 with segments).
+  const rideSeg: any = isNavigationMode
+    ? (activeJourney?.route?.segments as any[] | undefined)?.[navState?.stepIndex ?? -1]
+    : null;
+  const rideCueNow = useMemo(() => {
+    if (!rideSeg?.stops?.length || !navState || (rideSeg.coordinates?.length ?? 0) < 2) return null;
+    return rideCue({
+      along: rideSeg.landmarks_along,
+      progressM: progressAlong(rideSeg.coordinates, navState.projectedPoint),
+      stopsRemaining: navState.stopsRemaining,
+      alightStopName: rideSeg.to.name,
+      alightLandmark: asLandmark(rideSeg.to.landmark),
+    });
+  }, [rideSeg, navState]);
+  const journeyPoiIds = useMemo(() => journeyLandmarkIds(activeJourney?.route), [activeJourney?.route]);
+
   const stepEta = (navState?.stepETAs?.[navState?.stepIndex ?? 0]) ?? null;
 
   const walkInstruction = useMemo(() => {
@@ -1403,7 +1421,7 @@ export default function MapScreen() {
               visible
               navigating={isNavigationMode}
               focusCategory={categoryActive && !activeJourney ? poiCategory : null}
-              excludeIds={resultPoiIds}
+              excludeIds={isNavigationMode || activeJourney ? journeyPoiIds : resultPoiIds}
               standardStyle={activeStyleURL === process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL}
               dark={dark}
               onPress={handlePoiPress}
@@ -1417,6 +1435,11 @@ export default function MapScreen() {
               dark={dark}
               onPress={handleResultPress}
             />
+
+            {/* The journey's landmarks, named: board, get off after, pass, turn. */}
+            {activeJourney?.route && (
+              <JourneyLandmarksLayer route={activeJourney.route} dark={dark} />
+            )}
 
             <RouteOverlay
               walkLegs={walkLegs}
@@ -1550,6 +1573,7 @@ export default function MapScreen() {
         activeJourney={activeJourney}
         onClearJourney={handleClearJourney}
         nextNextPreview={nextNextPreview}
+        rideCue={rideCueNow}
         approachPhase={navState?.approachPhase ?? null}
         cameraHeading={cameraHeading}
         onResetNorth={handleCompassPress}

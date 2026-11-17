@@ -18,7 +18,10 @@ import {
   ReportIcon,
   type PlaceCategoryKey,
   type PoiCategory,
+  PoiCategoryGlyph,
 } from "@/components/icons/NavigoIcons";
+import { poiCategoryMeta } from "@/components/icons/poiCategories";
+import type { RideCue } from "@/utils/landmarks";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import type { Step } from "@/utils/mapHelpers";
@@ -102,6 +105,8 @@ export interface MapFloatingUIProps {
   activeJourney: any;
   onClearJourney: () => void;
   nextNextPreview: string | null;
+  /** Live ride feed: landmark being passed, the next one, and the alight cue. */
+  rideCue?: RideCue | null;
   approachPhase: ApproachPhase;
   cameraHeading: number;
   onResetNorth: () => void;
@@ -143,6 +148,7 @@ export default function MapFloatingUI({
   activeJourney,
   onClearJourney,
   nextNextPreview,
+  rideCue,
   cameraHeading,
   onResetNorth,
   headingUp,
@@ -705,6 +711,35 @@ export default function MapFloatingUI({
               </PressableScale>
             </View>
 
+            {/* Live ride feed: "Passing Naivas" → "Next: Meditest Hospital · 400 m";
+                two stops out it becomes the alight cue with its landmark. */}
+            {rideCue && (rideCue.alight || rideCue.passing || rideCue.next) && (
+              <View style={[styles.rideStrip, rideCue.alight && styles.rideStripAlight]}>
+                {rideCue.alight ? (
+                  <Ionicons name="notifications" size={15} color="#FFFFFF" />
+                ) : (
+                  <View
+                    style={[
+                      styles.rideBadge,
+                      { backgroundColor: poiCategoryMeta((rideCue.passing ?? rideCue.next!.landmark).category).color },
+                    ]}
+                  >
+                    <PoiCategoryGlyph
+                      category={(rideCue.passing ?? rideCue.next!.landmark).category as PoiCategory}
+                      size={11}
+                    />
+                  </View>
+                )}
+                <Text style={styles.rideText} numberOfLines={1}>
+                  {rideCue.alight
+                    ? rideCue.alight
+                    : rideCue.passing
+                    ? `Passing ${rideCue.passing.name} · on your ${rideCue.passing.side}`
+                    : `Next: ${rideCue.next!.landmark.name} · ${mToNice(rideCue.next!.inM)}`}
+                </Text>
+              </View>
+            )}
+
             {nextNextPreview && (
               <View style={styles.navThenStrip}>
                 <Text style={styles.navThenText} numberOfLines={1}>
@@ -1121,6 +1156,23 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: "rgba(255,255,255,0.12)",
   },
+  rideStrip: {
+    backgroundColor: "#1E293B",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  rideStripAlight: { backgroundColor: ORANGE },
+  rideBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rideText: { flex: 1, color: "#F8FAFC", fontSize: 12.5, fontWeight: "600" },
   navThenStrip: {
     backgroundColor: "#1F2937",
     paddingHorizontal: 14,

@@ -5,6 +5,7 @@ import type { Route } from "@/services/route";
 import type { RouteInfo, Step } from "@/utils/mapHelpers";
 import { detectManeuver } from "@/utils/mapHelpers";
 import type { LatLng } from "@/providers/map/types";
+import { asLandmark, withLandmark } from "@/utils/landmarks";
 import { useEffect, useReducer, useRef } from "react";
 
 type ActiveJourney = {
@@ -115,16 +116,28 @@ export function useRouteOverlay(
 
           allCoords = allCoords.concat(coords);
 
-          if (seg.mode === "WALK") {
-            newWalkLegs.push({ id: `walk-${i}`, coords });
+          const isStreet = seg.mode === "WALK" || seg.mode === "BICYCLE" || seg.mode === "CAR";
+          if (isStreet) {
+            // Walks draw as walk legs; bike / car journeys keep their solid line.
+            if (seg.mode === "WALK") {
+              newWalkLegs.push({ id: `walk-${i}`, coords });
+            } else {
+              newTransitLegs.push({ id: `street-${i}`, coords, color: sanitizeHex(seg.route_color, seg.mode) });
+            }
+            const verb = seg.mode === "CAR" ? "Drive" : seg.mode === "BICYCLE" ? "Cycle" : "Walk";
+            const target = seg.to.name === "Destination" ? toLoc.name : seg.to.name;
+            // Walking to a stop: anchor it ("Walk to Koja, opposite Masinde Muliro University").
+            const nextSeg = segments[i + 1];
+            const boardLm = nextSeg && nextSeg.stops?.length ? asLandmark(nextSeg.from.landmark) : null;
             summarySteps.push({
-              instruction: `Walk to ${seg.to.name === "Destination" ? toLoc.name : seg.to.name}`,
+              instruction: withLandmark(`${verb} to ${target}`, boardLm),
               distance: seg.distance,
               duration: seg.duration,
               location: [seg.to.lng, seg.to.lat],
               type: "walk",
               subSteps: (seg.walk_steps ?? []).map((ws: any) => ({
-                instruction: ws.instruction,
+                // "Turn left onto Kimathi St, after Java House"
+                instruction: withLandmark(ws.instruction, asLandmark(ws.landmark)),
                 note:        ws.note,
                 distance:    ws.distance,
                 duration:    ws.duration,
@@ -176,19 +189,23 @@ export function useRouteOverlay(
                 modeBadge: seg.mode_badge ?? "Bus",
                 stopCode: seg.from.stop_code ?? null,
                 platformCode: seg.from.platform_code ?? null,
-                landmark: seg.from.landmark ?? null,
+                landmark: asLandmark(seg.from.landmark)?.text ?? null,
                 nextDeparture: seg.next_departures?.[0] ?? null,
                 routeName: seg.route_name ?? undefined,
                 routeColor: color,
                 stops: seg.stops,
               } as any,
               {
-                instruction: `Alight at ${toName}`,
+                instruction: withLandmark(`Alight at ${toName}`, asLandmark(seg.to.landmark)),
                 distance: seg.distance,
                 duration: seg.duration,
                 location: [seg.to.lng, seg.to.lat],
                 type: "arrive",
                 mode: seg.mode,
+                landmarksAlong: seg.landmarks_along ?? [],
+                legCoords: seg.coordinates,
+                alightName: toName,
+                alightLandmark: asLandmark(seg.to.landmark),
                 routeName: seg.route_name ?? undefined,
                 routeColor: color,
               } as any

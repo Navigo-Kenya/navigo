@@ -1,4 +1,5 @@
 // services/route.ts
+import type { AlongLandmark, Landmark } from "@/utils/landmarks";
 import type { UnifiedLocation } from "@/store/journeyStore";
 import { fetchApi } from "./apiClient";
 
@@ -9,6 +10,8 @@ export interface WalkStep {
   duration?: number;
   lat: number;
   lng: number;
+  /** Landmark at this manoeuvre ("after Java House"). */
+  landmark?: Landmark | null;
 }
 
 export interface RouteStop {
@@ -75,7 +78,8 @@ export interface RouteSegment {
     name: string;
     lat: number;
     lng: number;
-    landmark?: string | null;
+    /** Where to board ("opposite Sarit Centre"); older payloads send a string. */
+    landmark?: Landmark | string | null;
   };
   to: {
     stop_id?: string | null;
@@ -84,7 +88,11 @@ export interface RouteSegment {
     name: string;
     lat: number;
     lng: number;
+    /** Where to alight ("just after Oryx Energies"). */
+    landmark?: Landmark | null;
   };
+  /** Landmarks passed on this transit leg, in order. */
+  landmarks_along?: AlongLandmark[];
   fare?: SegmentFare | null;
 }
 
