@@ -23,6 +23,7 @@ import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
 import * as Linking from "expo-linking";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { asLandmark, progressAlong, withLandmark, PASSING_WINDOW_M } from "@/utils/landmarks";
 import { AppState, AppStateStatus, DeviceEventEmitter } from "react-native";
 
 const EMA_LOC_WALK    = 0.25;
@@ -102,6 +103,8 @@ export function useNavigation() {
   const prevStepIndexRef     = useRef<number>(0);
   const lastAlightAlertRef   = useRef<number>(-1);
   const lastAnnouncedStopRef  = useRef<string | null>(null);
+  /** Landmarks already announced on this journey ("Passing Naivas"). */
+  const announcedLandmarksRef = useRef<Set<number>>(new Set());
   const prevApproachPhaseRef  = useRef<string | null>(null);
   const reroutingRef          = useRef<boolean>(false);
   const lastGpsTimeRef       = useRef<number>(Date.now());
@@ -192,15 +195,21 @@ export function useNavigation() {
     const allCoords: [number, number][] = [];
     const engineSteps: any[]            = [];
 
-    segments.forEach((seg: any) => {
+    segments.forEach((seg: any, segIdx: number) => {
       (seg.coordinates as [number, number][]).forEach(([lat, lng]) =>
         allCoords.push([lng, lat]),
       );
 
+      // A step's trigger point is the end of its leg: for walks, the stop or
+      // place being walked to; for rides, the stop to alight at. Both carry
+      // their landmark ("Alight at Westlands, just after Oryx Energies").
+      const nextSeg = segments[segIdx + 1];
+      const verb = seg.mode === "CAR" ? "Drive" : seg.mode === "BICYCLE" ? "Cycle" : "Walk";
+      const isStreet = seg.mode === "WALK" || seg.mode === "BICYCLE" || seg.mode === "CAR";
       engineSteps.push({
-        instruction: seg.mode === "WALK"
-          ? `Walk to ${seg.to.name}`
-          : `Board Line ${seg.route_name} at ${seg.from.name}`,
+        instruction: isStreet
+          ? withLandmark(`${verb} to ${seg.to.name}`, nextSeg?.stops?.length ? asLandmark(nextSeg.from.landmark) : null)
+          : withLandmark(`Alight at ${seg.to.name}`, asLandmark(seg.to.landmark)),
         distance: seg.distance,
         duration: seg.duration,
         location: [seg.to.lng, seg.to.lat] as [number, number],
@@ -212,6 +221,7 @@ export function useNavigation() {
 
     allCoordsRef.current = allCoords; 
     engineRef.current = new NavigationEngine(allCoords, engineSteps);
+    announcedLandmarksRef.current = new Set();
 
     navSession.restore().then((session) => {
       if (session && engineRef.current) {
@@ -558,6 +568,20 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
         VoiceGuide.announce(`Now passing ${result.currentStopName}.`);
       }
 
+      // Landmarks passed on the ride, once each: "Passing Naivas, on your left."
+      const rideSeg: any = (useJourneyStore.getState().activeJourney?.route?.segments as any[] | undefined)?.[result.stepIndex];
+      if (navHints === "detailed" && rideSeg?.landmarks_along?.length && rideSeg.coordinates?.length > 1) {
+        const prog = progressAlong(rideSeg.coordinates, result.projectedPoint);
+        for (const lm of rideSeg.landmarks_along) {
+          if (Math.abs(lm.progress_m - prog) <= PASSING_WINDOW_M && !announcedLandmarksRef.current.has(lm.id)) {
+            announcedLandmarksRef.current.add(lm.id);
+            VoiceGuide.announce(`Passing ${lm.name}, on your ${lm.side}.`);
+            break;
+          }
+        }
+      }
+      const alightLm = asLandmark(rideSeg?.to?.landmark);
+
       const stopsRem = result.stopsRemaining;
       if (stopsRem != null) {
         const last = lastAlightAlertRef.current;
@@ -568,7 +592,9 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
           const alightStop2 = engineRef.current?.steps[result.stepIndex]?.stops?.at(-1)?.name;
           if (navHints !== "off") VoiceGuide.announce(
-            alightStop2 ? `Prepare to alight at ${alightStop2} in 2 stops.` : "Prepare to alight in 2 stops.",
+            alightStop2
+              ? `${withLandmark(`Prepare to alight at ${alightStop2} in 2 stops`, alightLm)}.`
+              : "Prepare to alight in 2 stops.",
           );
           if (appStateRef.current !== "active" && !alightWarningFiredRef.current) {
             alightWarningFiredRef.current = true;
@@ -584,7 +610,9 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
           const alightStop1 = engineRef.current?.steps[result.stepIndex]?.stops?.at(-1)?.name;
           if (navHints !== "off") VoiceGuide.announce(
-            alightStop1 ? `Prepare to alight at ${alightStop1}.` : "Prepare to alight at the next stop.",
+            alightStop1
+              ? `${withLandmark(`Prepare to alight at ${alightStop1}`, alightLm)}.`
+              : "Prepare to alight at the next stop.",
           );
         } else if (stopsRem === 0 && last !== 0) {
           lastAlightAlertRef.current = 0;

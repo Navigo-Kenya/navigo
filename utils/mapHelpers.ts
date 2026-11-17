@@ -61,6 +61,11 @@ export type Step = {
   stopCode?: string | null;
   platformCode?: string | null;
   landmark?: string | null;
+  /** Transit legs: landmarks passed, the leg's line and where to alight (ride feed). */
+  landmarksAlong?: import("./landmarks").AlongLandmark[];
+  legCoords?: [number, number][];
+  alightName?: string;
+  alightLandmark?: import("./landmarks").Landmark | null;
   nextDeparture?: {
     departure_time?: string;
     eta_seconds?: number;

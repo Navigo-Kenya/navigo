@@ -65,16 +65,18 @@ export const PoiResultsLayer = memo(function PoiResultsLayer({
         id="poi-results-symbols"
         style={{
           iconImage: `poi-${category}`,
+          // ["zoom"] must drive a top-level interpolate / step (Mapbox rejects
+          // the whole layer otherwise): the selected case goes in the stops.
           iconSize: [
-            "case",
-            isSelected,
-            1.3,
-            ["interpolate", ["linear"], ["zoom"], 11, 0.78, 16, 0.95, 18, 1.05],
+            "interpolate", ["linear"], ["zoom"],
+            11, ["case", isSelected, 1.15, 0.78],
+            16, ["case", isSelected, 1.3, 0.95],
+            18, ["case", isSelected, 1.35, 1.05],
           ],
           iconAllowOverlap: true,
           iconPitchAlignment: "viewport",
           symbolSortKey: ["get", "sort"],
-          textField: ["case", isSelected, ["get", "name"], ["step", ["zoom"], "", 15, ["get", "name"]]],
+          textField: ["step", ["zoom"], ["case", isSelected, ["get", "name"], ""], 15, ["get", "name"]],
           textSize: ["case", isSelected, 13, 11.5],
           textColor: dark ? "#F4F4F5" : color,
           textHaloColor: dark ? "rgba(17,24,39,0.92)" : "rgba(255,255,255,0.95)",

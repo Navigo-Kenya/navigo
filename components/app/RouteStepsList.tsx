@@ -426,7 +426,8 @@ function TransitSection({
             </View>
             {(depart as any).landmark ? (
               <Text style={[ts.landmarkSub, { color: routeColor }]}>
-                Near {(depart as any).landmark}
+                {/* Already a phrase: "opposite Sarit Centre", "near Kencom House". */}
+                {String((depart as any).landmark).replace(/^./, (c) => c.toUpperCase())}
               </Text>
             ) : null}
           </View>
