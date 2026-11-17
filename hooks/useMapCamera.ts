@@ -21,6 +21,14 @@ export function useMapCamera(
         zoomLevel:          opts.zoom,
         ...(opts.heading !== undefined ? { heading: opts.heading } : {}),
         pitch:              opts.pitch ?? 0,
+        // Always set padding: the native camera keeps the last one (e.g. from
+        // fitBounds), which would push every later move off-centre.
+        padding: {
+          paddingTop:    opts.padding?.top ?? 0,
+          paddingRight:  opts.padding?.right ?? 0,
+          paddingBottom: opts.padding?.bottom ?? 0,
+          paddingLeft:   opts.padding?.left ?? 0,
+        },
         animationDuration:  opts.duration ?? 400,
         // Default to flyTo for flights, linearTo for tight loop tracking, allow manual override.
         animationMode:      opts.mode ?? ((opts.duration ?? 400) <= 250 ? "linearTo" : "flyTo"),

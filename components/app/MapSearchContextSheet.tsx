@@ -70,12 +70,10 @@ function palette(dark: boolean) {
 
 export default function MapSearchContextSheet(props: Props) {
   const { active, selectedPlace } = useExploreSearchStore();
-  if (!active) return null;
-  return selectedPlace ? (
-    <PlaceSheet key={selectedPlace.id} place={selectedPlace} {...props} />
-  ) : (
-    <ResultsSheet {...props} />
-  );
+  // A place can be open on its own (a POI tapped on the map, no search) or
+  // over search results (closing it returns to the list).
+  if (selectedPlace) return <PlaceSheet key={selectedPlace.id} place={selectedPlace} {...props} />;
+  return active ? <ResultsSheet {...props} /> : null;
 }
 
 // ─── Results ─────────────────────────────────────────────────────────────────
@@ -341,7 +339,7 @@ function PlaceSheet({ place: base, onFocusCoords, userLat, userLng }: Props & { 
   const C = palette(dark);
   const router = useRouter();
   const sheet = useRef<MapSheetHandle>(null);
-  const { selectPlace } = useExploreSearchStore();
+  const { selectPlace, active: overResults } = useExploreSearchStore();
   const { places: saved, addPlace } = useSavedStore();
   const isSaved = saved.some((p) => p.place_id === base.id);
 
@@ -404,7 +402,7 @@ function PlaceSheet({ place: base, onFocusCoords, userLat, userLng }: Props & { 
         hitSlop={12}
         style={[s.roundBtn, { backgroundColor: C.chip }]}
         accessibilityRole="button"
-        accessibilityLabel="Back to results"
+        accessibilityLabel={overResults ? "Back to results" : "Close"}
       >
         <Icon name="close" size={16} color={C.sub} />
       </PressableScale>
