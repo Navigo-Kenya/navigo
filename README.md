@@ -74,6 +74,7 @@ It covers the complete commute loop: search → plan → navigate → contribute
 - **AR walking guidance**, expo-camera full-screen overlay with bearing arrow, aligned ±15° haptic snap (Phase 2)
 - **Offline vector packs**, Mapbox TileStore packs (z10–16), replaces legacy raster downloader
 - **Real-time reports**, crowdsourced hazard/delay pins within viewport
+- **Live traffic incidents (TomTom)** in the Live reports layer: jams as amber / red road lines from zoom 12 (hidden while a journey is on screen), closures, accidents, roadworks, flooding and broken-down vehicles as pins with our report artwork (smaller, marked "Live · TomTom", no voting). They come with `/reports/viewport` from the API's shared per-city list, so the app never calls TomTom and adds no TomTom cost per user (`utils/incidents.ts`, `TrafficIncidentLayer`). Credited "© TomTom" in the layers sheet and the incident card.
 - **Our own places (POIs)**, Overture Maps places served as vector tiles by the API (`PoiLayer`), replacing Mapbox's: 17 category badges, names from zoom 16, landmarks only during navigation
 - **Category search**, chips (Restaurant, Fuel, Hospital…) list the nearest places of that category and pin them on the map; header chips switch category; "Search this area" after panning
 - **Place details**, tapping a place glides the camera to it, enlarges and names it (`SelectedPlaceLayer`), and opens the place sheet with live Google details (photos with credits, rating, hours, phone, website)

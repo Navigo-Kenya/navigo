@@ -25,8 +25,19 @@ import {
 } from "react-native";
 import { MapSheet, type MapSheetHandle } from "./MapSheet";
 import { Icon } from "@/components/icons/Icon";
+import { INCIDENT_TITLE, incidentWhere } from "@/utils/incidents";
 
 const { height: SH } = Dimensions.get("window");
+
+/** One label / value line in the TomTom incident card. */
+function FactRow({ label, value, text, sub }: { label: string; value: string; text: string; sub: string }) {
+  return (
+    <View style={{ flexDirection: "row", gap: 12 }}>
+      <Text style={{ width: 72, color: sub, fontSize: 13, fontWeight: "600" }}>{label}</Text>
+      <Text style={{ flex: 1, color: text, fontSize: 14, fontWeight: "600" }}>{value}</Text>
+    </View>
+  );
+}
 const ORANGE = "#FF6F00";
 const GREEN = "#16A34A";
 const RED = "#DC2626";
@@ -167,8 +178,15 @@ export default function ReportDetailCard({ report, clusterCount = 1, onClose, on
     track: dark ? "#3F3F46" : "#E5E7EB",
   };
 
-  const ago     = timeAgo(report.created_at);
-  const expires = expiresIn(report.expires_at);
+  // A live TomTom incident: same header, facts instead of votes and reporter.
+  const incident = report.source === "tomtom" ? report.incident ?? null : null;
+  const where = incident ? incidentWhere(incident) : null;
+  const incidentDelay = incident?.delay_s && incident.delay_s >= 60
+    ? `≈ ${Math.round(incident.delay_s / 60)} min delay`
+    : null;
+
+  const ago     = incident ? null : timeAgo(report.created_at);
+  const expires = incident ? null : expiresIn(report.expires_at);
   const rColor  = report.reporter ? nameColor(report.reporter.name) : ORANGE;
   const reliability = Math.max(0, Math.min(1, report.reliability ?? 0.5));
   const conf    = confidence(reliability);
@@ -177,9 +195,20 @@ export default function ReportDetailCard({ report, clusterCount = 1, onClose, on
     <View style={s.headerRow}>
       <ReportTypeIcon type={report.type} size={56} />
       <View style={s.headerText}>
-        <Text style={[s.catLabel, { color: C.text }]}>{meta.label}</Text>
-        <Text style={[s.catDesc, { color: C.sub }]} numberOfLines={1}>{meta.desc}</Text>
+        <Text style={[s.catLabel, { color: C.text }]}>
+          {incident ? INCIDENT_TITLE[incident.type] : meta.label}
+        </Text>
+        <Text style={[s.catDesc, { color: C.sub }]} numberOfLines={1}>
+          {incident ? where ?? incident.description : meta.desc}
+        </Text>
         <View style={s.metaRow}>
+          {incident && (
+            <>
+              <Text style={[s.metaTxt, { color: meta.color, fontWeight: "700" }]}>Live · TomTom</Text>
+              {!!incidentDelay && <View style={[s.metaDot, { backgroundColor: C.sub }]} />}
+              {!!incidentDelay && <Text style={[s.metaTxt, { color: C.sub }]}>{incidentDelay}</Text>}
+            </>
+          )}
           {!!ago && <Text style={[s.metaTxt, { color: C.sub }]}>{ago}</Text>}
           {!!ago && !!expires && <View style={[s.metaDot, { backgroundColor: C.sub }]} />}
           {!!expires && <Text style={[s.metaTxt, { color: C.sub }]}>{expires}</Text>}
@@ -207,7 +236,32 @@ export default function ReportDetailCard({ report, clusterCount = 1, onClose, on
 
   return (
     <>
-      <MapSheet ref={sheet} snapPoints={[340, SH * 0.6]} onClose={onClose} header={header}>
+      <MapSheet ref={sheet} snapPoints={incident ? [300, SH * 0.5] : [340, SH * 0.6]} onClose={onClose} header={header}>
+        {incident ? (
+          <View style={s.body}>
+            <View style={[s.confCard, { backgroundColor: C.card, gap: 10 }]}>
+              <FactRow label="Reported" value={incident.description} text={C.text} sub={C.sub} />
+              {!!where && <FactRow label="Where" value={where} text={C.text} sub={C.sub} />}
+              <FactRow
+                label="Delay"
+                value={incidentDelay ? incidentDelay.replace(" delay", "") : "Not reported"}
+                text={C.text}
+                sub={C.sub}
+              />
+              {incident.length_m != null && (
+                <FactRow
+                  label="Length"
+                  value={incident.length_m >= 1000 ? `${(incident.length_m / 1000).toFixed(1)} km` : `${incident.length_m} m`}
+                  text={C.text}
+                  sub={C.sub}
+                />
+              )}
+            </View>
+            <Text style={[s.voteHint, { color: C.sub, textAlign: "left" }]}>
+              Live traffic data © TomTom, refreshed every few minutes. It clears by itself when the road does.
+            </Text>
+          </View>
+        ) : (
         <View style={s.body}>
           {/* Still there? */}
           <Text style={[s.sectionLabel, { color: C.sub }]}>STILL THERE?</Text>
@@ -279,6 +333,7 @@ export default function ReportDetailCard({ report, clusterCount = 1, onClose, on
             </PressableScale>
           </View>
         </View>
+        )}
       </MapSheet>
 
       {/* ── Sign-in wall ─────────────────────────────────────────────────── */}

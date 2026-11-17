@@ -14,6 +14,8 @@ import * as Haptics              from "expo-haptics";
 import { OfflineNotice }         from "@/components/map/OfflineNotice";
 import { ReportLayer }           from "@/components/map/ReportLayer";
 import type { ReportLayerHandle } from "@/components/map/ReportLayer";
+import { TrafficIncidentLayer }  from "@/components/map/TrafficIncidentLayer";
+import { splitIncidents, type JamLine } from "@/utils/incidents";
 import { BusLayer }              from "@/components/map/BusLayer";
 import type { SelectedBusInfo }  from "@/components/map/BusLayer";
 import { RouteOverlay }          from "@/components/map/RouteOverlay";
@@ -280,6 +282,7 @@ export default function MapScreen() {
   const [nearestOpen,     setNearestOpen]     = useState(false);
   const [nearestStops,    setNearestStops]    = useState<UnifiedLocation[]>([]);
   const [activeReports,   setActiveReports]   = useState<TransitReport[]>([]);
+  const [trafficJams,     setTrafficJams]     = useState<JamLine[]>([]);
   const [selectedReport,  setSelectedReport]  = useState<{ report: TransitReport; count: number } | null>(null);
   const [allStops,        setAllStops]        = useState<Stop[]>([]);
   const [selectedIntermStop, setSelectedIntermStop] = useState<IntermediateStop | null>(null);
@@ -1056,10 +1059,13 @@ export default function MapScreen() {
       if (!useMapLayersStore.getState().layers.reports) return; 
       if (![north, south, east, west].every(Number.isFinite)) return;
       const reqId = ++reportReqId.current;
-      ReportService.getReportsInViewport(north, south, east, west)
-        .then((reports) => {
-          if (reqId !== reportReqId.current) return; 
-          setActiveReports(reports);
+      ReportService.getViewport(north, south, east, west)
+        .then(({ reports, incidents }) => {
+          if (reqId !== reportReqId.current) return;
+          // Live TomTom incidents: pins join the reports, jams become lines.
+          const { pins, jams } = splitIncidents(incidents);
+          setActiveReports([...reports, ...pins]);
+          setTrafficJams(jams);
           CacheService.set(CACHE_KEYS.REPORTS_VIEWPORT, reports);
         })
         .catch((err) => console.warn("Failed to fetch viewport reports", err));
@@ -1517,6 +1523,10 @@ export default function MapScreen() {
               />
             )}
             
+          {/* Live jams under the report pins; hidden while a journey is on
+              screen (its route carries its own traffic colours). */}
+          <TrafficIncidentLayer jams={trafficJams} visible={layers.reports && !activeJourney} />
+
           {layers.reports && (
             <ReportLayer
               ref={reportLayerRef}

@@ -21,6 +21,28 @@ export interface TransitReport {
   reliability?: number;
   /** The signed-in user's own vote, from the server. */
   my_vote?:   ReportVote | null;
+  /** "tomtom" for a live incident shown as a pin (no votes, no reporter). */
+  source?:    "community" | "tomtom";
+  /** Set when source is "tomtom". */
+  incident?:  MapIncident;
+}
+
+/** A live TomTom incident in the viewport, as the API sends it. */
+export interface MapIncident {
+  id:          string;
+  type:        "jam" | "accident" | "road_closed" | "lane_closed" | "roadworks" | "flooding" | "broken_down_vehicle" | "incident";
+  /** 1 moderate · 2 heavy */
+  level:       1 | 2;
+  description: string;
+  from:        string | null;
+  to:          string | null;
+  road:        string | null;
+  delay_s:     number | null;
+  length_m:    number | null;
+  /** [lat, lng] */
+  point:       [number, number];
+  /** Jams only: the road stretch, [lat, lng][]. */
+  line:        [number, number][] | null;
 }
 
 export interface ReportVoteResult {
@@ -38,6 +60,20 @@ export const ReportService = {
     east: number,
     west: number
   ): Promise<TransitReport[]> {
+    return (await this.getViewport(north, south, east, west)).reports;
+  },
+
+  /**
+   * Community reports in the viewport, plus live TomTom incidents (from the
+   * API's shared per-city list: no TomTom request per user). Older APIs send
+   * no `incidents`, which is the same as none.
+   */
+  async getViewport(
+    north: number,
+    south: number,
+    east: number,
+    west: number
+  ): Promise<{ reports: TransitReport[]; incidents: MapIncident[] }> {
     const bounds = { north, south, east, west };
     if (Object.values(bounds).some((value) => !Number.isFinite(value))) {
       throw new Error("Cannot fetch reports without finite viewport bounds");
@@ -48,8 +84,10 @@ export const ReportService = {
     const query = new URLSearchParams(
       Object.entries(bounds).map(([key, value]) => [key, String(value)]),
     ).toString();
-    const { data } = await api.get<{ data: TransitReport[] }>(`/reports/viewport?${query}`);
-    return data.data;
+    const { data } = await api.get<{ data: TransitReport[]; incidents?: MapIncident[] }>(
+      `/reports/viewport?${query}`
+    );
+    return { reports: data.data, incidents: data.incidents ?? [] };
   },
 
   async createReport(lat: number, lng: number, type: ReportCategory): Promise<void> {

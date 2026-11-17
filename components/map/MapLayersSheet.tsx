@@ -143,6 +143,9 @@ export function MapLayersSheet({ visible, onDismiss, dark }: MapLayersSheetProps
             );
           })}
         </View>
+        <Text style={[s.credit, { color: C.sub }]}>
+          Live reports include traffic incidents © TomTom.
+        </Text>
       </View>
     </MapSheet>
   );
@@ -161,6 +164,7 @@ const s = StyleSheet.create({
 
   body: { paddingHorizontal: 18 },
   section: { fontSize: 11, fontWeight: "800", letterSpacing: 0.6, marginBottom: 10 },
+  credit: { fontSize: 11.5, fontWeight: "500", marginTop: 12 },
 
   typeRow: { flexDirection: "row", gap: 10 },
   typeItem: { alignItems: "center", gap: 7 },
