@@ -1,9 +1,9 @@
 // components/app/ScreenHeader.tsx
-import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import type { ReactNode } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 
@@ -64,7 +64,7 @@ export function ScreenHeader({
           <Text style={[sh.sideText, { color: "#FF3B30" }]}>{leftLabel}</Text>
         ) : (
           <>
-            <Ionicons name="chevron-back" size={22} color={ORANGE} />
+            <Icon name="chevron-back" size={22} color={ORANGE} />
             <Text style={[sh.sideText, { color: ORANGE }]}>Back</Text>
           </>
         )}

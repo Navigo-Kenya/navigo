@@ -17,7 +17,6 @@ import {
   useColorScheme,
 } from "react-native";
 import Reanimated, { FadeIn } from "react-native-reanimated";
-import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -31,8 +30,10 @@ import { UnifiedLocation } from "@/store/journeyStore";
 import { useExploreSearchStore } from "@/store/exploreSearchStore";
 import { QUICK_CATEGORIES } from "@/components/app/MapFloatingUI";
 import { resolveStopCategory } from "@/components/app/StopsLayer";
+import { ModeIcon } from "@/components/app/StopTypeBadge";
 import { PlaceCategoryIcon, StopTypeGlyph } from "@/components/icons/NavigoIcons";
 import { PressableScale } from "@/components/ui/PressableScale";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 
@@ -293,7 +294,9 @@ export default function PlaceAndTransitSearchScreen() {
       return (
         <Reanimated.View entering={enter}>
           <PressableScale pressedScale={0.98} onPress={() => handleSelectRoute(rt)} style={[s.row, { borderBottomColor: C.line }]}>
+            {/* Line mode (bus, BRT, rail…): icon plus its badge text. */}
             <View style={[s.modeTag, { backgroundColor: rt.route_color || ORANGE }]}>
+              <ModeIcon mode={rt.mode} badge={rt.mode_badge} size={14} color="#FFFFFF" />
               <Text style={s.modeTagText}>{rt.mode_badge}</Text>
             </View>
             <View style={s.rowText}>
@@ -302,7 +305,7 @@ export default function PlaceAndTransitSearchScreen() {
                 {[rt.route_long_name, rt.agency_name].filter(Boolean).join(" · ")}
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={17} color={C.sub} />
+            <Icon name="chevron-forward" size={17} color={C.sub} />
           </PressableScale>
         </Reanimated.View>
       );
@@ -323,7 +326,7 @@ export default function PlaceAndTransitSearchScreen() {
                 {[st.stop_code, st.route_nams ? `Lines ${st.route_nams}` : null].filter(Boolean).join(" · ") || "Stop"}
               </Text>
             </View>
-            {item.kind === "recent" && <Ionicons name="time-outline" size={16} color={C.sub} />}
+            {item.kind === "recent" && <Icon name="time-outline" size={16} color={C.sub} />}
           </PressableScale>
         </Reanimated.View>
       );
@@ -336,7 +339,7 @@ export default function PlaceAndTransitSearchScreen() {
         <Reanimated.View entering={enter}>
           <PressableScale pressedScale={0.98} onPress={() => handleSelectPrediction(pred)} style={[s.row, { borderBottomColor: C.line }]}>
             <View style={[s.iconDisc, { backgroundColor: C.chip }]}>
-              {busy ? <ActivityIndicator size="small" color={ORANGE} /> : <Ionicons name="location" size={16} color={C.sub} />}
+              {busy ? <ActivityIndicator size="small" color={ORANGE} /> : <Icon name="location" size={16} color={C.sub} />}
             </View>
             <View style={s.rowText}>
               <Highlight text={pred.main_text} query={q} style={[s.rowTitle, { color: C.text }]} strong={strong} />
@@ -349,7 +352,7 @@ export default function PlaceAndTransitSearchScreen() {
               onPress={() => setQuery(pred.main_text)}
               accessibilityLabel={`Search for ${pred.main_text}`}
             >
-              <Ionicons name="arrow-up-outline" size={17} color={C.sub} style={{ transform: [{ rotate: "-45deg" }] }} />
+              <Icon name="arrow-up-outline" size={17} color={C.sub} style={{ transform: [{ rotate: "-45deg" }] }} />
             </Pressable>
           </PressableScale>
         </Reanimated.View>
@@ -366,12 +369,12 @@ export default function PlaceAndTransitSearchScreen() {
           style={[s.row, { borderBottomColor: C.line }]}
         >
           <View style={[s.iconDisc, { backgroundColor: C.chip }]}>
-            <Ionicons name="location" size={16} color={C.sub} />
+            <Icon name="location" size={16} color={C.sub} />
           </View>
           <View style={s.rowText}>
             <Text style={[s.rowTitle, { color: C.text }]} numberOfLines={1}>{rec.name}</Text>
           </View>
-          <Ionicons name="time-outline" size={16} color={C.sub} />
+          <Icon name="time-outline" size={16} color={C.sub} />
         </PressableScale>
       </Reanimated.View>
     );
@@ -381,7 +384,7 @@ export default function PlaceAndTransitSearchScreen() {
     searching ? null : (
       <View style={s.empty}>
         <View style={[s.emptyDisc, { backgroundColor: C.chip }]}>
-          <Ionicons name="search-outline" size={24} color={C.sub} />
+          <Icon name="search-outline" size={24} color={C.sub} />
         </View>
         <Text style={[s.emptyTitle, { color: C.text }]}>No matches for “{q}”</Text>
         <Text style={[s.emptySub, { color: C.sub }]}>
@@ -392,7 +395,7 @@ export default function PlaceAndTransitSearchScreen() {
   ) : (
     <View style={s.empty}>
       <View style={[s.emptyDisc, { backgroundColor: C.chip }]}>
-        <Ionicons name="compass-outline" size={24} color={C.sub} />
+        <Icon name="compass-outline" size={24} color={C.sub} />
       </View>
       <Text style={[s.emptyTitle, { color: C.text }]}>Where to?</Text>
       <Text style={[s.emptySub, { color: C.sub }]}>
@@ -407,7 +410,7 @@ export default function PlaceAndTransitSearchScreen() {
       <View style={[s.topHeader, { paddingTop: Math.max(insets.top, 12) + 4, borderBottomColor: C.line }]}>
         <View style={[s.searchBox, { backgroundColor: C.field }]}>
           <Pressable onPress={() => router.back()} hitSlop={12} accessibilityLabel="Back">
-            <Ionicons name="chevron-back" size={22} color={C.text} />
+            <Icon name="chevron-back" size={22} color={C.text} />
           </Pressable>
           <TextInput
             autoFocus
@@ -424,7 +427,7 @@ export default function PlaceAndTransitSearchScreen() {
             <ActivityIndicator size="small" color={ORANGE} />
           ) : query.length > 0 ? (
             <Pressable onPress={() => setQuery("")} hitSlop={10} accessibilityLabel="Clear">
-              <Ionicons name="close-circle" size={18} color={C.sub} />
+              <Icon name="close-circle" size={18} color={C.sub} />
             </Pressable>
           ) : null}
         </View>
@@ -459,11 +462,11 @@ export default function PlaceAndTransitSearchScreen() {
       {/* ── Home / Work + Directions ──────────────────────────────────────── */}
       <View style={[s.quickRow, { borderBottomColor: C.line }]}>
         <PressableScale onPress={() => goPinned(homePlace, "Home")} style={[s.quickChip, { backgroundColor: C.chip }]}>
-          <Ionicons name="home" size={15} color={ORANGE} />
+          <Icon name="home" size={15} color={ORANGE} />
           <Text style={[s.quickText, { color: C.text }]}>{homePlace ? "Home" : "Set home"}</Text>
         </PressableScale>
         <PressableScale onPress={() => goPinned(workPlace, "Work")} style={[s.quickChip, { backgroundColor: C.chip }]}>
-          <Ionicons name="briefcase" size={15} color={ORANGE} />
+          <Icon name="briefcase" size={15} color={ORANGE} />
           <Text style={[s.quickText, { color: C.text }]}>{workPlace ? "Work" : "Set work"}</Text>
         </PressableScale>
         <View style={{ flex: 1 }} />
@@ -472,7 +475,7 @@ export default function PlaceAndTransitSearchScreen() {
           style={[s.quickChip, { backgroundColor: ORANGE }]}
           accessibilityRole="button"
         >
-          <Ionicons name="navigate" size={14} color="#FFFFFF" />
+          <Icon name="navigate" size={14} color="#FFFFFF" />
           <Text style={[s.quickText, { color: "#FFFFFF" }]}>Directions</Text>
         </PressableScale>
       </View>
@@ -560,7 +563,7 @@ const s = StyleSheet.create({
     width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center",
     borderWidth: 2, borderColor: "#FFFFFF",
   },
-  modeTag: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, minWidth: 38, alignItems: "center" },
+  modeTag: { paddingHorizontal: 7, paddingVertical: 5, borderRadius: 9, minWidth: 44, alignItems: "center", gap: 1 },
   modeTagText: { color: "#FFFFFF", fontSize: 10.5, fontWeight: "800" },
 
   empty: { alignItems: "center", paddingHorizontal: 34, paddingTop: 40, gap: 8 },

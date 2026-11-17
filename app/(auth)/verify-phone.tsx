@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -23,6 +22,7 @@ import {
   buildFullPhone,
   CountryPickerModal,
 } from "@/components/auth/CountryPicker";
+import { Icon } from "@/components/icons/Icon";
 
 type Step = "enter" | "verify";
 
@@ -191,12 +191,12 @@ export default function VerifyPhone() {
       >
         <Pressable onPress={handleBack} style={styles.back}>
           <View style={[styles.backBtn, { backgroundColor: C.inputBg }]}>
-            <Ionicons name="arrow-back" size={20} color={C.text} />
+            <Icon name="arrow-back" size={20} color={C.text} />
           </View>
         </Pressable>
 
         <View style={[styles.badge, { backgroundColor: C.accentBg }]}>
-          <Ionicons
+          <Icon
             name={step === "enter" ? "phone-portrait-outline" : "shield-checkmark-outline"}
             size={28}
             color={C.accent}
@@ -224,7 +224,7 @@ export default function VerifyPhone() {
                 >
                   <Text style={styles.flagEmoji}>{selectedCountry.flag}</Text>
                   <Text style={[styles.dialCode, { color: C.text }]}>{selectedCountry.dial}</Text>
-                  <Ionicons name="chevron-down" size={12} color={C.textSub} style={{ marginLeft: 2 }} />
+                  <Icon name="chevron-down" size={12} color={C.textSub} style={{ marginLeft: 2 }} />
                 </Pressable>
 
                 <TextInput
@@ -344,7 +344,7 @@ export default function VerifyPhone() {
 function ErrorBox({ error, C }: { error: string; C: ReturnType<typeof theme> }) {
   return (
     <View style={[styles.errorBox, { backgroundColor: C.errBg, borderColor: C.errBd }]}>
-      <Ionicons name="alert-circle-outline" size={16} color={C.errText} />
+      <Icon name="alert-circle-outline" size={16} color={C.errText} />
       <Text style={[styles.errorText, { color: C.errText }]}>{error}</Text>
     </View>
   );

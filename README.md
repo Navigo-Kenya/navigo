@@ -48,6 +48,7 @@ It covers the complete commute loop: search → plan → navigate → contribute
 - **In-trip copilot**, Kwame answers live trip questions ("how many stops left?") using real-time navigation context
 - **Safety scoring**, night-time itineraries scored by walk distance after dark + nearby hazard reports; safer route flagged
 - **Route preview fly-through**, animated camera sweep along the full polyline before starting
+- **Landmark-anchored guidance**, "Walk to Koja, opposite Masinde Muliro University", "Alight at Westlands, just after Oryx Energies", "Turn left after Java House": landmarks from the API's `LandmarkService`, in every mode
 
 ### Navigation Engine
 - **Projection-based** (not proximity-based), projects GPS onto route polyline for accurate progress, ETA, and step detection; handles loops and U-turns correctly
@@ -65,6 +66,7 @@ It covers the complete commute loop: search → plan → navigate → contribute
 - **Pause / resume**, freezes engine and mutes voice; banner shows paused state
 - **Native puck + camera**, `CustomLocationProvider` + `LocationPuck` (puckBearing: course) with JS glide fallback via `prefs.nativeFollow`
 - **Geofenced alight alarm**, `expo-task-manager` background task fires at alight stop (180 m) and destination (120 m) even when app is killed
+- **Live ride feed**, the banner shows "Passing Naivas · on your left", then "Next: Meditest Hospital · 400 m", and two stops out "Alight at Westlands, just after Oryx Energies" (also spoken); the journey's landmarks are named on the map, the one to get off at ringed
 
 ### Map
 - **Mapbox GL**, custom style, stable camera with movement/heading thresholds
@@ -72,6 +74,11 @@ It covers the complete commute loop: search → plan → navigate → contribute
 - **AR walking guidance**, expo-camera full-screen overlay with bearing arrow, aligned ±15° haptic snap (Phase 2)
 - **Offline vector packs**, Mapbox TileStore packs (z10–16), replaces legacy raster downloader
 - **Real-time reports**, crowdsourced hazard/delay pins within viewport
+- **Our own places (POIs)**, Overture Maps places served as vector tiles by the API (`PoiLayer`), replacing Mapbox's: 17 category badges, names from zoom 16, landmarks only during navigation
+- **Category search**, chips (Restaurant, Fuel, Hospital…) list the nearest places of that category and pin them on the map; header chips switch category; "Search this area" after panning
+- **Place details**, tapping a place glides the camera to it, enlarges and names it (`SelectedPlaceLayer`), and opens the place sheet with live Google details (photos with credits, rating, hours, phone, website)
+- **Stop sheet**, a `MapSheet` like the place sheet: stop-type badge, community rating, next departure, live arrivals (30 s refresh), info, reviews, and review / suggest-an-edit / report-a-delay forms
+- **Real stop types**, stops show what they are (bus, terminal, rail, metro, BRT, ferry, tram, airport, cable) everywhere they are listed (`StopTypeBadge`)
 
 ### Community & Gamification
 - **Contributions**, stop edits, photos, delay reports, reviews with moderation queue
@@ -89,6 +96,36 @@ It covers the complete commute loop: search → plan → navigate → contribute
 - **Session replay harness**, dev-only trace recorder + replay screen for NavigationEngine golden-trace fixtures
 - **Nav metrics telemetry**, batched `POST /telemetry/nav-metrics` (reroute, snap_rate, arrival_precision, etc.)
 - **Sentry**, `@sentry/react-native` wired in `_layout.tsx`; inert until `EXPO_PUBLIC_SENTRY_DSN` is set (Phase 2 build)
+
+---
+
+## Design System
+
+### Icons (`components/icons/`)
+
+Navigo uses its **own icon set**, never stock icon fonts in new code.
+
+| File | What |
+|------|------|
+| `glyphs.ts` | The 81 UI icons as plain path data (24-unit grid, rounded 1.9 strokes), shared by the app and the gallery |
+| `Icon.tsx` | `<Icon name="star-outline" size={16} color={...} />`, a drop-in for `<Ionicons>` (same props and names) |
+| `NavigoIcons.tsx` | Map and category glyphs: map layers, report, place categories, stop types (`StopTypeGlyph`), POI categories (`PoiCategoryGlyph`) |
+| `poiCategories.ts` | POI category labels and colours (mirrors the API's `config/pois.php`) |
+| `reportIcons.ts` | Community report icons (pre-rendered PNGs) |
+
+Variants: a name ending in `-outline` draws the line style; the plain name draws the filled style, duotone (18% tint) or solid for stars, pins, bookmarks and status circles, with details knocked out in white. A name without a Navigo glyph falls back to Ionicons and warns in development, so add the glyph to `glyphs.ts`.
+
+Map badges (stop types, POI categories, reports) are pre-rendered PNGs in `assets/images/{stops,pois,reports}/` (@1x/@2x/@3x).
+
+**Gallery:** every icon and badge on one page for design review:
+
+```bash
+node scripts/icon-gallery.ts icon-gallery.html   # Node 23.6+ runs TypeScript directly
+```
+
+### Sheets
+
+`components/app/MapSheet.tsx` is the base for every sheet over the map (snap points, velocity throw, sticky footer, back button); floating map controls follow its top edge (`mapSheetInsets.ts`). Contribution forms use `components/app/stop/FormSheet.tsx` (keyboard-aware bottom sheet with a sticky submit).
 
 ---
 
@@ -168,6 +205,8 @@ Key design decisions:
 | `user.ts` | Auth + profile + saved places/journeys API client |
 | `ai.ts` | Kwame / AiService, `planRoute`, session context, nav context injection |
 | `apiClient.ts` | Axios instance; base URL from `EXPO_PUBLIC_API_URL` |
+| `poi.ts` | Place details (`/pois/{id}`, live Google content), nearby POIs by category, photo URLs |
+| `exploreSearch.ts` | Text search (places + stops + lines) and category search into the results sheet |
 
 ### Hooks
 
@@ -180,6 +219,15 @@ Key design decisions:
 | `useMapCamera.ts` | Camera follow / overview logic |
 | `useHeadingTracker.ts` | Smoothed device heading for AR overlay |
 | `useRatePrompt.ts` | Post-journey rating nudge |
+
+### Utils
+
+| Util | Purpose |
+|------|---------|
+| `landmarks.ts` | Landmark guidance helpers: `withLandmark` (no duplicated names), `progressAlong` (metres along a leg), `rideCue` (passing / next / alight cue) |
+| `departures.ts` | Departure metadata and no-departure copy |
+| `mapHelpers.ts` | ETA and duration formatting (70-minute rule), step types, maneuvers |
+| `rankRoutes.ts` | Route ranking criteria |
 
 ---
 
@@ -249,6 +297,9 @@ npm test -- --watch       # watch mode
 Test coverage:
 - `services/__tests__/navigationEngine.test.ts`, projection, off-route, dead reckoning, arrival (3 synthetic golden-trace fixtures)
 - `utils/__tests__/rankRoutes.test.ts`, route ranking criteria
+- `utils/__tests__/landmarks.test.ts`, landmark phrasing, progress along a leg, ride feed cues
+- `utils/__tests__/durations.test.ts`, ETA and duration formatting (70-minute rule)
+- `utils/__tests__/departures.test.ts`, departure metadata and no-departure copy
 
 ---
 
@@ -294,6 +345,8 @@ See [Navigo.md](../Navigo.md) for the full 20-feature roadmap with per-item stat
 2. `npx tsc --noEmit` and `npm test` must pass before opening a PR
 3. Navigation engine changes must include or update golden-trace fixtures in `services/__tests__/fixtures/`
 4. Use conventional commits: `feat:` / `fix:` / `perf:` / `refactor:`
+5. Use `<Icon>` from `@/components/icons/Icon`, not `@expo/vector-icons`; add missing glyphs to `glyphs.ts` and check them in the gallery
+6. Map layers inside a `ShapeSource` / `VectorSource` must be direct children (no fragments), and `["zoom"]` may only be the input of a top-level `interpolate` / `step`
 
 ---
 

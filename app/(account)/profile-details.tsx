@@ -22,6 +22,7 @@ import {
   useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE  = "#FF6F00";
 const GREY    = "#8E8E93";
@@ -91,15 +92,15 @@ function Row({
         pressed && onPress ? { backgroundColor: C.pressed, marginHorizontal: -14, paddingHorizontal: 14 } : null,
       ]}
     >
-      <Ionicons name={icon} size={18} color={danger ? DANGER : C.icon} />
+      <Icon name={icon} size={18} color={danger ? DANGER : C.icon} />
       <View style={s.rowBody}>
         <Text style={[s.rowLabel, { color: danger ? DANGER : C.text }]}>{label}</Text>
         {description ? <Text style={[s.rowDesc, { color: C.subText }]}>{description}</Text> : null}
       </View>
       {value ? <Text style={[s.rowValue, { color: C.subText }]}>{value}</Text> : null}
       {right ?? null}
-      {onPress && !right && !value ? <Ionicons name="chevron-forward" size={16} color={C.subText} /> : null}
-      {onPress && (value || right) ? <Ionicons name="chevron-forward" size={16} color={C.subText} style={{ marginLeft: 4 }} /> : null}
+      {onPress && !right && !value ? <Icon name="chevron-forward" size={16} color={C.subText} /> : null}
+      {onPress && (value || right) ? <Icon name="chevron-forward" size={16} color={C.subText} style={{ marginLeft: 4 }} /> : null}
     </Pressable>
   );
 }
@@ -107,7 +108,7 @@ function Row({
 function VerifiedBadge({ verified, C }: { verified: boolean; C: ReturnType<typeof makeC> }) {
   return (
     <View style={[s.badge, { backgroundColor: verified ? C.softGreen : C.softRed }]}>
-      <Ionicons
+      <Icon
         name={verified ? "checkmark-circle" : "alert-circle"}
         size={11}
         color={verified ? SUCCESS : DANGER}
@@ -126,7 +127,7 @@ function OAuthBadge({ provider, C }: { provider: string; C: ReturnType<typeof ma
     provider === "apple"  ? "logo-apple"  : "key-outline";
   return (
     <View style={[s.badge, { backgroundColor: C.softOrange }]}>
-      <Ionicons name={icon} size={11} color={ORANGE} />
+      <Icon name={icon} size={11} color={ORANGE} />
       <Text style={[s.badgeText, { color: ORANGE }]}>{label}</Text>
     </View>
   );
@@ -281,7 +282,7 @@ export default function ProfileDetails() {
               </View>
             ) : (
               <View style={[s.cameraRing, { backgroundColor: C.card, borderColor: C.bg }]}>
-                <Ionicons name="camera" size={14} color={C.text} />
+                <Icon name="camera" size={14} color={C.text} />
               </View>
             )}
           </Pressable>
@@ -299,7 +300,7 @@ export default function ProfileDetails() {
         <Section title="PERSONAL INFO" C={C}>
           {isEditing ? (
             <View style={s.editRow}>
-              <Ionicons name="person-outline" size={18} color={C.icon} />
+              <Icon name="person-outline" size={18} color={C.icon} />
               <View style={{ flex: 1 }}>
                 <Text style={[s.editFieldLabel, { color: C.subText }]}>Full name</Text>
                 <TextInput

@@ -3,7 +3,6 @@
 // user (stated preferences), with per-item and bulk delete.
 import { ScreenHeader } from "@/components/app/ScreenHeader";
 import api from "@/services/apiClient";
-import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -16,6 +15,7 @@ import {
   useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const GREY   = "#8E8E93";
@@ -102,7 +102,7 @@ export default function KwameMemoryScreen() {
       <ScrollView contentContainerStyle={[s.body, { paddingBottom: insets.bottom + 32 }]}>
         <View style={s.introRow}>
           <View style={[s.introIcon, { backgroundColor: C.soft }]}>
-            <Ionicons name="sparkles" size={20} color={ORANGE} />
+            <Icon name="sparkles" size={20} color={ORANGE} />
           </View>
           <Text style={[s.introText, { color: C.subText }]}>
             When you tell Kwame a lasting preference ("I avoid CBD at night"),
@@ -116,7 +116,7 @@ export default function KwameMemoryScreen() {
           <ActivityIndicator color={ORANGE} style={{ marginTop: 40 }} />
         ) : items.length === 0 ? (
           <View style={s.empty}>
-            <Ionicons name="cloud-outline" size={36} color={GREY} />
+            <Icon name="cloud-outline" size={36} color={GREY} />
             <Text style={[s.emptyTitle, { color: C.text }]}>Nothing remembered yet</Text>
             <Text style={[s.emptySub, { color: C.subText }]}>
               Chat with Kwame and mention your travel preferences.
@@ -129,7 +129,7 @@ export default function KwameMemoryScreen() {
                 <View key={m.id}>
                   {i > 0 && <View style={[s.divider, { backgroundColor: C.hairline }]} />}
                   <View style={s.memRow}>
-                    <Ionicons
+                    <Icon
                       name={m.kind === "preference" ? "options-outline" : "information-circle-outline"}
                       size={16}
                       color={ORANGE}
@@ -141,7 +141,7 @@ export default function KwameMemoryScreen() {
                       </Text>
                     </View>
                     <Pressable onPress={() => deleteOne(m.id)} hitSlop={10}>
-                      <Ionicons name="trash-outline" size={18} color={DANGER} />
+                      <Icon name="trash-outline" size={18} color={DANGER} />
                     </Pressable>
                   </View>
                 </View>
@@ -149,7 +149,7 @@ export default function KwameMemoryScreen() {
             </View>
 
             <Pressable onPress={deleteAll} style={s.forgetAll}>
-              <Ionicons name="trash-outline" size={16} color={DANGER} />
+              <Icon name="trash-outline" size={16} color={DANGER} />
               <Text style={s.forgetAllText}>Forget everything</Text>
             </Pressable>
           </>

@@ -24,6 +24,7 @@ import GuestWall from "@/components/app/GuestWall";
 import Profile from "./profile";
 import FavoriteScreen from "./favorite";
 import ContributeScreen from "./contribution";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const BLACK = "#111827";
@@ -270,7 +271,7 @@ function CustomFloatingTabBar({
                 style={[styles.tabPill, isActive && styles.tabPillActive]}
               >
                 <View>
-                  <Ionicons
+                  <Icon
                     name={isActive ? tab.iconActive : tab.icon}
                     size={21}
                     color={isActive ? WHITE : inactiveIconColor}

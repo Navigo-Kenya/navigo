@@ -1,7 +1,6 @@
 // components/app/JourneyDetailsSheet.tsx
 import { formatDist, usePrefsStore } from "@/store/prefsStore";
 import { extractFares, formatDurationParts } from "@/utils/mapHelpers";
-import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useRef, useState } from "react";
 import { useReportSheetTop } from "./mapSheetInsets";
 import {
@@ -20,6 +19,7 @@ import {
   View,
   useColorScheme,
 } from "react-native";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const BLACK = "#111827";
@@ -300,7 +300,7 @@ export default function JourneyDetailsSheet({
               style={[s.closeBtn, { backgroundColor: C.light }]}
               accessibilityLabel="Fly-through route preview"
             >
-              <Ionicons name="play" size={15} color={ORANGE} />
+              <Icon name="play" size={15} color={ORANGE} />
             </Pressable>
           )}
 
@@ -319,7 +319,7 @@ export default function JourneyDetailsSheet({
                 },
               ]}
             >
-              <Ionicons
+              <Icon
                 name={paused ? "play" : "pause"}
                 size={16}
                 color={paused ? "#F59E0B" : C.text}
@@ -332,7 +332,7 @@ export default function JourneyDetailsSheet({
             hitSlop={16}
             style={[s.closeBtn, { backgroundColor: C.light }]}
           >
-            <Ionicons name="close" size={17} color={C.text} />
+            <Icon name="close" size={17} color={C.text} />
           </Pressable>
         </View>
 
@@ -340,7 +340,7 @@ export default function JourneyDetailsSheet({
         {!routeLoading && segs.length > 0 && (
           <View style={s.minimalMetaRow}>
             <View style={[s.minimalPill, { backgroundColor: C.light }]}>
-              <Ionicons
+              <Icon
                 name={transitSegs.length > 0 ? "bus-outline" : "walk-outline"}
                 size={13}
                 color={ORANGE}
@@ -380,7 +380,7 @@ export default function JourneyDetailsSheet({
             ]}
             onPress={() => onToggleNav(!navigating)}
           >
-            <Ionicons
+            <Icon
               name={navigating ? "stop-circle-outline" : "navigate"}
               size={17}
               color="#fff"
@@ -438,7 +438,7 @@ export default function JourneyDetailsSheet({
             {saving ? (
               <ActivityIndicator size="small" color={ORANGE} />
             ) : (
-              <Ionicons
+              <Icon
                 name={isSaved ? "bookmark" : "bookmark-outline"}
                 size={16}
                 color={ORANGE}
@@ -457,7 +457,7 @@ export default function JourneyDetailsSheet({
             ]}
             onPress={handleShare}
           >
-            <Ionicons name="share-outline" size={16} color={GREY} />
+            <Icon name="share-outline" size={16} color={GREY} />
           </Pressable>
         </View>
 
@@ -510,7 +510,7 @@ export default function JourneyDetailsSheet({
               });
             }}
           >
-            <Ionicons name="map-outline" size={14} color={GREY} />
+            <Icon name="map-outline" size={14} color={GREY} />
             <Text style={s.mapsLinkText}>
               Open walking directions in{" "}
               {prefs.mapApp === "system"
@@ -521,7 +521,7 @@ export default function JourneyDetailsSheet({
                 ? "Apple Maps"
                 : "Waze"}
             </Text>
-            <Ionicons name="open-outline" size={13} color={GREY} />
+            <Icon name="open-outline" size={13} color={GREY} />
           </Pressable>
         </ScrollView>
 

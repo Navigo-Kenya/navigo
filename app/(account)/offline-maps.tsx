@@ -14,7 +14,6 @@ import {
 } from "@/services/offlinePacks";
 import { useAuthStore } from "@/store/authStore";
 import { useOfflineMapStore, type OfflineBBox } from "@/store/offlineMapStore";
-import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -28,6 +27,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MapView, Camera } from "@rnmapbox/maps";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 
@@ -83,7 +83,7 @@ export default function OfflineMaps() {
         <ScreenHeader title="Offline maps" C={C} />
         <View style={s.wall}>
           <View style={[s.wallIcon, { backgroundColor: C.soft }]}>
-            <Ionicons name="cloud-download-outline" size={34} color={ORANGE} />
+            <Icon name="cloud-download-outline" size={34} color={ORANGE} />
           </View>
           <Text style={[s.wallTitle, { color: C.text }]}>Maps that work offline</Text>
           <Text style={[s.wallSub, { color: C.subText }]}>
@@ -185,7 +185,7 @@ export default function OfflineMaps() {
             <Text style={[s.sectionTitle, { color: C.subText }]}>DOWNLOADED</Text>
             <View style={s.packRow}>
               <View style={[s.packIcon, { backgroundColor: C.soft }]}>
-                <Ionicons name="map" size={20} color={ORANGE} />
+                <Icon name="map" size={20} color={ORANGE} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[s.packName, { color: C.text }]}>{pack.name}</Text>
@@ -194,7 +194,7 @@ export default function OfflineMaps() {
                 </Text>
               </View>
               <Pressable onPress={handleDelete} hitSlop={10} style={s.deleteBtn}>
-                <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+                <Icon name="trash-outline" size={20} color="#FF3B30" />
               </Pressable>
             </View>
           </View>
@@ -241,7 +241,7 @@ export default function OfflineMaps() {
 
           {/* Estimate */}
           <View style={[s.estimate, { borderColor: C.hairline }]}>
-            <Ionicons name="cloud-download-outline" size={16} color={C.subText} />
+            <Icon name="cloud-download-outline" size={16} color={C.subText} />
             <Text style={[s.estimateText, { color: C.text }]}>
               {!est
                 ? "Move the map to pick an area"
@@ -265,14 +265,14 @@ export default function OfflineMaps() {
               disabled={!!est?.tooLarge}
               style={[s.primaryBtn, est?.tooLarge && { opacity: 0.5 }]}
             >
-              <Ionicons name="download-outline" size={18} color="#FFFFFF" />
+              <Icon name="download-outline" size={18} color="#FFFFFF" />
               <Text style={s.primaryBtnText}>{pack ? "Update / download area" : "Download this area"}</Text>
             </Pressable>
           )}
         </View>
 
         <View style={s.note}>
-          <Ionicons name="information-circle-outline" size={14} color={C.subText} />
+          <Icon name="information-circle-outline" size={14} color={C.subText} />
           <Text style={[s.noteText, { color: C.subText }]}>
             When you lose connection, the map automatically uses your downloaded
             area — labels, streets and journeys keep working at every zoom.

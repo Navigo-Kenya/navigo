@@ -3,7 +3,6 @@
 // compass-driven direction arrow to the next waypoint (stage/boarding stop).
 // Pure sensors — camera + magnetometer heading + GPS bearing — no ARKit/ARCore.
 import { useHeadingStore } from "@/store/headingStore";
-import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef, useState } from "react";
@@ -16,6 +15,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const GREEN  = "#30D158";
@@ -107,7 +107,7 @@ export default function ARWalkView({
           <CameraView style={StyleSheet.absoluteFill} facing="back" />
         ) : (
           <View style={[StyleSheet.absoluteFill, s.noCam]}>
-            <Ionicons name="videocam-off-outline" size={40} color="#8E8E93" />
+            <Icon name="videocam-off-outline" size={40} color="#8E8E93" />
             <Text style={s.noCamText}>
               Camera access is needed for AR guidance.{"\n"}Enable it in Settings.
             </Text>
@@ -121,7 +121,7 @@ export default function ARWalkView({
               transform: [{ rotate: `${relative}deg` }, { scale: aligned ? 1 : pulse }],
             }}
           >
-            <Ionicons
+            <Icon
               name="navigate"
               size={120}
               color={aligned ? GREEN : ORANGE}
@@ -139,10 +139,10 @@ export default function ARWalkView({
         {/* Top bar */}
         <View style={[s.topBar, { paddingTop: insets.top + 8 }]}>
           <Pressable onPress={onClose} style={s.closeBtn} hitSlop={10}>
-            <Ionicons name="chevron-down" size={22} color="#FFFFFF" />
+            <Icon name="chevron-down" size={22} color="#FFFFFF" />
           </Pressable>
           <View style={s.topPill}>
-            <Ionicons name="camera-outline" size={13} color={ORANGE} />
+            <Icon name="camera-outline" size={13} color={ORANGE} />
             <Text style={s.topPillText}>AR guidance</Text>
           </View>
           <View style={{ width: 40 }} />

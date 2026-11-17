@@ -12,6 +12,7 @@ import {
   View,
   useColorScheme,
 } from "react-native";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const GREEN  = "#10B981";
@@ -136,7 +137,7 @@ export default function SubmissionsScreen() {
         ]}
       >
         <View style={[s.iconCircle, { backgroundColor: color + "18" }]}>
-          <Ionicons name={typeIcon(item.type)} size={18} color={color} />
+          <Icon name={typeIcon(item.type)} size={18} color={color} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={[s.rowTitle, { color: C.text }]} numberOfLines={1}>
@@ -160,7 +161,7 @@ export default function SubmissionsScreen() {
           </View>
         </View>
         {item.status === "pending" && (
-          <Ionicons name="ellipsis-horizontal" size={16} color={C.sub} />
+          <Icon name="ellipsis-horizontal" size={16} color={C.sub} />
         )}
       </Pressable>
     );
@@ -205,7 +206,7 @@ export default function SubmissionsScreen() {
         onRefresh={onRefresh}
         ListEmptyComponent={
           <View style={s.empty}>
-            <Ionicons name="checkmark-circle-outline" size={48} color={C.sub} />
+            <Icon name="checkmark-circle-outline" size={48} color={C.sub} />
             <Text style={[s.emptyText, { color: C.sub }]}>
               {loaded ? "No submissions here" : "Loading…"}
             </Text>

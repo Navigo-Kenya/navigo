@@ -2,7 +2,6 @@
 import { ScreenHeader } from "@/components/app/ScreenHeader";
 import { ContributionService } from "@/services/contribution";
 import { useAuthStore } from "@/store/authStore";
-import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useEffect, useState } from "react";
 import {
@@ -14,6 +13,7 @@ import {
   View,
   useColorScheme,
 } from "react-native";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const GREY   = "#8E8E93";
@@ -85,7 +85,7 @@ function PodiumStep({
   return (
     <View style={p.item}>
       <View style={p.topSection}>
-        <Ionicons name={medal as any} size={rank === 1 ? 20 : 16} color={color} style={{ marginBottom: 4 }} />
+        <Icon name={medal as any} size={rank === 1 ? 20 : 16} color={color} style={{ marginBottom: 4 }} />
         <View style={[p.avatarRing, { borderColor: color }]}>
           <Avatar entry={entry} size={avatarSize} />
         </View>
@@ -179,7 +179,7 @@ export default function LeaderboardScreen() {
         </View>
       ) : error ? (
         <View style={ls.center}>
-          <Ionicons name="cloud-offline-outline" size={40} color={C.sub} />
+          <Icon name="cloud-offline-outline" size={40} color={C.sub} />
           <Text style={[ls.errorText, { color: C.sub }]}>Could not load leaderboard</Text>
           <Pressable style={ls.retryBtn} onPress={load}>
             <Text style={ls.retryText}>Try again</Text>
@@ -187,7 +187,7 @@ export default function LeaderboardScreen() {
         </View>
       ) : data.length === 0 ? (
         <View style={ls.center}>
-          <Ionicons name="trophy-outline" size={40} color={C.sub} />
+          <Icon name="trophy-outline" size={40} color={C.sub} />
           <Text style={[ls.errorText, { color: C.sub }]}>No entries yet</Text>
         </View>
       ) : (

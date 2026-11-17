@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, Share,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from "@/components/icons/Icon";
 
 interface Props {
   C: any;
@@ -71,7 +71,7 @@ export default function ChatHeader({
               activeOpacity={0.8}
             >
               <View style={styles.sparkleBadge}>
-                <Ionicons name="sparkles" size={11} color="#FFFFFF" />
+                <Icon name="sparkles" size={11} color="#FFFFFF" />
               </View>
               <Text style={[styles.brandPillText, { color: ORANGE }]}>Kwame AI</Text>
             </TouchableOpacity>
@@ -89,7 +89,7 @@ export default function ChatHeader({
               onPress={() => router.push('/kwame-settings')}
               activeOpacity={0.75}
             >
-              <Ionicons name="options-outline" size={20} color={C.text} />
+              <Icon name="options-outline" size={20} color={C.text} />
             </TouchableOpacity>
           ) : hasMessages ? (
             <View
@@ -103,14 +103,14 @@ export default function ChatHeader({
                 onPress={clearHistory}
                 hitSlop={8}
               >
-                <Ionicons name="create-outline" size={20} color={C.text} />
+                <Icon name="create-outline" size={20} color={C.text} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.pillIconBtn}
                 onPress={() => setMenuVisible(true)}
                 hitSlop={8}
               >
-                <Ionicons name="ellipsis-horizontal" size={20} color={C.text} />
+                <Icon name="ellipsis-horizontal" size={20} color={C.text} />
               </TouchableOpacity>
             </View>
           ) : (
@@ -122,7 +122,7 @@ export default function ChatHeader({
               onPress={() => setMenuVisible(true)}
               activeOpacity={0.75}
             >
-              <Ionicons name="chatbubble-ellipses-outline" size={20} color={C.text} />
+              <Icon name="chatbubble-ellipses-outline" size={20} color={C.text} />
             </TouchableOpacity>
           )}
         </View>
@@ -151,7 +151,7 @@ export default function ChatHeader({
             </Text>
 
             <TouchableOpacity style={styles.popoverRow} onPress={handleShareChat}>
-              <Ionicons name="share-outline" size={20} color={C.text} />
+              <Icon name="share-outline" size={20} color={C.text} />
               <Text style={[styles.popoverRowText, { color: C.text }]}>Share</Text>
             </TouchableOpacity>
 
@@ -162,7 +162,7 @@ export default function ChatHeader({
                 setMenuVisible(false);
               }}
             >
-              <Ionicons
+              <Icon
                 name={isPinned ? 'pricetag' : 'pricetag-outline'}
                 size={19}
                 color={C.text}
@@ -179,11 +179,11 @@ export default function ChatHeader({
                 router.push('/settings');
               }}
             >
-              <Ionicons name="folder-outline" size={20} color={C.text} />
+              <Icon name="folder-outline" size={20} color={C.text} />
               <Text style={[styles.popoverRowText, { color: C.text, flex: 1 }]}>
                 Saved places
               </Text>
-              <Ionicons name="chevron-forward" size={16} color={C.sub} />
+              <Icon name="chevron-forward" size={16} color={C.sub} />
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -193,7 +193,7 @@ export default function ChatHeader({
                 router.push('/kwame-settings');
               }}
             >
-              <Ionicons name="options-outline" size={20} color={C.text} />
+              <Icon name="options-outline" size={20} color={C.text} />
               <Text style={[styles.popoverRowText, { color: C.text }]}>
                 Voice & settings
               </Text>
@@ -206,7 +206,7 @@ export default function ChatHeader({
                 router.back();
               }}
             >
-              <Ionicons name="map-outline" size={20} color={C.text} />
+              <Icon name="map-outline" size={20} color={C.text} />
               <Text style={[styles.popoverRowText, { color: C.text }]}>
                 Return to map
               </Text>
@@ -221,7 +221,7 @@ export default function ChatHeader({
                 clearHistory();
               }}
             >
-              <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+              <Icon name="trash-outline" size={20} color="#FF3B30" />
               <Text style={[styles.popoverRowText, { color: '#FF3B30' }]}>Delete</Text>
             </TouchableOpacity>
           </View>

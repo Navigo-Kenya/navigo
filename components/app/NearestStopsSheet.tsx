@@ -1,5 +1,4 @@
 import { useStaticSheetTop } from "./mapSheetInsets";
-import { Ionicons } from "@expo/vector-icons";
 import { JSX } from "react";
 import {
     Dimensions,
@@ -10,6 +9,8 @@ import {
     View,
     useColorScheme,
 } from "react-native";
+import { Icon } from "@/components/icons/Icon";
+import { StopTypeBadge } from "@/components/app/StopTypeBadge";
 
 const BLACK = "#000000";
 const BG    = "#F6F7F8";
@@ -49,7 +50,7 @@ export default function NearestStopsSheet({
       <View style={styles.sheetHeader}>
         <Text style={[styles.panelTitle, { color: C.text }]}>Nearest stages</Text>
         <Pressable onPress={() => setNearestOpen(false)}>
-          <Ionicons name="close-outline" size={22} color={C.text} />
+          <Icon name="close-outline" size={22} color={C.text} />
         </Pressable>
       </View>
       <ScrollView contentContainerStyle={{ paddingTop: 6 }}>
@@ -63,7 +64,7 @@ export default function NearestStopsSheet({
               onPress={() => onSelect(s)}
             >
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <Ionicons name="bus-outline" size={16} color={C.text} />
+                <StopTypeBadge stop={s as any} size={22} />
                 <Text style={[styles.nearName, { color: C.text }]}>{s.name}</Text>
               </View>
               <Text style={styles.nearDist}>

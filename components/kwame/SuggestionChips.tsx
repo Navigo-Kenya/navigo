@@ -3,7 +3,7 @@
 // calls suggest_replies (unclear/open-ended requests).
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = '#FF6F00';
 
@@ -24,7 +24,7 @@ export default function SuggestionChips({ suggestions, C, onPress, disabled = fa
           disabled={disabled}
           onPress={() => onPress(s)}
         >
-          <Ionicons name="arrow-forward-circle-outline" size={14} color={ORANGE} />
+          <Icon name="arrow-forward-circle-outline" size={14} color={ORANGE} />
           <Text style={[styles.chipText, { color: C.text }]} numberOfLines={1}>{s}</Text>
         </TouchableOpacity>
       ))}

@@ -4,8 +4,8 @@
 // the active chip shows the winning stat ("Fastest · 32 min").
 import React from "react";
 import { ScrollView, Pressable, Text, StyleSheet } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import { RANKING_OPTIONS, RouteRanking, RankableRoute, rankingHeadline } from "@/utils/rankRoutes";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 
@@ -43,7 +43,7 @@ export default function RouteRankChips({
               { backgroundColor: selected ? ORANGE : chipBg, opacity: pressed ? 0.8 : 1 },
             ]}
           >
-            <Ionicons name={opt.icon as any} size={13} color={selected ? "#FFFFFF" : chipText} />
+            <Icon name={opt.icon as any} size={13} color={selected ? "#FFFFFF" : chipText} />
             <Text style={[s.chipText, { color: selected ? "#FFFFFF" : chipText }]}>
               {opt.label}
               {headline ? ` · ${headline}` : ""}

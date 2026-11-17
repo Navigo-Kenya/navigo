@@ -15,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { MapService } from "@/services/map";
+import { Icon } from "@/components/icons/Icon";
 
 const KAKAO_BLUE = "#3B82F6";
 
@@ -343,7 +344,7 @@ export default function WeatherMeteoSheet({
               hitSlop={12}
               style={s.closeBtn}
             >
-              <Ionicons name="close" size={24} color={textPrimary} />
+              <Icon name="close" size={24} color={textPrimary} />
             </Pressable>
           </View>
 
@@ -353,7 +354,7 @@ export default function WeatherMeteoSheet({
             </View>
           ) : failed && !data ? (
             <View style={s.loadingBox}>
-              <Ionicons name="cloud-offline-outline" size={40} color={textMuted} />
+              <Icon name="cloud-offline-outline" size={40} color={textMuted} />
               <Text style={[s.conditionLine, { color: textPrimary }]}>Weather unavailable</Text>
               <Text style={[s.footerMeta, { color: textMuted }]}>
                 Couldn&apos;t reach the weather service.
@@ -370,7 +371,7 @@ export default function WeatherMeteoSheet({
               {/* Centered Weather Icon + Decimal Temp + Condition + PM10/PM2.5 Pills[cite: 17] */}
               <View style={s.heroCenter}>
                 <View style={s.iconTempRow}>
-                  <Ionicons
+                  <Icon
                     name={data.iconName}
                     size={54}
                     color={dark ? "#93C5FD" : "#CBD5E1"}
@@ -457,7 +458,7 @@ export default function WeatherMeteoSheet({
                       <Text style={[s.hourLabel, { color: textMuted }]}>
                         {h.hourLabel}
                       </Text>
-                      <Ionicons
+                      <Icon
                         name={h.icon}
                         size={26}
                         color={
@@ -486,7 +487,7 @@ export default function WeatherMeteoSheet({
                       <Text style={[s.hourLabel, { color: textMuted }]}>
                         {d.dayLabel}
                       </Text>
-                      <Ionicons
+                      <Icon
                         name={d.icon}
                         size={26}
                         color={d.icon === "sunny" ? "#F59E0B" : "#94A3B8"}

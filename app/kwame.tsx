@@ -5,7 +5,6 @@ import {
   Platform, useColorScheme, Alert, Dimensions, Text, Share, Modal, Pressable,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import {
@@ -33,6 +32,7 @@ import VoiceOverlay from '../components/kwame/VoiceOverlay';
 import MessageBubble from '../components/kwame/MessageBubble';
 import PlacesScroller from '../components/kwame/PlaceCard';
 import SuggestionChips from '../components/kwame/SuggestionChips';
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = '#FF6F00';
 const ACCENT_BLUE = '#2563EB';
@@ -88,7 +88,7 @@ function RouteScroller({ routes, C }: { routes: any[]; C: any }) {
             onPress={scrollToNext}
             activeOpacity={0.7}
           >
-            <Ionicons name="chevron-forward" size={16} color={ORANGE} />
+            <Icon name="chevron-forward" size={16} color={ORANGE} />
           </TouchableOpacity>
         </View>
       )}
@@ -887,7 +887,7 @@ export default function KwameScreen() {
                 { backgroundColor: C.surfacePill, borderColor: C.border },
               ]}
             >
-              <Ionicons name="warning" size={18} color={C.text} />
+              <Icon name="warning" size={18} color={C.text} />
               <Text style={[styles.floatingToastText, { color: C.text }]}>
                 {toastWarning}
               </Text>
@@ -972,7 +972,7 @@ export default function KwameScreen() {
                             hitSlop={10}
                             style={styles.utilityIcon}
                           >
-                            <Ionicons name="copy-outline" size={17} color={C.sub} />
+                            <Icon name="copy-outline" size={17} color={C.sub} />
                           </TouchableOpacity>
 
                           <TouchableOpacity
@@ -985,7 +985,7 @@ export default function KwameScreen() {
                             hitSlop={10}
                             style={styles.utilityIcon}
                           >
-                            <Ionicons
+                            <Icon
                               name={
                                 dislikedMsgIds[msg.id]
                                   ? 'thumbs-down'
@@ -1002,7 +1002,7 @@ export default function KwameScreen() {
                             onPress={() => handleSpeak(msg.id, msg.text)}
                             disabled={msg.id === streamingMessageId}
                           >
-                            <Ionicons
+                            <Icon
                               name={
                                 speakingMsgId === msg.id
                                   ? 'stop-circle-outline'
@@ -1018,7 +1018,7 @@ export default function KwameScreen() {
                             style={styles.utilityIcon}
                             onPress={() => Share.share({ message: msg.text })}
                           >
-                            <Ionicons name="share-outline" size={17} color={C.sub} />
+                            <Icon name="share-outline" size={17} color={C.sub} />
                           </TouchableOpacity>
 
                           <TouchableOpacity
@@ -1026,7 +1026,7 @@ export default function KwameScreen() {
                             style={styles.utilityIcon}
                             onPress={() => Clipboard.setStringAsync(msg.text)}
                           >
-                            <Ionicons
+                            <Icon
                               name="ellipsis-horizontal"
                               size={17}
                               color={C.sub}
@@ -1103,7 +1103,7 @@ export default function KwameScreen() {
                         { backgroundColor: C.card, borderColor: C.border },
                       ]}
                     >
-                      <Ionicons name="navigate-outline" size={12} color={ORANGE} />
+                      <Icon name="navigate-outline" size={12} color={ORANGE} />
                       <Text style={{ fontSize: 12.5, fontWeight: '600', color: C.text }}>
                         {q}
                       </Text>
@@ -1142,7 +1142,7 @@ export default function KwameScreen() {
                         ]}
                         onPress={cancelRecordingMsg}
                       >
-                        <Ionicons name="close" size={20} color={C.text} />
+                        <Icon name="close" size={20} color={C.text} />
                       </TouchableOpacity>
 
                       <DottedWaveform
@@ -1170,7 +1170,7 @@ export default function KwameScreen() {
                         ]}
                         onPress={stopRecordingMsgAndSend}
                       >
-                        <Ionicons name="arrow-up" size={20} color="#FFFFFF" />
+                        <Icon name="arrow-up" size={20} color="#FFFFFF" />
                       </TouchableOpacity>
                     </>
                   ) : (
@@ -1181,7 +1181,7 @@ export default function KwameScreen() {
                         disabled={isProcessing}
                         onPress={() => router.push('/kwame-settings')}
                       >
-                        <Ionicons name="add" size={24} color={C.text} />
+                        <Icon name="add" size={24} color={C.text} />
                       </TouchableOpacity>
 
                       <TextInput
@@ -1201,7 +1201,7 @@ export default function KwameScreen() {
                         onPress={startRecordingMsg}
                         disabled={isProcessing}
                       >
-                        <Ionicons name="mic-outline" size={22} color={C.text} />
+                        <Icon name="mic-outline" size={22} color={C.text} />
                       </TouchableOpacity>
 
                       {inputText.trim().length > 0 ? (
@@ -1213,7 +1213,7 @@ export default function KwameScreen() {
                           onPress={() => handleSendText()}
                           disabled={isProcessing}
                         >
-                          <Ionicons name="arrow-up" size={19} color="#FFFFFF" />
+                          <Icon name="arrow-up" size={19} color="#FFFFFF" />
                         </TouchableOpacity>
                       ) : (
                         <TouchableOpacity
@@ -1268,7 +1268,7 @@ export default function KwameScreen() {
                   ]}
                   onPress={() => setDrawerOpen(false)}
                 >
-                  <Ionicons name="search-outline" size={20} color={C.text} />
+                  <Icon name="search-outline" size={20} color={C.text} />
                 </TouchableOpacity>
               </View>
 
@@ -1284,7 +1284,7 @@ export default function KwameScreen() {
                     router.back();
                   }}
                 >
-                  <Ionicons name="map-outline" size={21} color={C.text} />
+                  <Icon name="map-outline" size={21} color={C.text} />
                   <Text style={[styles.drawerMenuText, { color: C.text }]}>
                     Explore Map
                   </Text>
@@ -1297,7 +1297,7 @@ export default function KwameScreen() {
                     router.push('/kwame-settings');
                   }}
                 >
-                  <Ionicons name="bookmarks-outline" size={20} color={C.text} />
+                  <Icon name="bookmarks-outline" size={20} color={C.text} />
                   <Text style={[styles.drawerMenuText, { color: C.text }]}>
                     Saved Places & Routes
                   </Text>
@@ -1310,7 +1310,7 @@ export default function KwameScreen() {
                     router.push('/kwame-settings');
                   }}
                 >
-                  <Ionicons name="options-outline" size={21} color={C.text} />
+                  <Icon name="options-outline" size={21} color={C.text} />
                   <Text style={[styles.drawerMenuText, { color: C.text }]}>
                     Customize Kwame
                   </Text>
@@ -1334,7 +1334,7 @@ export default function KwameScreen() {
                       handleSendText(item);
                     }}
                   >
-                    <Ionicons name="chatbubble-outline" size={18} color={C.text} />
+                    <Icon name="chatbubble-outline" size={18} color={C.text} />
                     <Text
                       style={[styles.drawerHistoryText, { color: C.text }]}
                       numberOfLines={1}
@@ -1381,7 +1381,7 @@ export default function KwameScreen() {
                     clearHistory();
                   }}
                 >
-                  <Ionicons name="create-outline" size={19} color="#FFFFFF" />
+                  <Icon name="create-outline" size={19} color="#FFFFFF" />
                   <Text style={styles.drawerChatPillText}>Chat</Text>
                 </TouchableOpacity>
 

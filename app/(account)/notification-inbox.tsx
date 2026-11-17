@@ -17,6 +17,7 @@ import {
   useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const GREY   = "#8E8E93";
@@ -128,7 +129,7 @@ function NotifRow({
       ]}
     >
       <View style={[s.notifIcon, { backgroundColor: bg }]}>
-        <Ionicons name={meta.icon} size={20} color={meta.color} />
+        <Icon name={meta.icon} size={20} color={meta.color} />
       </View>
 
       <View style={s.notifBody}>
@@ -161,11 +162,11 @@ function EmptyState({ C }: { C: ReturnType<typeof makeC> }) {
       <View style={s.emptyIconWrap}>
         <View style={[s.emptyIconOuter, { backgroundColor: ORANGE + "18" }]}>
           <View style={[s.emptyIconInner, { backgroundColor: ORANGE + "30" }]}>
-            <Ionicons name="notifications" size={38} color={ORANGE} />
+            <Icon name="notifications" size={38} color={ORANGE} />
           </View>
         </View>
-        <View style={s.emptySparkle1}><Ionicons name="sparkles" size={14} color={ORANGE} /></View>
-        <View style={s.emptySparkle2}><Ionicons name="star" size={10} color="#FCD34D" /></View>
+        <View style={s.emptySparkle1}><Icon name="sparkles" size={14} color={ORANGE} /></View>
+        <View style={s.emptySparkle2}><Icon name="star" size={10} color="#FCD34D" /></View>
       </View>
 
       <Text style={[s.emptyTitle, { color: C.text }]}>You're all caught up</Text>
@@ -176,7 +177,7 @@ function EmptyState({ C }: { C: ReturnType<typeof makeC> }) {
       <View style={s.categoryRow}>
         {(Object.entries(CATEGORY_META) as [NotifCategory, typeof CATEGORY_META[NotifCategory]][]).map(([key, meta]) => (
           <View key={key} style={[s.categoryChip, { backgroundColor: meta.bg }]}>
-            <Ionicons name={meta.icon} size={13} color={meta.color} />
+            <Icon name={meta.icon} size={13} color={meta.color} />
             <Text style={[s.categoryChipText, { color: meta.color }]}>
               {key.charAt(0).toUpperCase() + key.slice(1)}
             </Text>
@@ -189,13 +190,13 @@ function EmptyState({ C }: { C: ReturnType<typeof makeC> }) {
         onPress={() => router.push("/(account)/notifications" as any)}
       >
         <View style={[s.settingsIcon, { backgroundColor: ORANGE + "18" }]}>
-          <Ionicons name="settings-outline" size={18} color={ORANGE} />
+          <Icon name="settings-outline" size={18} color={ORANGE} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={[s.settingsTitle, { color: C.text }]}>Notification settings</Text>
           <Text style={[s.settingsSub, { color: C.sub }]}>Control what you receive and how</Text>
         </View>
-        <Ionicons name="chevron-forward" size={16} color={C.sub} />
+        <Icon name="chevron-forward" size={16} color={C.sub} />
       </Pressable>
     </View>
   );

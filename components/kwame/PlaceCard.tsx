@@ -4,8 +4,8 @@
 // "Directions" action that hands the place back to the chat flow.
 import React from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, ScrollView, Dimensions } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { KwamePlace, mapboxThumb } from '../../services/ai';
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = '#FF6F00';
 const CARD_W = Math.min(Dimensions.get('window').width * 0.62, 250);
@@ -13,7 +13,7 @@ const CARD_W = Math.min(Dimensions.get('window').width * 0.62, 250);
 function Rating({ rating, count, C }: { rating: number; count?: number | null; C: any }) {
   return (
     <View style={styles.ratingRow}>
-      <Ionicons name="star" size={12} color="#FFB300" />
+      <Icon name="star" size={12} color="#FFB300" />
       <Text style={[styles.ratingText, { color: C.text }]}>{rating.toFixed(1)}</Text>
       {count != null && <Text style={[styles.ratingCount, { color: C.sub }]}>({count})</Text>}
     </View>
@@ -40,7 +40,7 @@ export function PlaceCard({ place, C, onDirections }: {
 
       <View style={styles.body}>
         <View style={styles.titleRow}>
-          <Ionicons
+          <Icon
             name={isStop ? 'bus-outline' : 'location-outline'}
             size={14}
             color={ORANGE}
@@ -64,7 +64,7 @@ export function PlaceCard({ place, C, onDirections }: {
           activeOpacity={0.8}
           onPress={() => onDirections(place)}
         >
-          <Ionicons name="navigate" size={14} color="#FFFFFF" />
+          <Icon name="navigate" size={14} color="#FFFFFF" />
           <Text style={styles.directionsText}>Directions</Text>
         </TouchableOpacity>
       </View>

@@ -23,7 +23,6 @@ import {
   LineLayer,
   PointAnnotation,
 } from "@rnmapbox/maps";
-import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -37,6 +36,8 @@ import { UnifiedLocation, useJourneyStore } from "@/store/journeyStore";
 import { extractFares, formatDurationParts, formatEta, getRouteColor, sToShort } from "@/utils/mapHelpers";
 import { rankRoutes, type RouteRanking } from "@/utils/rankRoutes";
 import { departureMeta } from "@/utils/departures";
+import { Icon } from "@/components/icons/Icon";
+import { StopTypeBadge } from "@/components/app/StopTypeBadge";
 
 const NativeShapeSource = ShapeSource as unknown as React.ComponentType<any>;
 const NativeLineLayer = LineLayer as unknown as React.ComponentType<any>;
@@ -313,7 +314,7 @@ function DepartureTimeSheet({
             <Text style={{ color: textMuted, fontSize: 13, flex: 1 }}>
               Based on intervals, wait times, and service status
             </Text>
-            <Ionicons name="checkmark" size={18} color={HEADER_BLUE} />
+            <Icon name="checkmark" size={18} color={HEADER_BLUE} />
           </View>
 
           {/* 4-Column KakaoMap Wheel Drum Picker */}
@@ -440,7 +441,7 @@ function ProportionalDurationBar({
             ]}
           >
             <View style={s.propTransitIconCircle}>
-              <Ionicons name={modeIcon as any} size={11} color={color} />
+              <Icon name={modeIcon as any} size={11} color={color} />
             </View>
             <Text style={s.propTransitText} numberOfLines={1}>
               {mins}
@@ -822,7 +823,7 @@ export default function MultiModalRoutePlannerScreen() {
                         { borderColor: legColor },
                       ]}
                     >
-                      <Ionicons
+                      <Icon
                         name={
                           leg.mode === "RAIL" || leg.mode === "SUBWAY"
                             ? "train"
@@ -936,7 +937,7 @@ export default function MultiModalRoutePlannerScreen() {
             },
           ]}
         >
-          <Ionicons name="navigate" size={15} color={textPrimary} />
+          <Icon name="navigate" size={15} color={textPrimary} />
           <Text style={[s.startNavText, { color: textPrimary }]}>
             Start Navigation
           </Text>
@@ -974,7 +975,7 @@ export default function MultiModalRoutePlannerScreen() {
                   }}
                   style={[s.modeIconPill, isAct && s.modeIconPillActive]}
                 >
-                  <Ionicons
+                  <Icon
                     name={m.icon as any}
                     size={20}
                     color={isAct ? HEADER_BLUE : "rgba(255,255,255,0.85)"}
@@ -989,7 +990,7 @@ export default function MultiModalRoutePlannerScreen() {
             hitSlop={12}
             style={s.headerCloseBtn}
           >
-            <Ionicons name="close" size={24} color="#FFFFFF" />
+            <Icon name="close" size={24} color="#FFFFFF" />
           </Pressable>
         </View>
 
@@ -1006,7 +1007,7 @@ export default function MultiModalRoutePlannerScreen() {
               <Text style={s.compactPillText} numberOfLines={1}>
                 {fromLoc.name}
               </Text>
-              <Ionicons
+              <Icon
                 name="arrow-forward"
                 size={14}
                 color="rgba(255,255,255,0.85)"
@@ -1021,7 +1022,7 @@ export default function MultiModalRoutePlannerScreen() {
               hitSlop={10}
               style={s.compactMoreBtn}
             >
-              <Ionicons name="swap-vertical" size={18} color="#FFFFFF" />
+              <Icon name="swap-vertical" size={18} color="#FFFFFF" />
             </Pressable>
           </View>
         ) : (
@@ -1056,7 +1057,7 @@ export default function MultiModalRoutePlannerScreen() {
 
             <View style={s.rightInputActions}>
               <Pressable onPress={swapEndpoints} hitSlop={10} style={s.swapBtn}>
-                <Ionicons name="swap-vertical" size={20} color="#FFFFFF" />
+                <Icon name="swap-vertical" size={20} color="#FFFFFF" />
               </Pressable>
               {fromLoc && toLoc && (
                 <Pressable
@@ -1068,7 +1069,7 @@ export default function MultiModalRoutePlannerScreen() {
                   hitSlop={10}
                   style={s.swapBtn}
                 >
-                  <Ionicons name="chevron-up" size={20} color="#FFFFFF" />
+                  <Icon name="chevron-up" size={20} color="#FFFFFF" />
                 </Pressable>
               )}
             </View>
@@ -1088,7 +1089,7 @@ export default function MultiModalRoutePlannerScreen() {
                   onPress={() => handleSelectEndpoint(currentLocation)}
                   style={s.quickPinBtn}
                 >
-                  <Ionicons name="locate" size={15} color={ORANGE} />
+                  <Icon name="locate" size={15} color={ORANGE} />
                   <Text style={[s.quickPinText, { color: ORANGE }]}>
                     Current Location
                   </Text>
@@ -1107,7 +1108,7 @@ export default function MultiModalRoutePlannerScreen() {
                   }
                   style={s.quickPinBtn}
                 >
-                  <Ionicons name="home" size={15} color={textMuted} />
+                  <Icon name="home" size={15} color={textMuted} />
                   <Text style={[s.quickPinText, { color: textPrimary }]}>
                     Home
                   </Text>
@@ -1126,7 +1127,7 @@ export default function MultiModalRoutePlannerScreen() {
                   }
                   style={s.quickPinBtn}
                 >
-                  <Ionicons name="business" size={15} color={textMuted} />
+                  <Icon name="business" size={15} color={textMuted} />
                   <Text style={[s.quickPinText, { color: textPrimary }]}>
                     Work/School
                   </Text>
@@ -1156,14 +1157,7 @@ export default function MultiModalRoutePlannerScreen() {
                     onPress={() => handleSelectEndpoint(st)}
                     style={[s.autoRow, { borderBottomColor: borderCol }]}
                   >
-                    <View
-                      style={[
-                        s.autoIcon,
-                        { backgroundColor: "rgba(37, 99, 235, 0.12)" },
-                      ]}
-                    >
-                      <Ionicons name="bus" size={16} color="#2563EB" />
-                    </View>
+                    <StopTypeBadge stop={st as any} size={34} />
                     <View style={{ flex: 1 }}>
                       <Text
                         style={[s.autoTitle, { color: textPrimary }]}
@@ -1198,7 +1192,7 @@ export default function MultiModalRoutePlannerScreen() {
                       {resolvingId === p.place_id ? (
                         <ActivityIndicator size="small" color={ORANGE} />
                       ) : (
-                        <Ionicons
+                        <Icon
                           name="location-outline"
                           size={16}
                           color={textPrimary}
@@ -1235,7 +1229,7 @@ export default function MultiModalRoutePlannerScreen() {
                       { backgroundColor: dark ? "#27272A" : "#F3F4F6" },
                     ]}
                   >
-                    <Ionicons name="time-outline" size={16} color={textMuted} />
+                    <Icon name="time-outline" size={16} color={textMuted} />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text
@@ -1318,7 +1312,7 @@ export default function MultiModalRoutePlannerScreen() {
               }}
               style={s.timeSelectBtn}
             >
-              <Ionicons name="time-outline" size={14} color={ORANGE} />
+              <Icon name="time-outline" size={14} color={ORANGE} />
               <Text style={[s.timeSelectText, { color: textPrimary }]}>
                 {timeConfig.label} ⌄
               </Text>
@@ -1376,7 +1370,7 @@ export default function MultiModalRoutePlannerScreen() {
                       </Text>
                     </View>
                     {active && (
-                      <Ionicons name="checkmark" size={18} color={ORANGE} />
+                      <Icon name="checkmark" size={18} color={ORANGE} />
                     )}
                   </Pressable>
                 );
@@ -1415,7 +1409,7 @@ export default function MultiModalRoutePlannerScreen() {
                   <View key={tabKey} style={{ width: SCREEN_W, flex: 1 }}>
                     {pageRoutes.length === 0 ? (
                       <View style={s.centerBox}>
-                        <Ionicons
+                        <Icon
                           name="trail-sign-outline"
                           size={42}
                           color={textMuted}
@@ -1632,7 +1626,7 @@ export default function MultiModalRoutePlannerScreen() {
               { backgroundColor: cardBg, borderColor: borderCol },
             ]}
           >
-            <Ionicons name="time-outline" size={16} color={textPrimary} />
+            <Icon name="time-outline" size={16} color={textPrimary} />
             <Text style={[s.mapLaterText, { color: textPrimary }]}>
               {timeConfig.time ? timeConfig.label : "Later"}
             </Text>
@@ -1785,7 +1779,7 @@ export default function MultiModalRoutePlannerScreen() {
                         onPress={() => handleStartJourney(rt)}
                         style={s.mapCardStartBtn}
                       >
-                        <Ionicons name="navigate" size={16} color="#FFFFFF" />
+                        <Icon name="navigate" size={16} color="#FFFFFF" />
                         <Text style={s.mapCardStartBtnText}>Start Navi</Text>
                       </Pressable>
                     </Pressable>

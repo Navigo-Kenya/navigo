@@ -18,6 +18,7 @@ import {
   useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const GREY   = "#8E8E93";
@@ -96,14 +97,14 @@ function PlaceRow({
         ) : null}
         <View style={s.placeFooter}>
           <View style={[s.listBadge, { backgroundColor: listColor + "22" }]}>
-            <Ionicons name={listIcon} size={10} color={listColor} />
+            <Icon name={listIcon} size={10} color={listColor} />
             <Text style={[s.listBadgeText, { color: listColor }]}>{listLabel}</Text>
           </View>
           <Text style={[s.placeDate, { color: C.sub }]}>{timeAgo(place.created_at)}</Text>
         </View>
       </View>
 
-      <Ionicons name="ellipsis-vertical" size={16} color={C.sub} style={{ marginLeft: 4 }} />
+      <Icon name="ellipsis-vertical" size={16} color={C.sub} style={{ marginLeft: 4 }} />
     </Pressable>
   );
 }
@@ -220,7 +221,7 @@ export default function SavedPlacesScreen() {
       {/* Search bar */}
       <View style={[s.searchWrap, { backgroundColor: C.card, borderBottomColor: C.hairline }]}>
         <View style={[s.searchRow, { backgroundColor: C.bg, borderColor: C.border }]}>
-          <Ionicons name="search-outline" size={16} color={C.sub} />
+          <Icon name="search-outline" size={16} color={C.sub} />
           <TextInput
             style={[s.searchInput, { color: C.text }]}
             placeholder="Search your places…"
@@ -231,7 +232,7 @@ export default function SavedPlacesScreen() {
           />
           {query.length > 0 && (
             <Pressable onPress={() => setQuery("")} hitSlop={8}>
-              <Ionicons name="close-circle" size={16} color={C.sub} />
+              <Icon name="close-circle" size={16} color={C.sub} />
             </Pressable>
           )}
         </View>
@@ -260,7 +261,7 @@ export default function SavedPlacesScreen() {
       {/* Place list */}
       {filtered.length === 0 ? (
         <View style={s.empty}>
-          <Ionicons name="bookmark-outline" size={52} color={C.sub} />
+          <Icon name="bookmark-outline" size={52} color={C.sub} />
           <Text style={[s.emptyTitle, { color: C.text }]}>
             {query ? `No results for "${query}"` : "Nothing here yet"}
           </Text>

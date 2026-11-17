@@ -1,5 +1,5 @@
-import { Ionicons } from "@expo/vector-icons";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Icon } from "@/components/icons/Icon";
 
 export const EAST_AFRICA = [
   { code: "KE", name: "Kenya",       flag: "🇰🇪", dial: "+254", placeholder: "712 345 678" },
@@ -53,7 +53,7 @@ export function CountryPickerModal({ visible, selected, C, bottomInset, onSelect
           <Text style={[styles.title, { color: C.text }]}>Select country</Text>
           <Pressable onPress={onClose} hitSlop={10}>
             <View style={[styles.closeBtn, { backgroundColor: C.inputBg }]}>
-              <Ionicons name="close" size={18} color={C.text} />
+              <Icon name="close" size={18} color={C.text} />
             </View>
           </Pressable>
         </View>
@@ -80,7 +80,7 @@ export function CountryPickerModal({ visible, selected, C, bottomInset, onSelect
                 </View>
                 {isSelected && (
                   <View style={[styles.check, { backgroundColor: C.accent }]}>
-                    <Ionicons name="checkmark" size={12} color="#FFF" />
+                    <Icon name="checkmark" size={12} color="#FFF" />
                   </View>
                 )}
               </Pressable>

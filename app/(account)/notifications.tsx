@@ -19,6 +19,7 @@ import {
   useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const GREEN  = "#10B981";
@@ -72,7 +73,7 @@ function ToggleRow({ icon, label, description, value, onChange, C, disabled }: {
 }) {
   return (
     <View style={[s.row, disabled && { pointerEvents: "none" }]}>
-      <Ionicons name={icon} size={18} color={C.icon} style={{ marginTop: description ? 2 : 0 }} />
+      <Icon name={icon} size={18} color={C.icon} style={{ marginTop: description ? 2 : 0 }} />
       <View style={s.rowBody}>
         <Text style={[s.rowLabel, { color: C.text }]}>{label}</Text>
         {description ? <Text style={[s.rowDesc, { color: C.subText }]}>{description}</Text> : null}
@@ -96,7 +97,7 @@ function OsPermissionBanner({ granted, C }: { granted: boolean | null; C: Return
   if (granted) {
     return (
       <View style={[s.permBanner, { backgroundColor: C.permGrantedBg }]}>
-        <Ionicons name="checkmark-circle" size={18} color={GREEN} />
+        <Icon name="checkmark-circle" size={18} color={GREEN} />
         <Text style={[s.permText, { color: C.permGrantedText }]}>
           Notifications are enabled on this device
         </Text>
@@ -109,11 +110,11 @@ function OsPermissionBanner({ granted, C }: { granted: boolean | null; C: Return
       onPress={() => Linking.openSettings()}
       style={({ pressed }) => [s.permBanner, { backgroundColor: C.permDeniedBg, opacity: pressed ? 0.75 : 1 }]}
     >
-      <Ionicons name="alert-circle" size={18} color={C.permDeniedText} />
+      <Icon name="alert-circle" size={18} color={C.permDeniedText} />
       <Text style={[s.permText, { color: C.permDeniedText, flex: 1 }]}>
         Notifications are blocked by your device. Tap to open Settings and allow them.
       </Text>
-      <Ionicons name="chevron-forward" size={14} color={C.permDeniedText} />
+      <Icon name="chevron-forward" size={14} color={C.permDeniedText} />
     </Pressable>
   );
 }
@@ -261,7 +262,7 @@ export default function NotificationsScreen() {
         <View style={[s.masterCard, { backgroundColor: C.masterBg }]}>
           <View style={s.masterLeft}>
             <View style={[s.masterIconBox, { backgroundColor: sub ? C.switchOff : ORANGE }]}>
-              <Ionicons name="notifications" size={20} color="#FFFFFF" />
+              <Icon name="notifications" size={20} color="#FFFFFF" />
             </View>
             <View style={{ gap: 2 }}>
               <Text style={[s.masterLabel, { color: C.text }]}>Push Notifications</Text>

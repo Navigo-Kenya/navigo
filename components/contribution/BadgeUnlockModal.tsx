@@ -1,8 +1,8 @@
 // components/contribution/BadgeUnlockModal.tsx
 // Animated celebration modal replacing Alert.alert for badge + points feedback.
-import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useRef } from "react";
 import { Animated, Modal, Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const GREEN  = "#10B981";
@@ -58,7 +58,7 @@ export default function BadgeUnlockModal({ visible, onDismiss, pointsAwarded = 0
 
           {/* Pulsing icon ring */}
           <Animated.View style={[s.iconRing, { backgroundColor: accent + "1E", transform: [{ scale: pulse }] }]}>
-            <Ionicons name={hasBadge ? "ribbon" : "star"} size={40} color={accent} />
+            <Icon name={hasBadge ? "ribbon" : "star"} size={40} color={accent} />
           </Animated.View>
 
           {hasBadge ? (
@@ -75,7 +75,7 @@ export default function BadgeUnlockModal({ visible, onDismiss, pointsAwarded = 0
 
           {pointsAwarded > 0 && (
             <View style={[s.pill, { backgroundColor: GREEN + "1A" }]}>
-              <Ionicons name="add-circle" size={15} color={GREEN} />
+              <Icon name="add-circle" size={15} color={GREEN} />
               <Text style={[s.pillText, { color: GREEN }]}>+{pointsAwarded} Safiri Points</Text>
             </View>
           )}

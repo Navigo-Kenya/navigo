@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import { JSX } from "react";
 import {
     Pressable,
@@ -8,6 +7,8 @@ import {
     TextInput,
     View,
 } from "react-native";
+import { Icon } from "@/components/icons/Icon";
+import { StopTypeBadge } from "@/components/app/StopTypeBadge";
 
 const BLACK = "#000000";
 
@@ -37,7 +38,7 @@ export default function SearchOverlay({
       <Pressable style={styles.backdrop} onPress={() => setSearchOpen(false)} />
       <View style={styles.searchCard}>
         <View style={styles.searchRow}>
-          <Ionicons name="search-outline" size={18} color={BLACK} />
+          <Icon name="search-outline" size={18} color={BLACK} />
           <TextInput
             autoFocus
             placeholder="Search stops"
@@ -49,7 +50,7 @@ export default function SearchOverlay({
           />
           {searchQ.length > 0 && (
             <Pressable onPress={() => setSearchQ("")} hitSlop={8}>
-              <Ionicons name="close-circle-outline" size={18} color="#6B7280" />
+              <Icon name="close-circle-outline" size={18} color="#6B7280" />
             </Pressable>
           )}
         </View>
@@ -64,7 +65,7 @@ export default function SearchOverlay({
                 style={styles.searchResult}
                 onPress={() => onSelect(s)}
               >
-                <Ionicons name="bus-outline" size={16} color={BLACK} />
+                <StopTypeBadge stop={s as any} size={22} />
                 <Text style={{ color: BLACK, flex: 1 }} numberOfLines={1}>
                   {s.name}
                 </Text>

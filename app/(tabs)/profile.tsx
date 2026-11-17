@@ -10,6 +10,7 @@ import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { useEffect } from "react";
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View, useColorScheme } from "react-native";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE  = "#FF6F00";
 const BLACK   = "#1C1C1E";
@@ -36,7 +37,7 @@ function Row({
       accessibilityRole="button"
     >
       <View style={s.rowLeft}>
-        <Ionicons name={icon} size={18} color={C.icon} />
+        <Icon name={icon} size={18} color={C.icon} />
         <Text style={[s.rowLabel, { color: C.text }]}>{label}</Text>
       </View>
       <View style={s.rowRight}>
@@ -45,7 +46,7 @@ function Row({
         ) : (
           value
         )}
-        <Ionicons name="chevron-forward" size={18} color={GREY} />
+        <Icon name="chevron-forward" size={18} color={GREY} />
       </View>
     </Pressable>
   );
@@ -322,7 +323,7 @@ export default function Profile() {
           style={({ pressed }) => [s.linkBtn, { opacity: pressed ? 0.5 : 1 }]}
           accessibilityRole="button"
         >
-          <Ionicons name="document-text-outline" size={18} color={C.icon} />
+          <Icon name="document-text-outline" size={18} color={C.icon} />
           <Text style={[s.linkText, { color: C.text }]}>Terms & Privacy</Text>
         </Pressable>
         <Pressable
@@ -330,7 +331,7 @@ export default function Profile() {
           style={({ pressed }) => [s.linkBtn, { opacity: pressed ? 0.5 : 1 }]}
           accessibilityRole="button"
         >
-          <Ionicons name="log-out-outline" size={18} color="#FF3B30" />
+          <Icon name="log-out-outline" size={18} color="#FF3B30" />
           <Text style={[s.linkText, { color: "#FF3B30" }]}>Sign out</Text>
         </Pressable>
         <Text style={s.version}>v0.1.0</Text>

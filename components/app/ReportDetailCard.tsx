@@ -10,7 +10,6 @@ import { ReportTypeIcon } from "@/components/icons/ReportTypeIcon";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { useAuthStore } from "@/store/authStore";
 import { useReportVoteStore } from "@/store/reportVoteStore";
-import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import React, { useRef, useState } from "react";
@@ -25,6 +24,7 @@ import {
   useColorScheme,
 } from "react-native";
 import { MapSheet, type MapSheetHandle } from "./MapSheet";
+import { Icon } from "@/components/icons/Icon";
 
 const { height: SH } = Dimensions.get("window");
 const ORANGE = "#FF6F00";
@@ -200,7 +200,7 @@ export default function ReportDetailCard({ report, clusterCount = 1, onClose, on
         accessibilityRole="button"
         accessibilityLabel="Close"
       >
-        <Ionicons name="close" size={16} color={C.sub} />
+        <Icon name="close" size={16} color={C.sub} />
       </PressableScale>
     </View>
   );
@@ -258,7 +258,7 @@ export default function ReportDetailCard({ report, clusterCount = 1, onClose, on
             <View style={[s.initialsCircle, { backgroundColor: rColor + "22", borderColor: rColor + "33" }]}>
               {report.reporter
                 ? <Text style={[s.initials, { color: rColor }]}>{initialsOf(report.reporter.name)}</Text>
-                : <Ionicons name="person" size={16} color={rColor} />}
+                : <Icon name="person" size={16} color={rColor} />}
             </View>
             <View style={s.reporterText}>
               <Text style={[s.reporterName, { color: C.text }]} numberOfLines={1}>
@@ -274,7 +274,7 @@ export default function ReportDetailCard({ report, clusterCount = 1, onClose, on
               accessibilityRole="button"
               accessibilityLabel="Share this alert"
             >
-              <Ionicons name="share-outline" size={15} color={C.text} />
+              <Icon name="share-outline" size={15} color={C.text} />
               <Text style={[s.shareTxt, { color: C.text }]}>Share</Text>
             </PressableScale>
           </View>
@@ -287,7 +287,7 @@ export default function ReportDetailCard({ report, clusterCount = 1, onClose, on
           <Pressable style={s.wallBackdrop} onPress={() => setShowAuthWall(false)} />
           <View style={[s.wallSheet, { backgroundColor: dark ? "#18181B" : "#FFFFFF" }]}>
             <View style={[s.wallIcon, { backgroundColor: ORANGE + "18" }]}>
-              <Ionicons name="lock-closed" size={28} color={ORANGE} />
+              <Icon name="lock-closed" size={28} color={ORANGE} />
             </View>
             <Text style={[s.wallTitle, { color: C.text }]}>Join the conversation</Text>
             <Text style={[s.wallSub, { color: C.sub }]}>
@@ -299,7 +299,7 @@ export default function ReportDetailCard({ report, clusterCount = 1, onClose, on
               style={s.wallPrimary}
             >
               <Text style={s.wallPrimaryTxt}>Sign In</Text>
-              <Ionicons name="arrow-forward" size={15} color="#fff" />
+              <Icon name="arrow-forward" size={15} color="#fff" />
             </PressableScale>
             <PressableScale
               containerStyle={{ alignSelf: "stretch" }}
@@ -346,7 +346,7 @@ function VoteButton({
           : { backgroundColor: bg, borderColor: "transparent" },
       ]}
     >
-      <Ionicons name={active ? icon : `${icon}-outline`} size={18} color={active ? color : text} />
+      <Icon name={active ? icon : `${icon}-outline`} size={18} color={active ? color : text} />
       <Text style={[s.voteLabel, { color: active ? color : text }]}>{label}</Text>
       <View style={[s.countPill, { backgroundColor: active ? color : text + "14" }]}>
         <Text style={[s.countTxt, { color: active ? "#FFFFFF" : text }]}>{count}</Text>

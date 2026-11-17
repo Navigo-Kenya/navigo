@@ -1,7 +1,6 @@
 import { ScreenHeader } from "@/components/app/ScreenHeader";
 import { Badge } from "@/services/contribution";
 import { useContributionStore } from "@/store/contributionStore";
-import { Ionicons } from "@expo/vector-icons";
 import { useEffect } from "react";
 import {
   Alert,
@@ -13,6 +12,7 @@ import {
   View,
   useColorScheme,
 } from "react-native";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const GREY   = "#8E8E93";
@@ -86,7 +86,7 @@ function BadgeCard({
           { backgroundColor: earned ? badge.color + "22" : C.border + "60" },
         ]}
       >
-        <Ionicons
+        <Icon
           name={badge.icon as any}
           size={28}
           color={earned ? badge.color : GREY}
@@ -109,7 +109,7 @@ function BadgeCard({
       )}
       {!earned && (
         <View style={s.lockOverlay}>
-          <Ionicons name="lock-closed" size={12} color={GREY} />
+          <Icon name="lock-closed" size={12} color={GREY} />
         </View>
       )}
     </Pressable>

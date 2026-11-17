@@ -1,6 +1,5 @@
 import { ScreenHeader } from "@/components/app/ScreenHeader";
 import { useContributionStore } from "@/store/contributionStore";
-import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -16,6 +15,7 @@ import {
   View,
   useColorScheme,
 } from "react-native";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const GREY   = "#8E8E93";
@@ -123,21 +123,21 @@ export default function AddPhotoScreen() {
           </View>
         ) : (
           <View style={[s.pickerPlaceholder, { backgroundColor: C.card, borderColor: C.border }]}>
-            <Ionicons name="camera-outline" size={48} color={C.sub} />
+            <Icon name="camera-outline" size={48} color={C.sub} />
             <Text style={[s.placeholderText, { color: C.sub }]}>Add a stop photo</Text>
             <View style={s.pickerBtns}>
               <Pressable
                 style={[s.pickerBtn, { backgroundColor: ORANGE }]}
                 onPress={() => pickImage(true)}
               >
-                <Ionicons name="camera" size={18} color="#FFF" />
+                <Icon name="camera" size={18} color="#FFF" />
                 <Text style={s.pickerBtnText}>Camera</Text>
               </Pressable>
               <Pressable
                 style={[s.pickerBtn, { backgroundColor: C.input }]}
                 onPress={() => pickImage(false)}
               >
-                <Ionicons name="images-outline" size={18} color={C.text} />
+                <Icon name="images-outline" size={18} color={C.text} />
                 <Text style={[s.pickerBtnText, { color: C.text }]}>Library</Text>
               </Pressable>
             </View>
@@ -174,7 +174,7 @@ export default function AddPhotoScreen() {
             <ActivityIndicator color="#FFF" size="small" />
           ) : (
             <>
-              <Ionicons name="cloud-upload-outline" size={18} color="#FFF" />
+              <Icon name="cloud-upload-outline" size={18} color="#FFF" />
               <Text style={s.submitText}>Submit for Review</Text>
             </>
           )}

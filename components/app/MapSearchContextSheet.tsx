@@ -35,6 +35,7 @@ import { StopTypeGlyph } from "@/components/icons/NavigoIcons";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { resolveStopCategory } from "./StopsLayer";
 import { MapSheet, type MapSheetHandle } from "./MapSheet";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const BLUE = "#2563EB";
@@ -203,7 +204,7 @@ function ResultsSheet({
       ) : count === 0 ? (
         <View style={s.empty}>
           <View style={[s.emptyDisc, { backgroundColor: C.chip }]}>
-            <Ionicons name="search-outline" size={26} color={C.sub} />
+            <Icon name="search-outline" size={26} color={C.sub} />
           </View>
           <Text style={[s.emptyTitle, { color: C.text }]}>Nothing found for “{query}”</Text>
           <Text style={[s.emptySub, { color: C.sub }]}>
@@ -291,7 +292,7 @@ function ResultsSheet({
                     {[rt.route_long_name, rt.agency_name].filter(Boolean).join(" · ")}
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color={C.sub} />
+                <Icon name="chevron-forward" size={18} color={C.sub} />
               </PressableScale>
             );
           }
@@ -405,7 +406,7 @@ function PlaceSheet({ place: base, onFocusCoords, userLat, userLng }: Props & { 
         accessibilityRole="button"
         accessibilityLabel="Back to results"
       >
-        <Ionicons name="close" size={16} color={C.sub} />
+        <Icon name="close" size={16} color={C.sub} />
       </PressableScale>
     </View>
   );
@@ -416,7 +417,7 @@ function PlaceSheet({ place: base, onFocusCoords, userLat, userLng }: Props & { 
         <Text style={[s.bigBtnText, { color: C.text }]}>From here</Text>
       </PressableScale>
       <PressableScale containerStyle={{ flex: 1.4 }} onPress={() => go("to")} style={[s.bigBtn, { backgroundColor: ORANGE }]}>
-        <Ionicons name="navigate" size={16} color="#FFFFFF" />
+        <Icon name="navigate" size={16} color="#FFFFFF" />
         <Text style={[s.bigBtnText, { color: "#FFFFFF" }]}>Directions</Text>
       </PressableScale>
     </View>
@@ -541,9 +542,9 @@ function InfoRow({
 }) {
   const body = (
     <View style={[s.infoRow, { borderBottomColor: line }]}>
-      <Ionicons name={icon} size={18} color={color} />
+      <Icon name={icon} size={18} color={color} />
       <Text style={[s.infoText, { color: textColor }]} numberOfLines={2}>{text}</Text>
-      {onPress && <Ionicons name="chevron-forward" size={14} color={color} style={{ opacity: 0.6 }} />}
+      {onPress && <Icon name="chevron-forward" size={14} color={color} style={{ opacity: 0.6 }} />}
     </View>
   );
   return onPress ? (
@@ -564,7 +565,7 @@ function HoursRow({ hours, openNow, C }: { hours: string[]; openNow?: boolean; C
       accessibilityLabel={open ? "Hide opening hours" : "Show opening hours"}
     >
       <View style={[s.infoRow, { borderBottomColor: C.line, alignItems: "flex-start" }]}>
-        <Ionicons name="time-outline" size={18} color={C.sub} />
+        <Icon name="time-outline" size={18} color={C.sub} />
         <View style={{ flex: 1, gap: 6 }}>
           <Text style={[s.infoText, { color: C.text }]}>
             {openNow != null && (
@@ -590,7 +591,7 @@ function HoursRow({ hours, openNow, C }: { hours: string[]; openNow?: boolean; C
               );
             })}
         </View>
-        <Ionicons name={open ? "chevron-up" : "chevron-down"} size={14} color={C.sub} style={{ marginTop: 2 }} />
+        <Icon name={open ? "chevron-up" : "chevron-down"} size={14} color={C.sub} style={{ marginTop: 2 }} />
       </View>
     </PressableScale>
   );
@@ -664,7 +665,7 @@ function PlaceFacts({ place, sub, showCategory }: { place: ExplorePlaceItem; sub
   if (place.rating != null) {
     bits.push(
       <View key="r" style={s.ratingWrap}>
-        <Ionicons name="star" size={12} color="#F59E0B" />
+        <Icon name="star" size={12} color="#F59E0B" />
         <Text style={[s.fact, { color: sub }]}>
           <Text style={s.ratingNum}>{place.rating.toFixed(1)}</Text>
           {place.reviewCount != null ? ` (${place.reviewCount.toLocaleString()})` : ""}
@@ -705,7 +706,7 @@ function RoundAction({
   return (
     <PressableScale onPress={onPress} hitSlop={6} accessibilityRole="button" accessibilityLabel={label} style={s.roundActionWrap}>
       <View style={[s.roundAction, { backgroundColor: bg }]}>
-        <Ionicons name={icon} size={16} color={fg} />
+        <Icon name={icon} size={16} color={fg} />
       </View>
       {withLabel && <Text style={[s.roundActionLabel, { color: fg === "#FFFFFF" ? BLUE : fg }]}>{label}</Text>}
     </PressableScale>

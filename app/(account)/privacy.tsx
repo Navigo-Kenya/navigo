@@ -19,6 +19,7 @@ import {
   useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const GREY   = "#8E8E93";
@@ -81,7 +82,7 @@ function NavRow({ icon, label, description, value, onPress, C, danger }: {
         pressed && onPress ? { backgroundColor: C.pressed, marginHorizontal: -14, paddingHorizontal: 14 } : null,
       ]}
     >
-      <Ionicons name={icon} size={18} color={danger ? DANGER : C.icon} />
+      <Icon name={icon} size={18} color={danger ? DANGER : C.icon} />
       <View style={s.rowBody}>
         <Text style={[s.rowLabel, { color: danger ? DANGER : C.text }]}>{label}</Text>
         {description ? <Text style={[s.rowDesc, { color: C.subText }]}>{description}</Text> : null}
@@ -91,7 +92,7 @@ function NavRow({ icon, label, description, value, onPress, C, danger }: {
           ? <Text style={[s.rowValue, { color: C.subText }]}>{value}</Text>
           : value
       ) : null}
-      {onPress ? <Ionicons name="chevron-forward" size={16} color={danger ? DANGER : C.subText} style={{ marginLeft: 4 }} /> : null}
+      {onPress ? <Icon name="chevron-forward" size={16} color={danger ? DANGER : C.subText} style={{ marginLeft: 4 }} /> : null}
     </Pressable>
   );
 }
@@ -106,7 +107,7 @@ function ToggleRow({ icon, label, description, value, onChange, C }: {
 }) {
   return (
     <View style={s.row}>
-      <Ionicons name={icon} size={18} color={C.icon} style={{ marginTop: description ? 2 : 0 }} />
+      <Icon name={icon} size={18} color={C.icon} style={{ marginTop: description ? 2 : 0 }} />
       <View style={s.rowBody}>
         <Text style={[s.rowLabel, { color: C.text }]}>{label}</Text>
         {description ? <Text style={[s.rowDesc, { color: C.subText }]}>{description}</Text> : null}
@@ -295,7 +296,7 @@ export default function Privacy() {
               style={[s.permBanner, { backgroundColor: C.softOrange }]}
               onPress={() => Linking.openSettings()}
             >
-              <Ionicons name="warning-outline" size={16} color={ORANGE} />
+              <Icon name="warning-outline" size={16} color={ORANGE} />
               <View style={{ flex: 1, gap: 2 }}>
                 <Text style={[s.permBannerTitle, { color: ORANGE }]}>
                   Location access not granted
@@ -304,7 +305,7 @@ export default function Privacy() {
                   Navigo can't show your position or nearby stops. Tap to open Settings and enable location.
                 </Text>
               </View>
-              <Ionicons name="chevron-forward" size={15} color={ORANGE} />
+              <Icon name="chevron-forward" size={15} color={ORANGE} />
             </Pressable>
           )}
           <ToggleRow
@@ -420,7 +421,7 @@ export default function Privacy() {
 
         {/* ── Privacy note ─────────────────────────────────────────────────── */}
         <View style={s.legalNote}>
-          <Ionicons name="information-circle-outline" size={14} color={C.subText} />
+          <Icon name="information-circle-outline" size={14} color={C.subText} />
           <Text style={[s.legalText, { color: C.subText }]}>
             Your data is processed in accordance with our Privacy Policy. Location data is never sold to third parties.
           </Text>
