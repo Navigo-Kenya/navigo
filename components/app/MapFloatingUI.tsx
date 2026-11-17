@@ -60,8 +60,11 @@ const TAB_BAR_CLEARANCE = 74;
 const FALLBACK_LAT = -1.2864;
 const FALLBACK_LNG = 36.8172;
 
-/** Quick-search chips. Icons come from PlaceCategoryIcon, keyed by `key`. */
-/** Category chips; `poi` is the POI category they search (config/pois.php). */
+/**
+ * Category chips under the search bar, in the results sheet and on the search
+ * screen. `poi` is the POI category they search (api config/pois.php); icons
+ * come from PlaceCategoryIcon, keyed by `key`. Everyday needs first.
+ */
 export const QUICK_CATEGORIES: readonly {
   key: PlaceCategoryKey;
   poi: PoiCategory;
@@ -76,6 +79,18 @@ export const QUICK_CATEGORIES: readonly {
   { key: "store",      poi: "grocery",  label: "Groceries",   color: "#7C3AED" },
   { key: "pharmacy",   poi: "pharmacy", label: "Pharmacy",    color: "#16A34A" },
   { key: "atm",        poi: "bank",     label: "ATM / Bank",  color: "#0D9488" },
+  // Colours from poiCategories.ts, so a chip matches its map pins.
+  { key: "hotel",         poi: "lodging",       label: "Hotels",        color: "#0891B2" },
+  { key: "mall",          poi: "mall",          label: "Malls",         color: "#7C3AED" },
+  { key: "shopping",      poi: "shopping",      label: "Shopping",      color: "#A855F7" },
+  { key: "attraction",    poi: "attraction",    label: "Attractions",   color: "#0D9488" },
+  { key: "park",          poi: "park",          label: "Parks",         color: "#65A30D" },
+  { key: "entertainment", poi: "entertainment", label: "Entertainment", color: "#DB2777" },
+  { key: "nightlife",     poi: "nightlife",     label: "Nightlife",     color: "#9333EA" },
+  { key: "sport",         poi: "sport",         label: "Sport & gyms",  color: "#CA8A04" },
+  { key: "school",        poi: "education",     label: "Schools",       color: "#4F46E5" },
+  { key: "worship",       poi: "worship",       label: "Worship",       color: "#64748B" },
+  { key: "government",    poi: "government",    label: "Government",    color: "#475569" },
 ];
 
 /** Camera moved this far from the last category search: offer "Search this area". */
@@ -274,6 +289,9 @@ export default function MapFloatingUI({
   const [stackVisible, setStackVisible] = useState(4);
   const lastSheetY = useRef(Number.POSITIVE_INFINITY);
   const lastLiftedY = useRef(Number.POSITIVE_INFINITY);
+  // Results-sheet category row: keep the selected chip in view (a chip near
+  // the end, picked from the bar under the search box, would start off-screen).
+  const categoryTabsRef = useRef<ScrollView>(null);
   useEffect(() => {
     const applyTop = (y: number) => {
       lastSheetY.current = y;
@@ -500,6 +518,7 @@ export default function MapFloatingUI({
             {activeCategory ? (
               /* Category search: switch category in place (tabs would be empty). */
               <ScrollView
+                ref={categoryTabsRef}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.contextTabsRow}
@@ -509,6 +528,15 @@ export default function MapFloatingUI({
                   return (
                     <PressableScale
                       key={cat.key}
+                      onLayout={
+                        isSel
+                          ? (e) =>
+                              categoryTabsRef.current?.scrollTo({
+                                x: Math.max(0, e.nativeEvent.layout.x - 24),
+                                animated: true,
+                              })
+                          : undefined
+                      }
                       onPress={() => !isSel && handleCategoryPress(cat)}
                       style={[
                         styles.contextTab,
