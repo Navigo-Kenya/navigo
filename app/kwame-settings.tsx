@@ -4,11 +4,11 @@ import {
   Switch, ActivityIndicator, useColorScheme, Animated, Alert
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAudioPlayer, AudioModule } from 'expo-audio';
 import { useKwameSettingsStore } from '../store/kwameSettingsStore';
 import { AiService } from '../services/ai';
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = '#FF6F00';
 
@@ -93,11 +93,11 @@ function StepRow({
         <Text style={[s.stepLabel, { color: C.text }]}>{label}</Text>
         <View style={s.stepControls}>
           <TouchableOpacity onPress={onDec} hitSlop={10} style={[s.stepBtn, { backgroundColor: C.raised }]}>
-            <Ionicons name="remove" size={16} color={C.text} />
+            <Icon name="remove" size={16} color={C.text} />
           </TouchableOpacity>
           <Text style={[s.stepValue, { color: ORANGE }]}>{display}</Text>
           <TouchableOpacity onPress={onInc} hitSlop={10} style={[s.stepBtn, { backgroundColor: C.raised }]}>
-            <Ionicons name="add" size={16} color={C.text} />
+            <Icon name="add" size={16} color={C.text} />
           </TouchableOpacity>
         </View>
       </View>
@@ -112,9 +112,9 @@ function PreviewActionBtn({ isPreviewing, isPlaying, onToggle, C }: any) {
       {isPreviewing && !isPlaying ? (
         <ActivityIndicator size="small" color={ORANGE} />
       ) : isPlaying ? (
-        <Ionicons name="square" size={12} color="#FFF" />
+        <Icon name="square" size={12} color="#FFF" />
       ) : (
-        <Ionicons name="play" size={14} color={C.text} style={{ marginLeft: 2 }} />
+        <Icon name="play" size={14} color={C.text} style={{ marginLeft: 2 }} />
       )}
     </TouchableOpacity>
   );
@@ -212,7 +212,7 @@ export default function KwameSettingsScreen() {
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <View style={[s.header, { backgroundColor: C.bg }]}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={15} style={s.headerBack}>
-          <Ionicons name="chevron-back" size={28} color={C.text} />
+          <Icon name="chevron-back" size={28} color={C.text} />
         </TouchableOpacity>
         <View style={s.headerCenter}>
           <Text style={[s.headerTitle, { color: C.text }]}>Voice Settings</Text>
@@ -248,7 +248,7 @@ export default function KwameSettingsScreen() {
                   C={C} 
                 />
                 
-                {isSelected && <Ionicons name="checkmark" size={20} color={ORANGE} style={s.trailingCheck} />}
+                {isSelected && <Icon name="checkmark" size={20} color={ORANGE} style={s.trailingCheck} />}
               </TouchableOpacity>
             )
           })}
@@ -299,7 +299,7 @@ export default function KwameSettingsScreen() {
                   C={C} 
                 />
 
-                {isSelected && <Ionicons name="checkmark" size={20} color={ORANGE} style={s.trailingCheck} />}
+                {isSelected && <Icon name="checkmark" size={20} color={ORANGE} style={s.trailingCheck} />}
               </TouchableOpacity>
             )
           })}
@@ -320,13 +320,13 @@ export default function KwameSettingsScreen() {
                 style={[s.rowLayout, i !== STYLES.length - 1 && { borderBottomColor: C.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
               >
                 <View style={[s.styleIcon, { backgroundColor: isSelected ? ORANGE : C.raised }]}>
-                  <Ionicons name={item.icon as any} size={18} color={isSelected ? '#FFF' : C.sub} />
+                  <Icon name={item.icon as any} size={18} color={isSelected ? '#FFF' : C.sub} />
                 </View>
                 <View style={s.rowLabels}>
                   <Text style={[s.rowTitle, { color: isSelected ? ORANGE : C.text }]}>{item.label}</Text>
                   <Text style={[s.rowSubtitle, { color: C.sub }]}>{item.desc}</Text>
                 </View>
-                {isSelected && <Ionicons name="checkmark" size={20} color={ORANGE} style={s.trailingCheck} />}
+                {isSelected && <Icon name="checkmark" size={20} color={ORANGE} style={s.trailingCheck} />}
               </TouchableOpacity>
             )
           })}

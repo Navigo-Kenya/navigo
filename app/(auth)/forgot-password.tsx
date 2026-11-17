@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useRef, useState } from "react";
 import {
@@ -16,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AuthService } from "@/services/auth";
 import { useAuthStore } from "@/store/authStore";
+import { Icon } from "@/components/icons/Icon";
 
 export default function ForgotPassword() {
   const router = useRouter();
@@ -93,7 +93,7 @@ export default function ForgotPassword() {
           style={styles.back}
         >
           <View style={[styles.backBtn, { backgroundColor: C.inputBg }]}>
-            <Ionicons name="arrow-back" size={20} color={C.text} />
+            <Icon name="arrow-back" size={20} color={C.text} />
           </View>
         </Pressable>
 
@@ -107,7 +107,7 @@ export default function ForgotPassword() {
         {/* Header */}
         <View style={styles.header}>
           <View style={[styles.badge, { backgroundColor: C.accentBg }]}>
-            <Ionicons
+            <Icon
               name={step === "email" ? "mail-outline" : "lock-closed-outline"}
               size={28}
               color={C.accent}
@@ -125,7 +125,7 @@ export default function ForgotPassword() {
 
         {!!error && (
           <View style={[styles.errorBox, { backgroundColor: C.errBg, borderColor: C.errBd }]}>
-            <Ionicons name="alert-circle-outline" size={16} color={C.errText} />
+            <Icon name="alert-circle-outline" size={16} color={C.errText} />
             <Text style={[styles.errorText, { color: C.errText }]}>{error}</Text>
           </View>
         )}
@@ -201,7 +201,7 @@ export default function ForgotPassword() {
                   secureTextEntry={!showPw}
                 />
                 <Pressable onPress={() => setShowPw((v) => !v)} style={styles.eyeBtn}>
-                  <Ionicons
+                  <Icon
                     name={showPw ? "eye-off-outline" : "eye-outline"}
                     size={20}
                     color={C.textSub}

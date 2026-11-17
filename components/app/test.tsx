@@ -1,9 +1,9 @@
 // components/app/MapFloatingUI.tsx
 import { Step, mToNice, stepIcon } from "@/utils/mapHelpers";
-import { Ionicons } from "@expo/vector-icons";
 import React, { JSX, useRef } from "react";
 import { Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const RED    = "#FF3B30";
@@ -94,7 +94,7 @@ export default function MapFloatingUI({
   if (arrivalSoonShown) {
     topContent = (
       <View style={[s.arrivalBanner, { backgroundColor: cardBg }]}>
-        <Ionicons name="checkmark-circle" size={20} color={GREEN} />
+        <Icon name="checkmark-circle" size={20} color={GREEN} />
         <Text style={s.arrivalText}>{"You've arrived!"}</Text>
       </View>
     );
@@ -103,7 +103,7 @@ export default function MapFloatingUI({
     topContent = (
       <View style={s.offRouteBanner}>
         <View style={s.navIconBox}>
-          <Ionicons name={rerouting ? "refresh" : "warning"} size={20} color={WHITE} />
+          <Icon name={rerouting ? "refresh" : "warning"} size={20} color={WHITE} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={s.navInstruction} numberOfLines={1}>{rerouting ? "Recalculating…" : "Off route"}</Text>
@@ -114,7 +114,7 @@ export default function MapFloatingUI({
   } else if (wrongDirection && navigating) {
     topContent = (
       <View style={s.offRouteBanner}>
-        <View style={s.navIconBox}><Ionicons name="arrow-back-circle" size={20} color={WHITE} /></View>
+        <View style={s.navIconBox}><Icon name="arrow-back-circle" size={20} color={WHITE} /></View>
         <View style={{ flex: 1 }}>
           <Text style={s.navInstruction}>Wrong direction</Text>
           <Text style={s.navSub}>Turn around to get back on route</Text>
@@ -124,7 +124,7 @@ export default function MapFloatingUI({
   } else if (navigating && instructionText) {
     topContent = (
       <View style={s.navBanner}>
-        <View style={s.navIconBox}><Ionicons name={nextStep ? stepIcon(nextStep.type) : "navigate"} size={20} color={WHITE} /></View>
+        <View style={s.navIconBox}><Icon name={nextStep ? stepIcon(nextStep.type) : "navigate"} size={20} color={WHITE} /></View>
         <View style={{ flex: 1 }}>
           <Text style={s.navInstruction} numberOfLines={1}>{instructionText}</Text>
           {subText && <Text style={s.navSub}>{subText}</Text>}
@@ -136,31 +136,31 @@ export default function MapFloatingUI({
     const seg = activeJourney.route?.segments?.find((s: any) => s.mode !== "WALK");
     topContent = (
       <View style={[s.journeyBanner, { backgroundColor: cardBg }]}>
-        <Ionicons name="time-outline" size={20} color={BLUE} />
+        <Icon name="time-outline" size={20} color={BLUE} />
         <View style={{ flex: 1 }}>
           <Text style={[s.journeyText, { color: textColor }]} numberOfLines={1}>Waiting for Line {seg?.route_name}</Text>
           <Text style={[s.waitingSub, { color: GREY }]} numberOfLines={1}>At {seg?.from?.name}</Text>
         </View>
-        <Pressable onPress={onClearJourney} hitSlop={12} style={[s.bannerClose, { backgroundColor: lightBg }]}><Ionicons name="close" size={15} color={GREY} /></Pressable>
+        <Pressable onPress={onClearJourney} hitSlop={12} style={[s.bannerClose, { backgroundColor: lightBg }]}><Icon name="close" size={15} color={GREY} /></Pressable>
       </View>
     );
   } else if (activeJourney) {
     topContent = (
       <View style={[s.journeyBanner, { backgroundColor: cardBg }]}>
-        <Ionicons name="navigate-circle" size={20} color={ORANGE} />
+        <Icon name="navigate-circle" size={20} color={ORANGE} />
         <Text style={[s.journeyText, { color: textColor }]} numberOfLines={1}>To {activeJourney.toLoc.name}</Text>
-        <Pressable onPress={onClearJourney} hitSlop={12} style={[s.bannerClose, { backgroundColor: lightBg }]}><Ionicons name="close" size={15} color={GREY} /></Pressable>
+        <Pressable onPress={onClearJourney} hitSlop={12} style={[s.bannerClose, { backgroundColor: lightBg }]}><Icon name="close" size={15} color={GREY} /></Pressable>
       </View>
     );
   } else {
     topContent = (
       <Pressable style={[s.searchBar, { backgroundColor: cardBg }]} onPress={onOpenSearch}>
         <View style={s.searchTouchable}>
-          <Ionicons name="search" size={18} color={GREY} />
+          <Icon name="search" size={18} color={GREY} />
           <Text style={s.searchPlaceholder}>{"Search destination…"}</Text>
         </View>
         <Pressable onPress={onOpenKwame} style={[s.kwameChip, { backgroundColor: softOrange }]}>
-          <Ionicons name="sparkles" size={14} color={ORANGE} />
+          <Icon name="sparkles" size={14} color={ORANGE} />
           <Text style={s.kwameChipText}>AI</Text>
         </Pressable>
       </Pressable>
@@ -178,23 +178,23 @@ export default function MapFloatingUI({
       {/* Top Right Floating Stack */}
       <View style={[s.topRightStack, { top: (insets.top || 44) + 16 }]}>
         <Pressable onPress={onOpenReport} style={[s.navBtn, { backgroundColor: cardBg }]}>
-          <Ionicons name="megaphone-outline" size={22} color={RED} />
+          <Icon name="megaphone-outline" size={22} color={RED} />
         </Pressable>
         <Pressable onPress={onOpenKwame} style={[s.navBtn, { backgroundColor: cardBg }]}>
-          <Ionicons name="sparkles" size={22} color={ORANGE} />
+          <Icon name="sparkles" size={22} color={ORANGE} />
         </Pressable>
       </View>
 
       {/* Bottom Stack: Only Recenter & Status Pills */}
       <View style={[s.stack, { bottom: (insets.bottom || 0) + 36 + bottomOffset }]}>
         {gpsLost && navigating && (
-          <View style={s.gpsLostPill}><Ionicons name="warning-outline" size={12} color={WHITE} /><Text style={s.gpsLostText}>GPS lost</Text></View>
+          <View style={s.gpsLostPill}><Icon name="warning-outline" size={12} color={WHITE} /><Text style={s.gpsLostText}>GPS lost</Text></View>
         )}
         {navigating && currentSpeedKph != null && currentSpeedKph > 1 && (
           <View style={[s.speedPill, { backgroundColor: cardBg }]}><Text style={[s.speedVal, { color: textColor }]}>{currentSpeedKph}</Text><Text style={s.speedUnit}>km/h</Text></View>
         )}
         <Pressable onPress={handleNavBtn} style={[s.navBtn, { backgroundColor: cameraUnlocked ? BLUE : cardBg }]}>
-          <Ionicons name={cameraUnlocked ? "locate" : navigating ? "compass" : "navigate"} size={22} color={cameraUnlocked ? WHITE : navigating ? BLUE : ORANGE} />
+          <Icon name={cameraUnlocked ? "locate" : navigating ? "compass" : "navigate"} size={22} color={cameraUnlocked ? WHITE : navigating ? BLUE : ORANGE} />
         </Pressable>
         {cameraUnlocked && <View style={s.unlockedDot} />}
       </View>

@@ -1,7 +1,7 @@
 // components/app/BusDetailsSheet.tsx
 import { useReportSheetTop } from "./mapSheetInsets";
 import { sToMin } from "@/utils/mapHelpers";
-import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { MaterialIcons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
@@ -17,6 +17,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { BusStopMeta, SelectedBusInfo } from "@/components/map/BusLayer";
 import { BUS_DWELL_S, BUS_SPEED_KPH } from "@/components/map/BusLayer";
+import { Icon } from "@/components/icons/Icon";
 
 const { height: SCREEN_H } = Dimensions.get("window");
 const MAX_Y  = SCREEN_H * 0.08;
@@ -331,7 +332,7 @@ export default function BusDetailsSheet({ bus, following, onFollow, onDismiss }:
               </View>
 
               <Pressable onPress={onDismiss} hitSlop={12} style={s.closeBtn}>
-                <Ionicons name="close" size={20} color={C.sub} />
+                <Icon name="close" size={20} color={C.sub} />
               </Pressable>
             </View>
           )}

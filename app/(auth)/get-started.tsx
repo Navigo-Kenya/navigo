@@ -1,6 +1,5 @@
 
 // app/get-started.tsx
-import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { useAuthStore } from "@/store/authStore";
@@ -15,6 +14,7 @@ import {
   useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Icon } from "@/components/icons/Icon";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 
@@ -173,7 +173,7 @@ export default function GetStarted() {
           <Text style={styles.primaryText}>
             {isLast ? "Get Started" : "Next"}
           </Text>
-          <Ionicons
+          <Icon
             name={isLast ? "arrow-forward" : "chevron-forward"}
             size={18}
             color="#FFF"
@@ -243,7 +243,7 @@ function SlideItem({
             },
           ]}
         >
-          <Ionicons name={slide.icon} size={circleSize * 0.38} color={slide.iconColor} />
+          <Icon name={slide.icon} size={circleSize * 0.38} color={slide.iconColor} />
         </View>
       </View>
 

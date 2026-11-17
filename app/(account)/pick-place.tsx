@@ -2,7 +2,6 @@ import { MapService } from "@/services/map";
 import { useSavedStore } from "@/store/savedStore";
 import { UnifiedLocation } from "@/store/journeyStore";
 import { useStopSearch } from "@/hooks/useStopSearch";
-import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
@@ -19,6 +18,8 @@ import {
 } from "react-native";
 import MapView, { MapPressEvent, PROVIDER_GOOGLE, Region } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Icon } from "@/components/icons/Icon";
+import { StopTypeBadge } from "@/components/app/StopTypeBadge";
 
 const ORANGE = "#FF6F00";
 const BLACK  = "#1C1C1E";
@@ -187,10 +188,10 @@ export default function PickPlaceScreen() {
         {/* Header */}
         <View style={s.header}>
           <Pressable onPress={() => setPreview(null)} hitSlop={12} style={[s.backBtn, { backgroundColor: C.card }]}>
-            <Ionicons name="arrow-back" size={20} color={C.text} />
+            <Icon name="arrow-back" size={20} color={C.text} />
           </Pressable>
           <View style={s.headerCenter}>
-            <Ionicons name={icon} size={18} color={ORANGE} />
+            <Icon name={icon} size={18} color={ORANGE} />
             <Text style={[s.headerTitle, { color: C.text }]}>{title}</Text>
           </View>
           <View style={{ width: 38 }} />
@@ -206,7 +207,7 @@ export default function PickPlaceScreen() {
         {/* Place info card */}
         <View style={[s.previewCard, { backgroundColor: C.card }]}>
           <View style={[s.previewIconBox, { backgroundColor: preview.type === "stop" ? "#FFF3E0" : "#EFF6FF" }]}>
-            <Ionicons
+            <Icon
               name={preview.type === "stop" ? "bus-outline" : "location-outline"}
               size={20}
               color={preview.type === "stop" ? ORANGE : "#3B82F6"}
@@ -222,7 +223,7 @@ export default function PickPlaceScreen() {
 
         {/* Pin label */}
         <View style={[s.pinLabel, { backgroundColor: C.hairline }]}>
-          <Ionicons name={icon} size={14} color={GREY} />
+          <Icon name={icon} size={14} color={GREY} />
           <Text style={[s.pinLabelText, { color: C.sub }]}>
             Will be set as your <Text style={{ fontWeight: "700", color: C.text }}>{pin === "work" ? "Work" : "Home"}</Text> location
           </Text>
@@ -267,7 +268,7 @@ export default function PickPlaceScreen() {
 
         {/* Centered pin */}
         <View pointerEvents="none" style={s.pinWrap}>
-          <Ionicons name="location" size={44} color={ORANGE} style={s.pinIcon} />
+          <Icon name="location" size={44} color={ORANGE} style={s.pinIcon} />
           <View style={s.pinShadow} />
         </View>
 
@@ -277,7 +278,7 @@ export default function PickPlaceScreen() {
             style={[s.mapBtn, { backgroundColor: dark ? "#1C1C1E" : "#FFFFFF" }]}
             onPress={() => setMapMode(false)}
           >
-            <Ionicons name="arrow-back" size={20} color={C.text} />
+            <Icon name="arrow-back" size={20} color={C.text} />
           </Pressable>
           <View style={[s.addressPill, { backgroundColor: dark ? "#1C1C1E" : "#FFFFFF" }]}>
             {geocoding
@@ -290,7 +291,7 @@ export default function PickPlaceScreen() {
         {/* Bottom confirm bar */}
         <View style={[s.mapBottomBar, { paddingBottom: insets.bottom + 16, backgroundColor: dark ? "#1C1C1E" : "#FFFFFF" }]}>
           <View style={s.mapConfirmInfo}>
-            <Ionicons name={icon} size={18} color={ORANGE} />
+            <Icon name={icon} size={18} color={ORANGE} />
             <Text style={[s.mapConfirmLabel, { color: C.sub }]}>
               Setting as <Text style={{ color: C.text, fontWeight: "700" }}>{pin === "work" ? "Work" : "Home"}</Text>
             </Text>
@@ -319,10 +320,10 @@ export default function PickPlaceScreen() {
       {/* Header */}
       <View style={s.header}>
         <Pressable onPress={() => router.back()} hitSlop={12} style={[s.backBtn, { backgroundColor: C.card }]}>
-          <Ionicons name="arrow-back" size={20} color={C.text} />
+          <Icon name="arrow-back" size={20} color={C.text} />
         </Pressable>
         <View style={s.headerCenter}>
-          <Ionicons name={icon} size={18} color={ORANGE} />
+          <Icon name={icon} size={18} color={ORANGE} />
           <Text style={[s.headerTitle, { color: C.text }]}>{title}</Text>
         </View>
         <View style={{ width: 38 }} />
@@ -330,7 +331,7 @@ export default function PickPlaceScreen() {
 
       {/* Search input */}
       <View style={[s.inputWrap, { backgroundColor: C.input, borderColor: C.border }]}>
-        <Ionicons name="search-outline" size={18} color={C.sub} />
+        <Icon name="search-outline" size={18} color={C.sub} />
         <TextInput
           style={[s.input, { color: C.text }]}
           placeholder="Search stops or places…"
@@ -343,7 +344,7 @@ export default function PickPlaceScreen() {
         {loading && <ActivityIndicator size="small" color={ORANGE} />}
         {!loading && query.length > 0 && (
           <Pressable onPress={() => setQuery("")} hitSlop={8}>
-            <Ionicons name="close-circle" size={18} color={C.sub} />
+            <Icon name="close-circle" size={18} color={C.sub} />
           </Pressable>
         )}
       </View>
@@ -359,13 +360,13 @@ export default function PickPlaceScreen() {
           onPress={() => { setQuery(""); setMapMode(true); setPinAddress(""); }}
         >
           <View style={[s.rowIcon, { backgroundColor: ORANGE + "18" }]}>
-            <Ionicons name="map-outline" size={18} color={ORANGE} />
+            <Icon name="map-outline" size={18} color={ORANGE} />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={[s.rowTitle, { color: ORANGE }]}>Set on map</Text>
             <Text style={[s.rowSub, { color: C.sub }]}>Drop a pin anywhere on the map</Text>
           </View>
-          <Ionicons name="chevron-forward" size={16} color={ORANGE} />
+          <Icon name="chevron-forward" size={16} color={ORANGE} />
         </Pressable>
 
         {/* Remove existing pin row */}
@@ -375,7 +376,7 @@ export default function PickPlaceScreen() {
             onPress={handleRemove}
           >
             <View style={[s.rowIcon, { backgroundColor: "#FF3B3018" }]}>
-              <Ionicons name="trash-outline" size={18} color="#FF3B30" />
+              <Icon name="trash-outline" size={18} color="#FF3B30" />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[s.rowTitle, { color: "#FF3B30" }]}>Remove {pin === "work" ? "Work" : "Home"}</Text>
@@ -395,9 +396,7 @@ export default function PickPlaceScreen() {
                 onPress={() => selectStop(loc)}
                 disabled={saving}
               >
-                <View style={[s.rowIcon, { backgroundColor: ORANGE + "18" }]}>
-                  <Ionicons name="bus-outline" size={16} color={ORANGE} />
-                </View>
+                <StopTypeBadge stop={loc as any} size={34} />
                 <View style={{ flex: 1 }}>
                   <Text style={[s.rowTitle, { color: C.text }]} numberOfLines={1}>{loc.name}</Text>
                   {loc.route_nams ? (
@@ -421,7 +420,7 @@ export default function PickPlaceScreen() {
                 disabled={saving}
               >
                 <View style={[s.rowIcon, { backgroundColor: C.hairline }]}>
-                  <Ionicons name="location-outline" size={16} color={C.sub} />
+                  <Icon name="location-outline" size={16} color={C.sub} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[s.rowTitle, { color: C.text }]} numberOfLines={1}>{place.main_text}</Text>
@@ -435,7 +434,7 @@ export default function PickPlaceScreen() {
         {/* Empty state */}
         {showEmpty && (
           <View style={s.empty}>
-            <Ionicons name="search-outline" size={40} color={C.sub} />
+            <Icon name="search-outline" size={40} color={C.sub} />
             <Text style={[s.emptyText, { color: C.sub }]}>No results for "{query}"</Text>
           </View>
         )}
@@ -443,7 +442,7 @@ export default function PickPlaceScreen() {
         {/* Idle hint */}
         {query.trim().length < 2 && (
           <View style={s.empty}>
-            <Ionicons name={icon} size={44} color={C.sub} />
+            <Icon name={icon} size={44} color={C.sub} />
             <Text style={[s.emptyText, { color: C.sub }]}>
               Search for a stop or place, or drop a pin on the map.
             </Text>

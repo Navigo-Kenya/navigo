@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Platform, Share, Dimensions } from 'react-native';
 
 const CARD_WIDTH = Dimensions.get('window').width - 28; // matches scrollContent paddingHorizontal: 14
-import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { mapboxJourneyThumb, TransitLeg } from '../../services/ai';
 import { UserService } from '../../services/user';
@@ -12,6 +11,7 @@ import { useSavedStore } from '../../store/savedStore';
 import { useJourneyStore } from '../../store/journeyStore';
 import { renderMarkdownText } from '../../utils/markdown';
 import { sToMin } from '../../utils/mapHelpers';
+import { Icon } from "@/components/icons/Icon";
 
 interface Props {
   route: any;
@@ -170,7 +170,7 @@ const RouteActions = ({ route, C, startLeg, endLeg }: { route: any; C: any; star
         activeOpacity={0.8}
       >
         <Text style={styles.selectRouteText}>Select Route</Text>
-        <Ionicons name="arrow-forward-circle" size={18} color="#FFFFFF" />
+        <Icon name="arrow-forward-circle" size={18} color="#FFFFFF" />
       </TouchableOpacity>
 
       <View style={styles.secondaryActions}>
@@ -178,7 +178,7 @@ const RouteActions = ({ route, C, startLeg, endLeg }: { route: any; C: any; star
           style={[styles.iconActionBtn, { borderColor: C.border }]}
           onPress={handleShare}
         >
-          <Ionicons name="share-outline" size={20} color={C.text} />
+          <Icon name="share-outline" size={20} color={C.text} />
         </TouchableOpacity>
 
         <TouchableOpacity 
@@ -192,7 +192,7 @@ const RouteActions = ({ route, C, startLeg, endLeg }: { route: any; C: any; star
           {saving ? (
             <ActivityIndicator size="small" color={ORANGE} />
           ) : (
-            <Ionicons name={(isSavedLocally || savedJourneyId) ? "bookmark" : "bookmark-outline"} size={20} color={(isSavedLocally || savedJourneyId) ? ORANGE : C.text} />
+            <Icon name={(isSavedLocally || savedJourneyId) ? "bookmark" : "bookmark-outline"} size={20} color={(isSavedLocally || savedJourneyId) ? ORANGE : C.text} />
           )}
         </TouchableOpacity>
       </View>
@@ -226,7 +226,7 @@ export default function RouteCard({ route, index, C }: Props) {
         {/* Route Header Info */}
         <View style={[styles.routeHeader, { borderBottomColor: C.border }]}>
           <View style={styles.headerTitleContainer}>
-            <Ionicons name="navigate-circle-outline" size={20} color={ORANGE} style={{ marginRight: 6 }} />
+            <Icon name="navigate-circle-outline" size={20} color={ORANGE} style={{ marginRight: 6 }} />
             {renderMarkdownText(route.summary || "Suggested Travel Plan", [styles.routeHeadline, { color: C.text }], C.text)}
           </View>
           <View style={styles.headerBadges}>
@@ -236,7 +236,7 @@ export default function RouteCard({ route, index, C }: Props) {
               </View>
             ) : null}
             <View style={[styles.badge, { backgroundColor: C.border }]}>
-              <Ionicons name="time-outline" size={13} color={ORANGE} style={{ marginRight: 4 }} />
+              <Icon name="time-outline" size={13} color={ORANGE} style={{ marginRight: 4 }} />
               <Text style={[styles.badgeText, { color: ORANGE }]}>{sToMin(route.total_duration)}</Text>
             </View>
           </View>
@@ -257,7 +257,7 @@ export default function RouteCard({ route, index, C }: Props) {
               <View key={legIndex} style={styles.legRow}>
                 <View style={styles.indicatorContainer}>
                   <View style={[styles.iconNodeFrame, { backgroundColor: isWalk ? C.iconBg : `${ORANGE}20` }]}>
-                    <Ionicons name={isWalk ? "walk-outline" : "bus-outline"} size={14} color={isWalk ? C.sub : ORANGE} />
+                    <Icon name={isWalk ? "walk-outline" : "bus-outline"} size={14} color={isWalk ? C.sub : ORANGE} />
                   </View>
                   {legIndex < legs.length - 1 && <View style={[styles.indicatorLine, { backgroundColor: C.border }]} />}
                 </View>

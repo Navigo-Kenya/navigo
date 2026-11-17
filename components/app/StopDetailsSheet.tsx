@@ -45,9 +45,11 @@ import { PressableScale } from "@/components/ui/PressableScale";
 import { LineNoDepartures, NoDeparturesState } from "./DepartureEmpty";
 import { MapSheet, type MapSheetHandle } from "./MapSheet";
 import { resolveStopCategory } from "./StopsLayer";
+import { ModeIcon } from "./StopTypeBadge";
 import { REVIEW_TAGS, Stars, StopReviewForm } from "./stop/StopReviewForm";
 import { StopEditForm } from "./stop/StopEditForm";
 import { StopReportForm } from "./stop/StopReportForm";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const BLUE = "#2563EB";
@@ -168,7 +170,19 @@ export default function StopDetailsSheet({
   const [photos, setPhotos] = useState<StopPhoto[]>([]);
   const [photosLoading, setPhotosLoading] = useState(true);
 
-  const category = resolveStopCategory(stop as any);
+  // The stop's type: from the stop itself, else the departure board's
+  // stop_type, else the modes of the lines serving it (a station served only
+  // by trains is a station, never "bus" by default).
+  const category = useMemo(() => {
+    const own = (stop.stop_type ?? board?.stop?.stop_type) || null;
+    const lineModes = (board?.routes ?? []).map((r) => r.mode);
+    return resolveStopCategory({
+      ...(stop as any),
+      stop_type: own,
+      mode: stop.mode ?? lineModes[0] ?? null,
+      mode_badge: stop.mode_badge ?? board?.routes?.[0]?.mode_badge ?? null,
+    });
+  }, [stop, board]);
   const typeLabel = TYPE_LABEL[category.category] ?? "Transit stop";
 
   // ── Data ────────────────────────────────────────────────────────────────
@@ -419,7 +433,7 @@ export default function StopDetailsSheet({
           <View style={s.factsRow}>
             {rating ? (
               <Pressable onPress={() => openTab("reviews")} style={s.ratingInline} hitSlop={6}>
-                <Ionicons name="star" size={12} color={AMBER} />
+                <Icon name="star" size={12} color={AMBER} />
                 <Text style={[s.fact, { color: C.text, fontWeight: "800" }]}>{rating.avg.toFixed(1)}</Text>
                 <Text style={[s.fact, { color: C.sub }]}>({rating.count})</Text>
               </Pressable>
@@ -439,7 +453,7 @@ export default function StopDetailsSheet({
           accessibilityRole="button"
           accessibilityLabel="Close"
         >
-          <Ionicons name="close" size={16} color={C.sub} />
+          <Icon name="close" size={16} color={C.sub} />
         </PressableScale>
       </View>
 
@@ -491,7 +505,7 @@ export default function StopDetailsSheet({
           <ActivityIndicator color="#FFFFFF" size="small" />
         ) : (
           <>
-            <Ionicons name="navigate" size={16} color="#FFFFFF" />
+            <Icon name="navigate" size={16} color="#FFFFFF" />
             <Text style={[s.bigBtnText, { color: "#FFFFFF" }]}>Directions</Text>
           </>
         )}
@@ -617,7 +631,7 @@ function ArrivalsTab({
             : "Departures"}
         </Text>
         <PressableScale onPress={onRefresh} hitSlop={10} style={[s.refresh, { backgroundColor: C.chip }]} accessibilityLabel="Refresh departures">
-          {loading ? <ActivityIndicator size="small" color={C.sub} /> : <Ionicons name="refresh" size={14} color={C.sub} />}
+          {loading ? <ActivityIndicator size="small" color={C.sub} /> : <Icon name="refresh" size={14} color={C.sub} />}
         </PressableScale>
       </View>
 
@@ -635,37 +649,42 @@ function ArrivalsTab({
             accessibilityLabel={`Line ${r.route_short_name} to ${r.headsign}`}
             accessibilityHint="Shows the line on the map. Long-press to report a delay."
           >
-            <View style={[s.lineBadge, { backgroundColor: color }]}>
-              <Text style={s.lineBadgeMode}>{r.mode_badge}</Text>
-              <Text style={s.lineBadgeName} numberOfLines={1}>
-                {r.route_short_name}
-              </Text>
-            </View>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={[s.headsign, { color: C.text }]} numberOfLines={1}>
-                {r.headsign}
-              </Text>
-              {!!r.agency_name && (
-                <Text style={[s.agency, { color: C.sub }]} numberOfLines={1}>
-                  {r.agency_name}
+            {/* Line pill on its own line: long rail names truncate instead of
+                squeezing the headsign and times. */}
+            <View style={s.lineTop}>
+              <View style={[s.linePill, { backgroundColor: color }]}>
+                <ModeIcon mode={r.mode} badge={r.mode_badge} size={14} color="#FFFFFF" />
+                <Text style={s.linePillText} numberOfLines={1}>
+                  {r.route_short_name}
                 </Text>
-              )}
+              </View>
+              <Text style={[s.agency, { color: C.sub }]} numberOfLines={1}>
+                {[r.mode_badge, r.agency_name].filter(Boolean).join(" · ")}
+              </Text>
             </View>
-            <View style={s.etaCol}>
-              {!first ? (
-                <LineNoDepartures status={r.arrivals_status} />
-              ) : (
-                <>
-                  <Text style={[s.etaMain, { color: first.eta_seconds <= 120 ? RED : C.text }]}>
-                    {first.eta_seconds <= 60 ? "Now" : formatEta(first.eta_seconds)}
-                  </Text>
-                  <Text style={[s.etaSub, { color: C.sub }]} numberOfLines={1}>
-                    {[departureMeta(first), rest[0] ? `then ${formatEta(rest[0].eta_seconds)}` : null]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </Text>
-                </>
-              )}
+            <View style={s.lineBottom}>
+              <View style={{ flex: 1, minWidth: 0, flexDirection: "row", gap: 5 }}>
+                <Icon name="arrow-forward" size={14} color={C.sub} style={{ marginTop: 2 }} />
+                <Text style={[s.headsign, { color: C.text }]} numberOfLines={2}>
+                  {r.headsign}
+                </Text>
+              </View>
+              <View style={s.etaCol}>
+                {!first ? (
+                  <LineNoDepartures status={r.arrivals_status} />
+                ) : (
+                  <>
+                    <Text style={[s.etaMain, { color: first.eta_seconds <= 120 ? RED : C.text }]}>
+                      {first.eta_seconds <= 60 ? "Now" : formatEta(first.eta_seconds)}
+                    </Text>
+                    <Text style={[s.etaSub, { color: C.sub }]} numberOfLines={2}>
+                      {[departureMeta(first), rest[0] ? `then ${formatEta(rest[0].eta_seconds)}` : null]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </Text>
+                  </>
+                )}
+              </View>
             </View>
           </PressableScale>
         );
@@ -726,7 +745,7 @@ function InfoTab({
               />
             ))}
         <PressableScale onPress={onAddPhoto} style={[s.addPhoto, { borderColor: ORANGE + "66" }]} accessibilityLabel="Add a photo">
-          <Ionicons name="camera" size={20} color={ORANGE} />
+          <Icon name="camera" size={20} color={ORANGE} />
           <Text style={s.addPhotoText}>Add photo</Text>
         </PressableScale>
       </ScrollView>
@@ -755,6 +774,7 @@ function InfoTab({
                 style={[s.lineChip, { backgroundColor: r.route_color ? `#${String(r.route_color).replace("#", "")}` : BLUE }]}
                 accessibilityLabel={`Line ${r.short_name}`}
               >
+                <ModeIcon mode={[0, 1, 2].includes(Number(r.route_type)) ? "RAIL" : "BUS"} size={13} color="#FFFFFF" />
                 <Text style={s.lineChipText}>{r.short_name}</Text>
               </PressableScale>
             ))}
@@ -763,7 +783,7 @@ function InfoTab({
       )}
 
       <Pressable onPress={onSuggest} style={s.suggestRow}>
-        <Ionicons name="create-outline" size={15} color={BLUE} />
+        <Icon name="create-outline" size={15} color={BLUE} />
         <Text style={[s.suggestText, { color: BLUE }]}>Something wrong here? Suggest an edit</Text>
       </Pressable>
     </View>
@@ -821,7 +841,7 @@ function ReviewsTab({
         </View>
       ) : (
         <View style={s.emptyReviews}>
-          <Ionicons name="chatbubbles-outline" size={34} color={C.sub} />
+          <Icon name="chatbubbles-outline" size={34} color={C.sub} />
           <Text style={[s.emptyTitle, { color: C.text }]}>No reviews yet</Text>
           <Text style={[s.emptySub, { color: C.sub }]}>{"Tell other riders if it's safe, sheltered and easy to find."}</Text>
         </View>
@@ -845,7 +865,7 @@ function ReviewsTab({
       )}
 
       <PressableScale onPress={onWrite} style={[s.writeBtn, { borderColor: AMBER }]} accessibilityRole="button">
-        <Ionicons name={mine ? "create-outline" : "star-outline"} size={16} color={AMBER} />
+        <Icon name={mine ? "create-outline" : "star-outline"} size={16} color={AMBER} />
         <Text style={[s.writeText, { color: C.text }]}>{mine ? "Edit your review" : "Write a review"}</Text>
       </PressableScale>
 
@@ -914,7 +934,7 @@ function Action({
   return (
     <PressableScale onPress={onPress} hitSlop={4} style={s.action} accessibilityRole="button" accessibilityLabel={label}>
       <View style={[s.actionCircle, { backgroundColor: C.chip }]}>
-        <Ionicons name={icon} size={17} color={fg ?? C.text} />
+        <Icon name={icon} size={17} color={fg ?? C.text} />
       </View>
       <Text style={[s.actionLabel, { color: C.sub }]}>{label}</Text>
     </PressableScale>
@@ -940,11 +960,11 @@ function NeighborPill({
       style={[s.neighbor, { backgroundColor: C.chip, justifyContent: side === "next" ? "flex-end" : "flex-start" }]}
       accessibilityLabel={`${side === "prev" ? "Previous" : "Next"} stop: ${stop.name}`}
     >
-      {side === "prev" && <Ionicons name="chevron-back" size={13} color={ORANGE} />}
+      {side === "prev" && <Icon name="chevron-back" size={13} color={ORANGE} />}
       <Text style={[s.neighborText, { color: C.text, textAlign: side === "next" ? "right" : "left" }]} numberOfLines={1}>
         {stop.name}
       </Text>
-      {side === "next" && <Ionicons name="chevron-forward" size={13} color={ORANGE} />}
+      {side === "next" && <Icon name="chevron-forward" size={13} color={ORANGE} />}
     </PressableScale>
   );
 }
@@ -961,14 +981,14 @@ function InfoRow({
 }) {
   const body = (
     <View style={[s.infoRow, { borderBottomColor: C.line }]}>
-      <Ionicons name={icon} size={18} color={color} />
+      <Icon name={icon} size={18} color={color} />
       <View style={{ flex: 1 }}>
         <Text style={[s.infoText, { color: C.text }]} numberOfLines={2}>
           {text}
         </Text>
         {!!sub && <Text style={[s.infoSub, { color: onPress ? BLUE : C.sub }]}>{sub}</Text>}
       </View>
-      {onPress && <Ionicons name="chevron-forward" size={14} color={C.sub} />}
+      {onPress && <Icon name="chevron-forward" size={14} color={C.sub} />}
     </View>
   );
   return onPress ? <PressableScale onPress={onPress}>{body}</PressableScale> : body;
@@ -1032,10 +1052,11 @@ const s = StyleSheet.create({
   liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: GREEN },
   boardHeadText: { flex: 1, fontSize: 11.5 },
   refresh: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  lineRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 18, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
-  lineBadge: { minWidth: 54, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 10, alignItems: "center" },
-  lineBadgeMode: { color: "rgba(255,255,255,0.85)", fontSize: 9, fontWeight: "800", letterSpacing: 0.4 },
-  lineBadgeName: { color: "#FFFFFF", fontSize: 15, fontWeight: "900" },
+  lineRow: { gap: 7, paddingHorizontal: 18, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  lineTop: { flexDirection: "row", alignItems: "center", gap: 8 },
+  linePill: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 9, maxWidth: "62%" },
+  linePillText: { color: "#FFFFFF", fontSize: 14, fontWeight: "900", flexShrink: 1 },
+  lineBottom: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   headsign: { fontSize: 14.5, fontWeight: "700" },
   agency: { fontSize: 12, marginTop: 2 },
   etaCol: { alignItems: "flex-end", maxWidth: 130 },
@@ -1053,7 +1074,7 @@ const s = StyleSheet.create({
   infoSub: { fontSize: 12, marginTop: 2 },
   section: { fontSize: 11, fontWeight: "800", letterSpacing: 0.6, marginBottom: 10 },
   lineChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  lineChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, minWidth: 44, alignItems: "center" },
+  lineChip: { flexDirection: "row", gap: 5, paddingHorizontal: 11, paddingVertical: 7, borderRadius: 10, minWidth: 44, alignItems: "center", maxWidth: "100%" },
   lineChipText: { color: "#FFFFFF", fontSize: 13, fontWeight: "800" },
   suggestRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 18 },
   suggestText: { fontSize: 13, fontWeight: "700" },

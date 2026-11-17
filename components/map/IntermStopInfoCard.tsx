@@ -16,12 +16,12 @@ import {
   useSheetTop,
   useTopUiBottom,
 } from "@/components/app/mapSheetInsets";
-import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { StopService, type StopDeparturesResponse } from "@/services/stop";
 import { formatEta } from "@/utils/mapHelpers";
 import { departureMeta } from "@/utils/departures";
+import { Icon } from "@/components/icons/Icon";
 
 interface IntermStopInfoCardProps {
   stop: IntermediateStop;
@@ -143,7 +143,7 @@ export function IntermStopInfoCard({
             hitSlop={10}
             style={[s.closeBtn, { backgroundColor: pillBg }]}
           >
-            <Ionicons name="close" size={16} color={sub} />
+            <Icon name="close" size={16} color={sub} />
           </Pressable>
         </View>
 
@@ -178,7 +178,7 @@ export function IntermStopInfoCard({
                 }}
                 style={[s.infoBtn, { backgroundColor: pillBg }]}
               >
-                <Ionicons
+                <Icon
                   name="information-circle-outline"
                   size={15}
                   color={text}
@@ -205,7 +205,7 @@ export function IntermStopInfoCard({
                 { backgroundColor: stop.color || "#FF6F00" },
               ]}
             >
-              <Ionicons name="navigate" size={13} color="#FFFFFF" />
+              <Icon name="navigate" size={13} color="#FFFFFF" />
               <Text style={s.routeToText}>To Here</Text>
             </Pressable>
           </View>

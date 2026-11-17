@@ -9,7 +9,7 @@ import {
   View,
   useColorScheme,
 } from "react-native";
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
@@ -43,6 +43,7 @@ import {
   useSheetAccessoryHeight,
   useSheetTop,
 } from "./mapSheetInsets";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const WINDOW_H = Dimensions.get("window").height;
@@ -378,7 +379,7 @@ export default function MapFloatingUI({
           ]}
           accessibilityLabel="Compass / Toggle 3D heading"
         >
-          <Ionicons
+          <Icon
             name={headingUp ? "navigate" : "compass-outline"}
             size={20}
             color={headingUp ? ORANGE : textPrimary}
@@ -402,7 +403,7 @@ export default function MapFloatingUI({
           ]}
           accessibilityLabel="Open AR Walk View"
         >
-          <Ionicons name="camera-outline" size={20} color="#FFFFFF" />
+          <Icon name="camera-outline" size={20} color="#FFFFFF" />
         </PressableScale>
       ),
     });
@@ -426,7 +427,7 @@ export default function MapFloatingUI({
             accessibilityRole="button"
             accessibilityLabel={`Search ${activeCategory?.label ?? ""} in this area`}
           >
-            <Ionicons name="refresh" size={15} color={ORANGE} />
+            <Icon name="refresh" size={15} color={ORANGE} />
             <Text style={[styles.searchAreaText, { color: textPrimary }]}>Search this area</Text>
           </PressableScale>
         </Animated.View>
@@ -463,7 +464,7 @@ export default function MapFloatingUI({
                 accessibilityRole="button"
                 accessibilityLabel="Back to search"
               >
-                <Ionicons name="chevron-back" size={20} color={textPrimary} />
+                <Icon name="chevron-back" size={20} color={textPrimary} />
               </PressableScale>
 
               <PressableScale
@@ -474,7 +475,7 @@ export default function MapFloatingUI({
                 accessibilityRole="search"
                 accessibilityLabel={`Search: ${searchContextQuery}. Tap to edit`}
               >
-                <Ionicons name="search" size={17} color={ORANGE} />
+                <Icon name="search" size={17} color={ORANGE} />
                 <Text
                   style={[styles.activeSearchQueryText, { color: textPrimary }]}
                   numberOfLines={1}
@@ -491,7 +492,7 @@ export default function MapFloatingUI({
                   accessibilityRole="button"
                   accessibilityLabel="Clear search"
                 >
-                  <Ionicons name="close" size={14} color={textPrimary} />
+                  <Icon name="close" size={14} color={textPrimary} />
                 </PressableScale>
               </PressableScale>
             </View>
@@ -594,7 +595,7 @@ export default function MapFloatingUI({
                   { backgroundColor: cardBg, borderColor: borderCol },
                 ]}
               >
-                <Ionicons name="search" size={20} color={ORANGE} />
+                <Icon name="search" size={20} color={ORANGE} />
                 <Text
                   style={[styles.searchPlaceholder, { color: textMuted }]}
                   numberOfLines={1}
@@ -610,7 +611,7 @@ export default function MapFloatingUI({
                   }}
                   style={styles.kwameMicBtn}
                 >
-                  <Ionicons name="sparkles" size={16} color={ORANGE} />
+                  <Icon name="sparkles" size={16} color={ORANGE} />
                 </PressableScale>
               </PressableScale>
 
@@ -668,7 +669,7 @@ export default function MapFloatingUI({
           <View style={styles.navBanner}>
             <View style={styles.navBannerMain}>
               <View style={styles.navIconBox}>
-                <Ionicons
+                <Icon
                   name={
                     nextStep?.type === "walk"
                       ? "walk"
@@ -707,7 +708,7 @@ export default function MapFloatingUI({
                 hitSlop={10}
                 style={styles.navCloseBtn}
               >
-                <Ionicons name="close" size={20} color="#FFFFFF" />
+                <Icon name="close" size={20} color="#FFFFFF" />
               </PressableScale>
             </View>
 
@@ -716,7 +717,7 @@ export default function MapFloatingUI({
             {rideCue && (rideCue.alight || rideCue.passing || rideCue.next) && (
               <View style={[styles.rideStrip, rideCue.alight && styles.rideStripAlight]}>
                 {rideCue.alight ? (
-                  <Ionicons name="notifications" size={15} color="#FFFFFF" />
+                  <Icon name="notifications" size={15} color="#FFFFFF" />
                 ) : (
                   <View
                     style={[
@@ -754,7 +755,7 @@ export default function MapFloatingUI({
               isIndoor ||
               paused) && (
               <View style={styles.statusAlertStrip}>
-                <Ionicons name="alert-circle" size={16} color="#FEF08A" />
+                <Icon name="alert-circle" size={16} color="#FEF08A" />
                 <Text style={styles.statusAlertText}>
                   {paused
                     ? "Navigation paused"
@@ -836,7 +837,7 @@ export default function MapFloatingUI({
               { backgroundColor: cardBg, borderColor: borderCol },
             ]}
           >
-            <Ionicons
+            <Icon
               name={liveMeteo?.iconName ?? "partly-sunny"}
               size={18}
               color="#F59E0B"
@@ -882,7 +883,7 @@ export default function MapFloatingUI({
             }}
             style={styles.boardChip}
           >
-            <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
+            <Icon name="checkmark-circle" size={18} color="#FFFFFF" />
             <Text style={styles.boardChipText}>I&apos;m on board</Text>
           </PressableScale>
         </Animated.View>
@@ -914,7 +915,7 @@ export default function MapFloatingUI({
           ]}
           accessibilityLabel="Recenter on my location"
         >
-          <Ionicons
+          <Icon
             name={followMe ? "locate" : "locate-outline"}
             size={21}
             color={followMe ? ORANGE : textPrimary}

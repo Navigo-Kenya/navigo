@@ -11,6 +11,7 @@ import * as Haptics from "expo-haptics";
 import { useContributionStore } from "@/store/contributionStore";
 import type { StopReview } from "@/services/contribution";
 import { FormLabel, FormSheet, formColors } from "./FormSheet";
+import { Icon } from "@/components/icons/Icon";
 
 const AMBER = "#F59E0B";
 const RATING_WORDS = ["", "Poor", "Fair", "Good", "Very good", "Excellent"];
@@ -130,7 +131,7 @@ export function StopReviewForm({
               key={a.key}
               style={[styles.aspectRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.line }]}
             >
-              <Ionicons name={a.icon} size={17} color={C.sub} />
+              <Icon name={a.icon} size={17} color={C.sub} />
               <Text style={[styles.aspectLabel, { color: C.text }]}>{a.label}</Text>
               <Stars
                 value={aspects[a.key]}
@@ -167,7 +168,7 @@ export function StopReviewForm({
                 accessibilityRole="checkbox"
                 accessibilityState={{ checked: on }}
               >
-                {on && <Ionicons name="checkmark" size={13} color={color} />}
+                {on && <Icon name="checkmark" size={13} color={color} />}
                 <Text style={[styles.tagText, { color: on ? color : C.text }]}>{t.label}</Text>
               </Pressable>
             );
@@ -208,7 +209,7 @@ export function Stars({
     <View style={{ flexDirection: "row", gap: size > 26 ? 6 : 2 }}>
       {[1, 2, 3, 4, 5].map((n) => {
         const icon = n <= value ? "star" : n - 0.5 <= value ? "star-half" : "star-outline";
-        const star = <Ionicons name={icon as any} size={size} color={n - 0.5 <= value ? AMBER : idle} />;
+        const star = <Icon name={icon as any} size={size} color={n - 0.5 <= value ? AMBER : idle} />;
         return onSet ? (
           <Pressable key={n} onPress={() => onSet(n)} hitSlop={6} accessibilityRole="button" accessibilityLabel={`${n} stars`}>
             {star}

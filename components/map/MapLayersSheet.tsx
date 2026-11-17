@@ -5,10 +5,10 @@
 import { MapSheet, type MapSheetHandle } from "@/components/app/MapSheet";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { useMapLayersStore, type MapLayers } from "@/store/mapLayersStore";
-import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useRef } from "react";
 import { Dimensions, Image, StyleSheet, Text, View } from "react-native";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const { height: SH } = Dimensions.get("window");
@@ -56,7 +56,7 @@ export function MapLayersSheet({ visible, onDismiss, dark }: MapLayersSheetProps
         accessibilityRole="button"
         accessibilityLabel="Close"
       >
-        <Ionicons name="close" size={16} color={C.sub} />
+        <Icon name="close" size={16} color={C.sub} />
       </PressableScale>
     </View>
   );
@@ -91,7 +91,7 @@ export function MapLayersSheet({ visible, onDismiss, dark }: MapLayersSheetProps
                   <Image source={mt.image} style={s.typeThumb} />
                   {active && (
                     <View style={s.checkBadge}>
-                      <Ionicons name="checkmark" size={11} color="#FFFFFF" />
+                      <Icon name="checkmark" size={11} color="#FFFFFF" />
                     </View>
                   )}
                 </View>
@@ -130,7 +130,7 @@ export function MapLayersSheet({ visible, onDismiss, dark }: MapLayersSheetProps
                 >
                   <Image source={md.image} style={[s.detailThumb, !active && { opacity: 0.55 }]} />
                   <View style={[s.toggleDot, { backgroundColor: active ? ORANGE : C.ring }]}>
-                    <Ionicons name={active ? "checkmark" : "add"} size={11} color={active ? "#FFFFFF" : C.sub} />
+                    <Icon name={active ? "checkmark" : "add"} size={11} color={active ? "#FFFFFF" : C.sub} />
                   </View>
                 </View>
                 <Text

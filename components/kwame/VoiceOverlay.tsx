@@ -2,8 +2,8 @@ import React, { useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, Animated, StyleSheet, Easing,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Icon } from "@/components/icons/Icon";
 
 interface Props {
   C: any;
@@ -173,7 +173,7 @@ export default function VoiceOverlay({
           activeOpacity={0.8}
           onPress={() => toggleUiMode('chat', { keepAudio: true })}
         >
-          <Ionicons name="add" size={24} color={C.text} />
+          <Icon name="add" size={24} color={C.text} />
           <Text style={[styles.askPlaceholder, { color: C.sub }]}>Ask Kwame</Text>
         </TouchableOpacity>
 
@@ -185,7 +185,7 @@ export default function VoiceOverlay({
           onPress={() => setIsMuted(!isMuted)}
           activeOpacity={0.75}
         >
-          <Ionicons
+          <Icon
             name={isMuted ? 'mic-off-outline' : 'mic-outline'}
             size={22}
             color={isMuted ? '#FF3B30' : C.text}
@@ -197,7 +197,7 @@ export default function VoiceOverlay({
           onPress={() => toggleUiMode('chat')}
           activeOpacity={0.8}
         >
-          <Ionicons name="close" size={22} color={C.bg} />
+          <Icon name="close" size={22} color={C.bg} />
         </TouchableOpacity>
       </View>
     </Animated.View>

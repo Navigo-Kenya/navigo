@@ -7,13 +7,13 @@
 // see the stop and an approved landmark is applied to it).
 import React, { useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View, useColorScheme } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
 import { Camera as MapboxCamera, MapView as MapboxMapView } from "@rnmapbox/maps";
 import { useContributionStore } from "@/store/contributionStore";
 import { distanceM, formatDistance } from "@/services/exploreSearch";
 import { FormLabel, FormSheet, formColors } from "./FormSheet";
+import { Icon } from "@/components/icons/Icon";
 
 const BLUE = "#2563EB";
 const ORANGE = "#FF6F00";
@@ -200,10 +200,10 @@ export function StopEditForm({
           </MapboxMapView>
           {/* Fixed pin: the map moves under it. */}
           <View pointerEvents="none" style={styles.pinWrap}>
-            <Ionicons name="location" size={38} color={ORANGE} style={{ marginBottom: 30 }} />
+            <Icon name="location" size={38} color={ORANGE} style={{ marginBottom: 30 }} />
           </View>
           <Pressable onPress={useMyLocation} style={[styles.gpsBtn, { backgroundColor: C.bg }]} hitSlop={6}>
-            {gps ? <ActivityIndicator size="small" color={BLUE} /> : <Ionicons name="locate" size={18} color={BLUE} />}
+            {gps ? <ActivityIndicator size="small" color={BLUE} /> : <Icon name="locate" size={18} color={BLUE} />}
           </Pressable>
         </View>
         <Text style={[styles.help, { color: C.sub }]}>
@@ -233,7 +233,7 @@ export function StopEditForm({
                 <Text style={[styles.chipText, { color: C.text, textDecorationLine: off ? "line-through" : "none" }]}>
                   {l.short_name}
                 </Text>
-                <Ionicons name={off ? "add" : "close"} size={13} color={C.sub} />
+                <Icon name={off ? "add" : "close"} size={13} color={C.sub} />
               </Pressable>
             );
           })}

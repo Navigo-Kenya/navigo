@@ -1,4 +1,4 @@
-import { AntDesign, Ionicons } from "@expo/vector-icons";
+import { AntDesign } from "@expo/vector-icons";
 import * as Google from "expo-auth-session/providers/google";
 import * as AppleAuthentication from "expo-apple-authentication";
 import * as WebBrowser from "expo-web-browser";
@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { AuthService } from "@/services/auth";
 import type { AuthUser } from "@/store/authStore";
+import { Icon } from "@/components/icons/Icon";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -160,7 +161,7 @@ export function SocialButtons({ onSuccess, onNeedsPhone, onError, disabled, show
             <ActivityIndicator size="small" color={dark ? "#000" : "#FFF"} />
           ) : (
             <>
-              <Ionicons name="logo-apple" size={20} color={dark ? "#000000" : "#FFFFFF"} />
+              <Icon name="logo-apple" size={20} color={dark ? "#000000" : "#FFFFFF"} />
               <Text style={[styles.btnText, { color: dark ? "#000000" : "#FFFFFF" }]}>
                 Continue with Apple
               </Text>

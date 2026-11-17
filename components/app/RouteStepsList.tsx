@@ -10,7 +10,7 @@ import {
   formatEta,
 } from "@/utils/mapHelpers";
 import { departureMeta } from "@/utils/departures";
-import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { MaterialIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -21,6 +21,7 @@ import {
   View,
   useColorScheme,
 } from "react-native";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const BLACK = "#111827";
@@ -317,7 +318,7 @@ function StopsList({
           {stop.stop_code && (
             <Text style={sl.codeText}>{stop.stop_code}</Text>
           )}
-          <Ionicons name="locate-outline" size={13} color={GREY} />
+          <Icon name="locate-outline" size={13} color={GREY} />
         </Pressable>
       ))}
     </View>

@@ -6,7 +6,6 @@
 import { ScreenHeader } from "@/components/app/ScreenHeader";
 import { NavigationEngine, EngineResult } from "@/services/navigationEngine";
 import { TraceRecorder, RecordedSession } from "@/services/traceRecorder";
-import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Pressable,
@@ -19,6 +18,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MapView, Camera, ShapeSource, LineLayer, CircleLayer } from "@rnmapbox/maps";
+import { Icon } from "@/components/icons/Icon";
 
 const NativeShapeSource = ShapeSource as unknown as React.ComponentType<any>;
 const NativeLineLayer   = LineLayer   as unknown as React.ComponentType<any>;
@@ -161,7 +161,7 @@ export default function DevReplayScreen() {
               onPress={() => openSession(s)}
               style={[st.sessionRow, { backgroundColor: C.card }]}
             >
-              <Ionicons name="analytics-outline" size={20} color={ORANGE} />
+              <Icon name="analytics-outline" size={20} color={ORANGE} />
               <View style={{ flex: 1 }}>
                 <Text style={{ color: C.text, fontWeight: "600" }}>
                   {s.destination ?? "Unknown destination"}
@@ -174,7 +174,7 @@ export default function DevReplayScreen() {
                 hitSlop={10}
                 onPress={() => TraceRecorder.remove(s.id).then(() => TraceRecorder.list().then(setSessions))}
               >
-                <Ionicons name="trash-outline" size={18} color="#FF3B30" />
+                <Icon name="trash-outline" size={18} color="#FF3B30" />
               </Pressable>
             </Pressable>
           ))}
@@ -233,22 +233,22 @@ export default function DevReplayScreen() {
 
         <View style={st.controls}>
           <Pressable onPress={() => setSession(null)} style={st.ctrlBtn}>
-            <Ionicons name="list" size={20} color={C.text} />
+            <Icon name="list" size={20} color={C.text} />
           </Pressable>
           <Pressable
             onPress={() => { openSession(session); }}
             style={st.ctrlBtn}
           >
-            <Ionicons name="play-skip-back" size={20} color={C.text} />
+            <Icon name="play-skip-back" size={20} color={C.text} />
           </Pressable>
           <Pressable onPress={() => setPlaying((p) => !p)} style={[st.ctrlBtn, st.playBtn]}>
-            <Ionicons name={playing ? "pause" : "play"} size={22} color="#FFF" />
+            <Icon name={playing ? "pause" : "play"} size={22} color="#FFF" />
           </Pressable>
           <Pressable onPress={() => setSpeedIdx((i) => (i + 1) % SPEEDS.length)} style={st.ctrlBtn}>
             <Text style={{ color: C.text, fontWeight: "800", fontSize: 13 }}>{SPEEDS[speedIdx]}×</Text>
           </Pressable>
           <Pressable onPress={exportSession} style={st.ctrlBtn}>
-            <Ionicons name="share-outline" size={20} color={C.text} />
+            <Icon name="share-outline" size={20} color={C.text} />
           </Pressable>
         </View>
       </View>

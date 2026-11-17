@@ -8,7 +8,6 @@ import { REPORT_TYPES, REPORT_TYPE_ORDER } from "@/components/icons/reportIcons"
 import { ReportTypeIcon } from "@/components/icons/ReportTypeIcon";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { useAuthStore } from "@/store/authStore";
-import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import React, { useRef, useState } from "react";
@@ -24,6 +23,7 @@ import {
   useColorScheme,
 } from "react-native";
 import { MapSheet, type MapSheetHandle } from "./MapSheet";
+import { Icon } from "@/components/icons/Icon";
 
 const { height: SH } = Dimensions.get("window");
 const ORANGE = "#FF6F00";
@@ -85,7 +85,7 @@ export default function ReportSheet({ onClose, userLat, userLng }: Props) {
           {done ? "Alert pinned" : "Report an issue"}
         </Text>
         <View style={[s.locChip, { backgroundColor: C.chip }]}>
-          <Ionicons name={hasLocation ? "location" : "location-outline"} size={12} color={hasLocation ? ORANGE : C.sub} />
+          <Icon name={hasLocation ? "location" : "location-outline"} size={12} color={hasLocation ? ORANGE : C.sub} />
           <Text style={[s.locText, { color: C.sub }]} numberOfLines={1}>
             {hasLocation ? "Pinned at your current location" : "Waiting for your location…"}
           </Text>
@@ -98,7 +98,7 @@ export default function ReportSheet({ onClose, userLat, userLng }: Props) {
         accessibilityRole="button"
         accessibilityLabel="Close"
       >
-        <Ionicons name="close" size={16} color={C.sub} />
+        <Icon name="close" size={16} color={C.sub} />
       </PressableScale>
     </View>
   );
@@ -137,7 +137,7 @@ export default function ReportSheet({ onClose, userLat, userLng }: Props) {
         {done ? (
           <View style={s.doneBox}>
             <View style={s.doneCircle}>
-              <Ionicons name="checkmark" size={36} color="#16A34A" />
+              <Icon name="checkmark" size={36} color="#16A34A" />
             </View>
             <Text style={[s.doneTitle, { color: C.text }]}>Thanks, it&apos;s live!</Text>
             <Text style={[s.doneSub, { color: C.sub }]}>
@@ -176,7 +176,7 @@ export default function ReportSheet({ onClose, userLat, userLng }: Props) {
                   </Text>
                   {isSel && (
                     <View style={[s.check, { backgroundColor: c.color }]}>
-                      <Ionicons name="checkmark" size={12} color="#FFFFFF" />
+                      <Icon name="checkmark" size={12} color="#FFFFFF" />
                     </View>
                   )}
                 </PressableScale>
@@ -192,7 +192,7 @@ export default function ReportSheet({ onClose, userLat, userLng }: Props) {
           <Pressable style={s.wallBackdrop} onPress={() => setShowAuthWall(false)} />
           <View style={[s.wallSheet, { backgroundColor: dark ? "#18181B" : "#FFFFFF" }]}>
             <View style={[s.wallIcon, { backgroundColor: ORANGE + "18" }]}>
-              <Ionicons name="lock-closed" size={28} color={ORANGE} />
+              <Icon name="lock-closed" size={28} color={ORANGE} />
             </View>
             <Text style={[s.wallTitle, { color: C.text }]}>Sign in to report</Text>
             <Text style={[s.wallSub, { color: C.sub }]}>
@@ -204,7 +204,7 @@ export default function ReportSheet({ onClose, userLat, userLng }: Props) {
               style={s.wallPrimary}
             >
               <Text style={s.wallPrimaryTxt}>Sign In</Text>
-              <Ionicons name="arrow-forward" size={15} color="#fff" />
+              <Icon name="arrow-forward" size={15} color="#fff" />
             </PressableScale>
             <PressableScale
               containerStyle={{ alignSelf: "stretch" }}

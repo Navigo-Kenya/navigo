@@ -1,5 +1,4 @@
 // components/app/RateAppSheet.tsx
-import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useRef } from "react";
 import {
   Animated,
@@ -13,6 +12,7 @@ import {
   useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Icon } from "@/components/icons/Icon";
 
 const { height: SH } = Dimensions.get("window");
 const SHEET_H = Math.min(320, Math.max(280, SH * 0.40));
@@ -94,7 +94,7 @@ export default function RateAppSheet({ onRate, onLater }: Props) {
           {/* Stars */}
           <View style={s.stars}>
             {[1, 2, 3, 4, 5].map((i) => (
-              <Ionicons key={i} name="star" size={28} color="#FF6F00" />
+              <Icon key={i} name="star" size={28} color="#FF6F00" />
             ))}
           </View>
 
@@ -107,7 +107,7 @@ export default function RateAppSheet({ onRate, onLater }: Props) {
         {/* ── Actions ─────────────────────────────────────────────────────────── */}
         <View style={[s.actions, { paddingBottom: insets.bottom + 16 }]}>
           <Pressable style={s.primaryBtn} onPress={() => dismiss(onRate)}>
-            <Ionicons name="star-outline" size={16} color="#fff" />
+            <Icon name="star-outline" size={16} color="#fff" />
             <Text style={s.primaryTxt}>{STORE_LABEL}</Text>
           </Pressable>
 

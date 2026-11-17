@@ -2,10 +2,10 @@
 //
 // Empty states for departure boards: shown instead of invented times when
 // the timetable has nothing for a stop or a line.
-import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
 import { arrivalsStatusCopy, type ArrivalsStatus } from "@/utils/departures";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 
@@ -36,7 +36,7 @@ export function NoDeparturesState({
     <View style={s.wrap} accessibilityRole="summary">
       <View style={[s.discOuter, { borderColor: C.ring }]}>
         <View style={[s.disc, { backgroundColor: C.disc }]}>
-          <Ionicons name="time-outline" size={28} color={C.icon} />
+          <Icon name="time-outline" size={28} color={C.icon} />
           <View style={[s.slash, { backgroundColor: C.icon }]} />
         </View>
       </View>
@@ -48,7 +48,7 @@ export function NoDeparturesState({
           style={({ pressed }) => [s.action, { opacity: pressed ? 0.7 : 1 }]}
           accessibilityRole="button"
         >
-          <Ionicons name="create-outline" size={14} color={ORANGE} />
+          <Icon name="create-outline" size={14} color={ORANGE} />
           <Text style={s.actionText}>{actionLabel}</Text>
         </Pressable>
       )}
@@ -67,7 +67,7 @@ export function LineNoDepartures({ status }: { status?: ArrivalsStatus | string 
     : dark ? "#27272A" : "#F4F4F5";
   return (
     <View style={[s.pill, { backgroundColor: bg }]}>
-      <Ionicons name={copy.icon} size={12} color={fg} />
+      <Icon name={copy.icon} size={12} color={fg} />
       <Text style={[s.pillText, { color: fg }]} numberOfLines={1}>
         {copy.title}
       </Text>

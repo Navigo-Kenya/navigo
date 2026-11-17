@@ -9,6 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useContributionStore } from "@/store/contributionStore";
 import { FormLabel, FormSheet, formColors } from "./FormSheet";
+import { Icon } from "@/components/icons/Icon";
 
 const RED = "#DC2626";
 
@@ -101,12 +102,12 @@ export function StopReportForm({
                 accessibilityRole="radio"
                 accessibilityState={{ selected: on }}
               >
-                <Ionicons name={k.icon} size={20} color={k.color} />
+                <Icon name={k.icon} size={20} color={k.color} />
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.kindLabel, { color: C.text }]}>{k.label}</Text>
                   <Text style={[styles.kindSub, { color: C.sub }]}>{k.sub}</Text>
                 </View>
-                <Ionicons name={on ? "radio-button-on" : "radio-button-off"} size={20} color={on ? k.color : C.sub} />
+                <Icon name={on ? "radio-button-on" : "radio-button-off"} size={20} color={on ? k.color : C.sub} />
               </Pressable>
             );
           })}

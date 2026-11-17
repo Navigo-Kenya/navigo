@@ -3,7 +3,6 @@ import { sToMin } from "@/utils/mapHelpers";
 import { useSavedStore } from "@/store/savedStore";
 import { useJourneyStore, UnifiedLocation } from "@/store/journeyStore";
 import { SavedJourney, SavedPlace } from "@/services/user";
-import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
@@ -18,6 +17,7 @@ import {
   View,
   useColorScheme,
 } from "react-native";
+import { Icon } from "@/components/icons/Icon";
 const ORANGE = "#FF6F00";
 const BLACK  = "#1C1C1E";
 const GREY   = "#8E8E93";
@@ -83,7 +83,7 @@ function PlaceCard({ place, C, onLongPress }: { place: SavedPlace; C: ReturnType
           <Text style={[s.placeSub, { color: C.sub }]} numberOfLines={1}>{place.category}</Text>
         ) : null}
         <View style={[s.placeBadge, { backgroundColor: meta.color + "18" }]}>
-          <Ionicons name={meta.icon} size={11} color={meta.color} />
+          <Icon name={meta.icon} size={11} color={meta.color} />
           <Text style={[s.placeBadgeText, { color: meta.color }]}>
             {def?.label ?? (place.list ?? "Saved")}
           </Text>
@@ -134,10 +134,10 @@ function JourneyCard({ journey, C, onPress, onLongPress }: { journey: SavedJourn
           <View style={s.journeyChips}>
             {segs.slice(0, 4).map((seg: any, i: number) => (
               <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
-                {i > 0 && <Ionicons name="chevron-forward" size={9} color={C.sub} />}
+                {i > 0 && <Icon name="chevron-forward" size={9} color={C.sub} />}
                 {seg.mode === "WALK" ? (
                   <View style={[s.walkChip, { backgroundColor: C.pressed }]}>
-                    <Ionicons name="walk" size={10} color={C.sub} />
+                    <Icon name="walk" size={10} color={C.sub} />
                     <Text style={[s.chipText, { color: C.sub }]}>
                       {Math.max(1, Math.round((seg.duration ?? 0) / 60))}m
                     </Text>
@@ -295,7 +295,7 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
           onPress={() => router.push("/(account)/notification-inbox" as any)}
           hitSlop={8}
         >
-          <Ionicons name="notifications-outline" size={20} color={C.text} />
+          <Icon name="notifications-outline" size={20} color={C.text} />
         </Pressable>
       </View>
 
@@ -319,7 +319,7 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
             <Text style={[s.profileName, { color: C.text }]} numberOfLines={1}>{user?.name ?? "—"}</Text>
             <Text style={[s.profileEmail, { color: C.sub }]} numberOfLines={1}>{user?.email ?? ""}</Text>
           </View>
-          <Ionicons name="chevron-forward" size={18} color={C.sub} />
+          <Icon name="chevron-forward" size={18} color={C.sub} />
         </Pressable>
 
         {/* New list button */}
@@ -327,7 +327,7 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
           style={[s.newListBtn, { backgroundColor: C.pill }]}
           onPress={handleNewList}
         >
-          <Ionicons name="add" size={18} color={ORANGE} />
+          <Icon name="add" size={18} color={ORANGE} />
           <Text style={s.newListText}>New list</Text>
         </Pressable>
 
@@ -348,7 +348,7 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
               <Text style={s.newListInputAddText}>Add</Text>
             </Pressable>
             <Pressable onPress={() => setShowNewListInput(false)} hitSlop={8}>
-              <Ionicons name="close" size={18} color={C.sub} />
+              <Icon name="close" size={18} color={C.sub} />
             </Pressable>
           </View>
         )}
@@ -366,7 +366,7 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
                   onPress={() => viewList(item.key)}
                 >
                   <View style={[s.listIconWrap, { backgroundColor: item.color + "22" }]}>
-                    <Ionicons name={item.icon} size={18} color={item.color} />
+                    <Icon name={item.icon} size={18} color={item.color} />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={[s.listTitle, { color: C.text }]}>{item.label}</Text>
@@ -376,7 +376,7 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
                     hitSlop={8}
                     onPress={() => showListOptions(item.key, item.label, count, isCustom)}
                   >
-                    <Ionicons name="ellipsis-horizontal" size={18} color={C.sub} />
+                    <Icon name="ellipsis-horizontal" size={18} color={C.sub} />
                   </Pressable>
                 </Pressable>
               </View>
@@ -435,7 +435,7 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
         {/* Empty state */}
         {isEmpty && (
           <View style={s.emptyState}>
-            <Ionicons name="bookmark-outline" size={56} color={C.sub} />
+            <Icon name="bookmark-outline" size={56} color={C.sub} />
             <Text style={[s.emptyTitle, { color: C.text }]}>Save places you love</Text>
             <Text style={[s.emptySub, { color: C.sub }]}>
               Tap the bookmark on any stop to save it here.

@@ -23,6 +23,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PressableScale } from "@/components/ui/PressableScale";
+import { Icon } from "@/components/icons/Icon";
 
 const SH = Dimensions.get("window").height;
 const ORANGE = "#FF6F00";
@@ -112,7 +113,7 @@ export function FormSheet({
             </View>
             <View style={styles.header}>
               <View style={[styles.iconCircle, { backgroundColor: accent + "1F" }]}>
-                <Ionicons name={icon} size={18} color={accent} />
+                <Icon name={icon} size={18} color={accent} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.title, { color: C.text }]} numberOfLines={1}>
@@ -131,7 +132,7 @@ export function FormSheet({
                 accessibilityRole="button"
                 accessibilityLabel="Close"
               >
-                <Ionicons name="close" size={16} color={C.sub} />
+                <Icon name="close" size={16} color={C.sub} />
               </PressableScale>
             </View>
           </View>

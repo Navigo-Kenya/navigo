@@ -2,6 +2,7 @@ import { useTopUiBottom } from "@/components/app/mapSheetInsets";
 import { Ionicons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 
@@ -49,7 +50,7 @@ export function OfflineNotice({ variant, dark, onPress }: OfflineNoticeProps) {
   if (variant === "active") {
     return (
       <View style={[s.pill, { top, backgroundColor: bg }]}>
-        <Ionicons name={copy.icon} size={14} color={ORANGE} />
+        <Icon name={copy.icon} size={14} color={ORANGE} />
         <Text style={[s.pillText, { color: text }]}>{copy.title}</Text>
       </View>
     );
@@ -58,7 +59,7 @@ export function OfflineNotice({ variant, dark, onPress }: OfflineNoticeProps) {
   return (
     <View style={[s.card, { top, backgroundColor: bg }]}>
       <View style={s.iconWrap}>
-        <Ionicons name={copy.icon} size={20} color={ORANGE} />
+        <Icon name={copy.icon} size={20} color={ORANGE} />
       </View>
       <View style={{ flex: 1 }}>
         <Text style={[s.title, { color: text }]}>{copy.title}</Text>

@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useRef, useState } from "react";
 import {
@@ -24,6 +23,7 @@ import {
 } from "@/components/auth/CountryPicker";
 import { AuthService } from "@/services/auth";
 import { useAuthStore, type AuthUser } from "@/store/authStore";
+import { Icon } from "@/components/icons/Icon";
 
 export default function Register() {
   const router = useRouter();
@@ -107,7 +107,7 @@ export default function Register() {
         {/* Back */}
         <Pressable onPress={() => router.back()} style={styles.back}>
           <View style={[styles.backBtn, { backgroundColor: C.inputBg }]}>
-            <Ionicons name="arrow-back" size={20} color={C.text} />
+            <Icon name="arrow-back" size={20} color={C.text} />
           </View>
         </Pressable>
 
@@ -122,7 +122,7 @@ export default function Register() {
         {/* Error */}
         {!!error && (
           <View style={[styles.errorBox, { backgroundColor: C.errBg, borderColor: C.errBd }]}>
-            <Ionicons name="alert-circle-outline" size={16} color={C.errText} />
+            <Icon name="alert-circle-outline" size={16} color={C.errText} />
             <Text style={[styles.errorText, { color: C.errText }]}>{error}</Text>
           </View>
         )}
@@ -145,14 +145,14 @@ export default function Register() {
 
         {/* Email toggle */}
         <Pressable onPress={toggleEmail} style={styles.emailToggle}>
-          <Ionicons name="mail-outline" size={17} color={C.accent} />
+          <Icon name="mail-outline" size={17} color={C.accent} />
           <Text style={[styles.emailToggleText, { color: C.accent }]}>Sign up with email</Text>
           <Animated.View style={{
             transform: [{
               rotate: expandAnim.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "90deg"] }),
             }],
           }}>
-            <Ionicons name="chevron-forward" size={15} color={C.accent} />
+            <Icon name="chevron-forward" size={15} color={C.accent} />
           </Animated.View>
         </Pressable>
 
@@ -185,7 +185,7 @@ export default function Register() {
                 >
                   <Text style={styles.flagEmoji}>{selectedCountry.flag}</Text>
                   <Text style={[styles.dialCode, { color: C.text }]}>{selectedCountry.dial}</Text>
-                  <Ionicons name="chevron-down" size={12} color={C.textSub} style={{ marginLeft: 2 }} />
+                  <Icon name="chevron-down" size={12} color={C.textSub} style={{ marginLeft: 2 }} />
                 </Pressable>
                 <TextInput
                   ref={phoneRef}
@@ -212,7 +212,7 @@ export default function Register() {
                   secureTextEntry={!showPw}
                 />
                 <Pressable onPress={() => setShowPw((v) => !v)} style={styles.eyeBtn}>
-                  <Ionicons
+                  <Icon
                     name={showPw ? "eye-off-outline" : "eye-outline"}
                     size={20}
                     color={C.textSub}

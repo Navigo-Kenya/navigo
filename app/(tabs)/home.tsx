@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
@@ -12,6 +11,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSearch } from "../../store/app";
+import { Icon } from "@/components/icons/Icon";
 
 // Core Brand Palette
 const COLORS = {
@@ -146,7 +146,7 @@ export default function Home() {
           <Text style={styles.searchText}>Search destination or stage</Text>
         </View>
         <View style={styles.searchRight}>
-          <Ionicons name="time-outline" size={18} color={COLORS.textHeading} />
+          <Icon name="time-outline" size={18} color={COLORS.textHeading} />
           <Text style={styles.searchRightText}>Now</Text>
         </View>
       </Pressable>
@@ -180,7 +180,7 @@ export default function Home() {
                 onPress={() => handlePredictiveRouting(route.title)}
               >
                 <View style={styles.cardIcon}>
-                  <Ionicons
+                  <Icon
                     name={route.icon as any}
                     size={22}
                     color={COLORS.primary}
@@ -214,7 +214,7 @@ export default function Home() {
         <Text style={styles.sectionTitle}>Community Pulse</Text>
         {COMMUNITY_ALERTS.map((alert) => (
           <View key={alert.id} style={styles.alertCard}>
-            <Ionicons
+            <Icon
               name="warning-outline"
               size={20}
               color={COLORS.alertText}
@@ -228,7 +228,7 @@ export default function Home() {
           style={({ pressed }) => [styles.mapCta, pressed && { opacity: 0.85 }]}
           onPress={() => handleNavigation("/(tabs)/map")}
         >
-          <Ionicons name="map-outline" size={20} color="#FFFFFF" />
+          <Icon name="map-outline" size={20} color="#FFFFFF" />
           <Text style={styles.mapCtaText}>Explore Live Map</Text>
         </Pressable>
       </View>

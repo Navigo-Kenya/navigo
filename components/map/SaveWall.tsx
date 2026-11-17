@@ -1,6 +1,6 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Icon } from "@/components/icons/Icon";
 
 interface SaveWallProps {
   visible:   boolean;
@@ -19,7 +19,7 @@ export function SaveWall({ visible, onDismiss, dark }: SaveWallProps) {
       <View style={[s.card, { backgroundColor: dark ? "#1C1C1E" : "#FFFFFF" }]}>
         <View style={s.handle} />
         <View style={s.iconWrap}>
-          <Ionicons name="bookmark-outline" size={26} color="#FF6F00" />
+          <Icon name="bookmark-outline" size={26} color="#FF6F00" />
         </View>
         <Text style={[s.title, { color: dark ? "#FFF" : "#1C1C1E" }]}>
           Save this journey

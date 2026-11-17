@@ -27,6 +27,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useContributionStore } from "@/store/contributionStore";
 import { StopService } from "@/services/stop";
 import { UnifiedLocation } from "@/store/journeyStore";
+import { Icon } from "@/components/icons/Icon";
+import { StopTypeBadge } from "@/components/app/StopTypeBadge";
 
 const ORANGE = "#FF6F00";
 const GREEN  = "#10B981";
@@ -94,10 +96,10 @@ function StopSearchInput({
   if (value !== null) {
     return (
       <View style={[ssi.chip, { backgroundColor: C.input, borderColor: C.border }]}>
-        <Ionicons name="bus-outline" size={16} color={ORANGE} />
+        <StopTypeBadge stop={value as any} size={20} />
         <Text style={[ssi.chipText, { color: C.text }]} numberOfLines={1}>{value.name}</Text>
         <Pressable onPress={() => onChange(null)} hitSlop={8}>
-          <Ionicons name="close-circle" size={18} color={C.sub} />
+          <Icon name="close-circle" size={18} color={C.sub} />
         </Pressable>
       </View>
     );
@@ -106,7 +108,7 @@ function StopSearchInput({
   return (
     <View>
       <View style={[ssi.inputRow, { backgroundColor: C.input, borderColor: C.border }]}>
-        <Ionicons name="search-outline" size={16} color={C.sub} />
+        <Icon name="search-outline" size={16} color={C.sub} />
         <TextInput
           style={[ssi.textInput, { color: C.text }]}
           placeholder={placeholder}
@@ -135,7 +137,7 @@ function StopSearchInput({
                 style={({ pressed }) => [ssi.dropRow, pressed && { backgroundColor: C.pressed }]}
                 onPress={() => { onChange(stop); setQuery(""); setOpen(false); }}
               >
-                <Ionicons name="bus-outline" size={15} color={ORANGE} />
+                <StopTypeBadge stop={stop as any} size={22} />
                 <View style={{ flex: 1 }}>
                   <Text style={[ssi.dropName, { color: C.text }]} numberOfLines={1}>{stop.name}</Text>
                   {stop.route_nams ? (
@@ -258,20 +260,20 @@ function LocationPickerModal({
 
         {/* Centered pin, pointer-events none so map panning works */}
         <View pointerEvents="none" style={[StyleSheet.absoluteFill, lpm.pinContainer]}>
-          <Ionicons name="location" size={44} color={ORANGE} style={{ marginBottom: -4 }} />
+          <Icon name="location" size={44} color={ORANGE} style={{ marginBottom: -4 }} />
           <View style={lpm.pinShadow} />
         </View>
 
         {/* Top bar */}
         <View style={[lpm.topBar, { paddingTop: insets.top + 8 }]}>
           <Pressable style={lpm.topBtn} onPress={onClose}>
-            <Ionicons name="arrow-back" size={20} color="#1C1C1E" />
+            <Icon name="arrow-back" size={20} color="#1C1C1E" />
             <Text style={lpm.topBtnText}>Cancel</Text>
           </Pressable>
           <Pressable style={lpm.topBtn} onPress={handleMyLocation} disabled={gpsLoading}>
             {gpsLoading
               ? <ActivityIndicator size="small" color="#1C1C1E" />
-              : <Ionicons name="locate-outline" size={20} color="#1C1C1E" />}
+              : <Icon name="locate-outline" size={20} color="#1C1C1E" />}
             <Text style={lpm.topBtnText}>My Location</Text>
           </Pressable>
         </View>
@@ -279,7 +281,7 @@ function LocationPickerModal({
         {/* Bottom card */}
         <View style={[lpm.bottomCard, { paddingBottom: insets.bottom + 16 }]}>
           <View style={lpm.coordChip}>
-            <Ionicons name="location-outline" size={14} color={GREY} />
+            <Icon name="location-outline" size={14} color={GREY} />
             <Text style={lpm.coordText}>
               {displayCoords.lat.toFixed(5)}, {displayCoords.lng.toFixed(5)}
             </Text>
@@ -288,7 +290,7 @@ function LocationPickerModal({
             style={lpm.confirmBtn}
             onPress={() => { onConfirm(centerRef.current); onClose(); }}
           >
-            <Ionicons name="checkmark-circle-outline" size={18} color="#FFF" />
+            <Icon name="checkmark-circle-outline" size={18} color="#FFF" />
             <Text style={lpm.confirmText}>Confirm Location</Text>
           </Pressable>
         </View>
@@ -421,7 +423,7 @@ function BottomSheet({
           <View style={sh.sheetHeader}>
             <Text style={[sh.sheetTitle, { color: C.text }]}>{title}</Text>
             <Pressable onPress={onClose} hitSlop={12}>
-              <Ionicons name="close" size={22} color={C.sub} />
+              <Icon name="close" size={22} color={C.sub} />
             </Pressable>
           </View>
           {children}
@@ -571,7 +573,7 @@ function StopReviewSheet({
       <View style={{ flexDirection: "row", gap: 6 }}>
         {[1, 2, 3, 4, 5].map((n) => (
           <Pressable key={n} onPress={() => onSet(n)} hitSlop={6}>
-            <Ionicons
+            <Icon
               name={n <= value ? "star" : "star-outline"}
               size={26}
               color={n <= value ? "#F59E0B" : C.sub}
@@ -623,7 +625,7 @@ function StopReviewSheet({
         />
         {selectedStop?.route_nams ? (
           <View style={[sh.routeHint, { borderColor: C.border }]}>
-            <Ionicons name="bus-outline" size={12} color={C.sub} />
+            <Icon name="bus-outline" size={12} color={C.sub} />
             <Text style={[sh.routeHintText, { color: C.sub }]} numberOfLines={1}>
               {selectedStop.route_nams}
             </Text>
@@ -799,7 +801,7 @@ function StopEditSheet({
               style={[sh.mapPickBtn, { borderColor: ORANGE }]}
               onPress={() => setLocationPickerVisible(true)}
             >
-              <Ionicons name="map-outline" size={15} color={ORANGE} />
+              <Icon name="map-outline" size={15} color={ORANGE} />
               <Text style={[sh.mapPickBtnText, { color: ORANGE }]}>Pick on Map</Text>
             </Pressable>
           )}
@@ -958,12 +960,12 @@ function NewStopSheet({
                   contentFit="cover"
                 />
                 <View style={sh.coordChipRow}>
-                  <Ionicons name="location" size={13} color={ORANGE} />
+                  <Icon name="location" size={13} color={ORANGE} />
                   <Text style={[sh.coordText, { color: C.text }]}>
                     {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}
                   </Text>
                   <Pressable onPress={() => setCoords(null)} hitSlop={8}>
-                    <Ionicons name="close-circle" size={16} color={C.sub} />
+                    <Icon name="close-circle" size={16} color={C.sub} />
                   </Pressable>
                 </View>
               </>
@@ -981,14 +983,14 @@ function NewStopSheet({
             >
               {gpsLoading
                 ? <ActivityIndicator size="small" color={ORANGE} />
-                : <Ionicons name="locate-outline" size={16} color={C.text} />}
+                : <Icon name="locate-outline" size={16} color={C.text} />}
               <Text style={[sh.locationBtnText, { color: C.text }]}>My Location</Text>
             </Pressable>
             <Pressable
               style={[sh.locationBtn, { borderColor: C.border, backgroundColor: C.input }]}
               onPress={() => setLocationPickerVisible(true)}
             >
-              <Ionicons name="map-outline" size={16} color={C.text} />
+              <Icon name="map-outline" size={16} color={C.text} />
               <Text style={[sh.locationBtnText, { color: C.text }]}>Pick on Map</Text>
             </Pressable>
           </View>
@@ -1095,7 +1097,7 @@ function TypeCard({
     <Pressable onPress={onPress} style={{ width: "48%" }}>
       <View style={[s.typeCard, { backgroundColor: C.card, borderColor: C.border }]}>
         <View style={[s.typeIconCircle, { backgroundColor: ORANGE + "18" }]}>
-          <Ionicons name={type.icon} size={19} color={ORANGE} />
+          <Icon name={type.icon} size={19} color={ORANGE} />
         </View>
         <Text style={[s.typeLabel, { color: C.text }]}>{type.label}</Text>
         <Text style={[s.typeSub, { color: C.sub }]}>{type.subtitle}</Text>
@@ -1163,7 +1165,7 @@ export default function ContributionScreen() {
                     <Text style={[s.statsPillStreak, { color: C.text }]}>{stats.streak_days}d</Text>
                   </View>
                 ) : null}
-                <Ionicons name="chevron-forward" size={18} color={C.sub} />
+                <Icon name="chevron-forward" size={18} color={C.sub} />
               </View>
             </View>
           </Pressable>
@@ -1179,7 +1181,7 @@ export default function ContributionScreen() {
           onPress={() => router.push("/(account)/leaderboard" as any)}
           style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 8 }}
         >
-          <Ionicons name="trophy-outline" size={16} color={ORANGE} />
+          <Icon name="trophy-outline" size={16} color={ORANGE} />
           <Text style={{ color: ORANGE, fontWeight: "600" }}>View leaderboard</Text>
         </Pressable>
       </ScrollView>

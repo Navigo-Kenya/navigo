@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { Pressable, StyleSheet, Text, useColorScheme, View } from "react-native";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 
@@ -21,7 +22,7 @@ export default function GuestWall({ icon, title, subtitle }: GuestWallProps) {
   return (
     <View style={s.root}>
       <View style={s.iconWrap}>
-        <Ionicons name={icon} size={32} color={ORANGE} />
+        <Icon name={icon} size={32} color={ORANGE} />
       </View>
 
       <Text style={[s.title, { color: C.text }]}>{title}</Text>

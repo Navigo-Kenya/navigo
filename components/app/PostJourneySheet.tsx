@@ -18,6 +18,7 @@ import {
   useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
 const GREEN  = "#34C759";
@@ -80,7 +81,7 @@ function StarRow({ rating, onRate }: { rating: number; onRate: (n: number) => vo
             onPressOut={() => setHovered(0)}
             hitSlop={10}
           >
-            <Ionicons
+            <Icon
               name={n <= active ? "star" : "star-outline"}
               size={42}
               color={n <= active ? ORANGE : "rgba(142,142,147,0.32)"}
@@ -247,7 +248,7 @@ export default function PostJourneySheet({
           {!submitted && (
             <View style={s.header}>
               <View style={[s.doneChip, { backgroundColor: dark ? "rgba(52,199,89,0.14)" : "#ECFDF5" }]}>
-                <Ionicons name="checkmark-circle" size={13} color={GREEN} />
+                <Icon name="checkmark-circle" size={13} color={GREEN} />
                 <Text style={s.doneChipText}>Journey complete</Text>
               </View>
               <Text style={[s.destName, { color: C.text }]} numberOfLines={1}>
@@ -267,7 +268,7 @@ export default function PostJourneySheet({
           {submitted ? (
             <View style={s.successWrap}>
               <View style={[s.successCircle, { backgroundColor: dark ? "rgba(52,199,89,0.15)" : "#ECFDF5" }]}>
-                <Ionicons name="checkmark-circle" size={52} color={GREEN} />
+                <Icon name="checkmark-circle" size={52} color={GREEN} />
               </View>
               <Text style={[s.successTitle, { color: C.text }]}>Thanks for the feedback!</Text>
               <Text style={[s.successSub,   { color: C.sub  }]}>
@@ -376,7 +377,7 @@ export default function PostJourneySheet({
                             },
                           ]}
                         >
-                          <Ionicons name={tag.icon} size={12} color={sel ? ORANGE : C.sub} />
+                          <Icon name={tag.icon} size={12} color={sel ? ORANGE : C.sub} />
                           <Text style={[s.tagText, { color: sel ? ORANGE : C.text }]}>
                             {tag.label}
                           </Text>

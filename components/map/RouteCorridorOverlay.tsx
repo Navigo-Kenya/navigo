@@ -16,11 +16,11 @@ import {
   useColorScheme,
 } from "react-native";
 import { ShapeSource, LineLayer, CircleLayer, SymbolLayer } from "@rnmapbox/maps";
-import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import type { RouteCorridorResponse } from "@/services/stop";
 import type { Stop } from "@/utils/mapHelpers";
+import { Icon } from "@/components/icons/Icon";
 
 const NativeShapeSource = ShapeSource as unknown as React.ComponentType<any>;
 const NativeLineLayer = LineLayer as unknown as React.ComponentType<any>;
@@ -250,7 +250,7 @@ export function RouteCorridorSheet({
           accessibilityRole="button"
           accessibilityLabel="Close"
         >
-          <Ionicons name="close" size={16} color={C.sub} />
+          <Icon name="close" size={16} color={C.sub} />
         </PressableScale>
       </View>
 
@@ -272,7 +272,7 @@ export function RouteCorridorSheet({
                 accessibilityRole="tab"
                 accessibilityState={{ selected: isSel }}
               >
-                <Ionicons name="arrow-forward" size={12} color={isSel ? color : C.sub} />
+                <Icon name="arrow-forward" size={12} color={isSel ? color : C.sub} />
                 <Text style={[s.segText, { color: isSel ? C.text : C.sub }]} numberOfLines={1}>
                   To {headsign}
                 </Text>
@@ -362,7 +362,7 @@ export function RouteCorridorSheet({
                     accessibilityRole="button"
                     accessibilityLabel={`Departures at ${st.name}`}
                   >
-                    <Ionicons name="time-outline" size={16} color={C.text} />
+                    <Icon name="time-outline" size={16} color={C.text} />
                   </PressableScale>
                   <PressableScale
                     onPress={() =>
@@ -376,7 +376,7 @@ export function RouteCorridorSheet({
                     accessibilityRole="button"
                     accessibilityLabel={`Directions to ${st.name}`}
                   >
-                    <Ionicons name="navigate" size={15} color="#FFFFFF" />
+                    <Icon name="navigate" size={15} color="#FFFFFF" />
                   </PressableScale>
                 </View>
               </Pressable>
