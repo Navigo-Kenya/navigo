@@ -32,7 +32,10 @@ export function poiCategoryKeyOf(label: string | undefined | null): string {
   if (/school|universit|college/.test(l)) return "education";
   if (/church|mosque|temple|worship/.test(l)) return "worship";
   if (/supermarket|grocer|store/.test(l)) return "grocery";
-  if (/park|museum|attraction|cinema|theatre/.test(l)) return "attraction";
+  if (/park|garden|nature|forest/.test(l)) return "park";
+  if (/cinema|movie|theat|music|casino|entertain/.test(l)) return "entertainment";
+  if (/stadium|gym|fitness|sport|golf|pool/.test(l)) return "sport";
+  if (/museum|monument|attraction|historic|gallery|zoo/.test(l)) return "attraction";
   return "services";
 }
 
