@@ -366,10 +366,17 @@ function PlaceSheet({ place: base, onFocusCoords, userLat, userLng }: Props & { 
     place.distanceM ??
       (userLat != null && userLng != null ? distanceM(userLat, userLng, place.lat, place.lng) : undefined)
   );
-  // Google photos carry their author attribution, shown on each photo.
-  const photos: { uri: string; credit?: string }[] = g?.photos?.length
-    ? g.photos.map((p) => ({ uri: poiPhotoUrl(p.name, 600), credit: p.attributions[0]?.name ?? undefined }))
-    : (place.photos?.length ? place.photos : [mapboxStaticPhoto(place.lng, place.lat)]).map((uri) => ({ uri }));
+  // Google photos carry their author attribution, shown on each photo. The
+  // direct CDN URL loads fastest; the API redirect is the fallback (and the
+  // only source on a first view, before the API has resolved the URLs).
+  const photos: PhotoItem[] = g?.photos?.length
+    ? g.photos.map((p) => {
+        const proxy = poiPhotoUrl(p.name, 600);
+        return { key: p.name, uri: p.url || proxy, fallback: p.url ? proxy : undefined, credit: p.attributions[0]?.name ?? undefined };
+      })
+    : (place.photos?.length ? place.photos : [mapboxStaticPhoto(place.lng, place.lat)]).map((uri) => ({ key: uri, uri }));
+  // While our POI's details load, show placeholders, not the map snapshot.
+  const photosLoading = !!poiId && detailsLoading;
 
   const go = (role: "from" | "to") => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -424,23 +431,11 @@ function PlaceSheet({ place: base, onFocusCoords, userLat, userLng }: Props & { 
       footer={footer}
     >
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.photoStrip}>
-        {photos.map((p, i) => (
-          <View key={p.uri} style={[s.photo, { backgroundColor: C.chip }]}>
-            <Image
-              source={{ uri: p.uri }}
-              style={StyleSheet.absoluteFill}
-              contentFit="cover"
-              transition={200}
-              recyclingKey={p.uri}
-              accessibilityLabel={`${place.name}, photo ${i + 1}`}
-            />
-            {p.credit ? (
-              <Text style={s.photoCredit} numberOfLines={1}>
-                {p.credit}
-              </Text>
-            ) : null}
-          </View>
-        ))}
+        {photosLoading
+          ? [0, 1, 2].map((i) => <PhotoSkeleton key={i} color={C.skeleton} />)
+          : photos.map((p, i) => (
+              <PhotoTile key={p.key} photo={p} index={i} placeName={place.name} bg={C.chip} />
+            ))}
       </ScrollView>
 
       <View style={[s.actions, s.placeActions]}>
@@ -615,6 +610,50 @@ function InfoSkeleton({ color }: { color: string }) {
 }
 
 // ─── Small parts ─────────────────────────────────────────────────────────────
+
+type PhotoItem = { key: string; uri: string; fallback?: string; credit?: string };
+
+/** A place photo: direct URL first, the API redirect if that fails (an expired link). */
+function PhotoTile({ photo, index, placeName, bg }: { photo: PhotoItem; index: number; placeName: string; bg: string }) {
+  const [uri, setUri] = useState(photo.uri);
+  return (
+    <View style={[s.photo, { backgroundColor: bg }]}>
+      <Image
+        source={{ uri }}
+        style={StyleSheet.absoluteFill}
+        contentFit="cover"
+        transition={180}
+        cachePolicy="memory-disk"
+        priority={index === 0 ? "high" : "normal"}
+        recyclingKey={photo.key}
+        onError={() => {
+          if (photo.fallback && uri !== photo.fallback) setUri(photo.fallback);
+        }}
+        accessibilityLabel={`${placeName}, photo ${index + 1}`}
+      />
+      {photo.credit ? (
+        <Text style={s.photoCredit} numberOfLines={1}>
+          {photo.credit}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+function PhotoSkeleton({ color }: { color: string }) {
+  const pulse = useRef(new Animated.Value(0.5)).current;
+  React.useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 600, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.5, duration: 600, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+  return <Animated.View style={[s.photo, { backgroundColor: color, opacity: pulse }]} />;
+}
 
 /** Category, rating and open status, each only when we actually know it. */
 function PlaceFacts({ place, sub, showCategory }: { place: ExplorePlaceItem; sub: string; showCategory?: boolean }) {
