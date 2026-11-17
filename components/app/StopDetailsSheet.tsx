@@ -1,66 +1,62 @@
 // components/app/StopDetailsSheet.tsx
-import { useReportSheetTop } from "./mapSheetInsets";
-import {
-  ContributionService,
-  StopPhoto,
-  StopReview,
-} from "@/services/contribution";
-import { useContributionStore } from "@/store/contributionStore";
-import { useSavedStore } from "@/store/savedStore";
-import {
-  StopRoute,
-  StopService,
-  type StopDeparturesResponse,
-  type StopRouteBoardItem,
-} from "@/services/stop";
-import { useAuthStore } from "@/store/authStore";
-import { formatEta } from "@/utils/mapHelpers";
-import { departureMeta } from "@/utils/departures";
-import { LineNoDepartures, NoDeparturesState } from "./DepartureEmpty";
-import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
-import * as Location from "expo-location";
-import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
+//
+// A stop's sheet, built like the place sheet (MapSheet: drag, snap, floating
+// controls follow it) and adapted to transit:
+//   - header: stop-type badge, name, platform, code · direction, community
+//     rating and the next departure; swipe sideways for neighbouring stops
+//   - actions: Save · Share · Report a delay · Suggest an edit · Review
+//   - tabs: Arrivals (live board, refreshes every 30 s) · Info (photos,
+//     landmark, lines, accessibility) · Reviews (summary, tags, cards)
+//   - footer: From here / Directions
+// Contributions open as bottom-sheet forms (stop/StopReviewForm,
+// StopEditForm, StopReportForm).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Animated,
   Dimensions,
-  KeyboardAvoidingView,
-  Modal,
   PanResponder,
-  Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
-  TextInput,
-  TouchableWithoutFeedback,
   View,
   useColorScheme,
 } from "react-native";
+import { Image } from "expo-image";
+import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { useRouter } from "expo-router";
+import { ContributionService, type StopPhoto, type StopReview } from "@/services/contribution";
 import {
-  MapView as MapboxMapView,
-  Camera as MapboxCamera,
-} from "@rnmapbox/maps";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+  StopService,
+  type StopDeparturesResponse,
+  type StopRoute,
+  type StopRouteBoardItem,
+} from "@/services/stop";
+import { useAuthStore } from "@/store/authStore";
+import { useSavedStore } from "@/store/savedStore";
+import { formatEta } from "@/utils/mapHelpers";
+import { departureMeta } from "@/utils/departures";
+import { StopTypeGlyph } from "@/components/icons/NavigoIcons";
+import { PressableScale } from "@/components/ui/PressableScale";
+import { LineNoDepartures, NoDeparturesState } from "./DepartureEmpty";
+import { MapSheet, type MapSheetHandle } from "./MapSheet";
+import { resolveStopCategory } from "./StopsLayer";
+import { REVIEW_TAGS, Stars, StopReviewForm } from "./stop/StopReviewForm";
+import { StopEditForm } from "./stop/StopEditForm";
+import { StopReportForm } from "./stop/StopReportForm";
 
 const ORANGE = "#FF6F00";
 const BLUE = "#2563EB";
-const GREEN = "#10B981";
+const GREEN = "#16A34A";
 const RED = "#DC2626";
-const GREY = "#8E8E93";
 const AMBER = "#F59E0B";
-
-const SCREEN_H = Dimensions.get("window").height;
-const SCREEN_W = Dimensions.get("window").width;
-/** Horizontal drag that switches to the neighbouring stop on release. */
-const SWIPE_SWITCH_PX = SCREEN_W * 0.22;
-const FULL_Y = SCREEN_H * 0.08;
-const HALF_Y = SCREEN_H * 0.36;
-const PEEK_Y = SCREEN_H - 390;
+const { height: SH, width: SW } = Dimensions.get("window");
+const SWIPE_SWITCH_PX = SW * 0.22;
+const REFRESH_MS = 30_000;
 
 type Stop = {
   id: string;
@@ -73,1126 +69,63 @@ type Stop = {
   platform_code?: string | null;
   landmark?: string | null;
   direction_label?: string | null;
+  mode?: string | null;
+  mode_badge?: string | null;
 };
 
-function makeC(dark: boolean) {
-  return {
-    bg: dark ? "#18181B" : "#FFFFFF",
-    card: dark ? "#27272A" : "#F4F4F5",
-    text: dark ? "#F9FAFB" : "#111827",
-    sub: dark ? "#9CA3AF" : "#6B7280",
-    border: dark ? "#3F3F46" : "#E5E7EB",
-    handle: dark ? "#52525B" : "#D1D5DB",
-    softOrange: dark ? "rgba(255,111,0,0.16)" : "#FFF3E0",
-    softRed: dark ? "rgba(239,68,68,0.15)" : "#FEF2F2",
-    softGreen: dark ? "rgba(16,185,129,0.15)" : "#F0FDF4",
-    softBlue: dark ? "rgba(59,130,246,0.15)" : "#EFF6FF",
-    softPurple: dark ? "rgba(139,92,246,0.15)" : "#F5F3FF",
-    sheetBg: dark ? "#18181B" : "#FFFFFF",
-    input: dark ? "#3F3F46" : "#F3F4F6",
-  };
-}
+type Tab = "arrivals" | "info" | "reviews";
+type Form = "review" | "edit" | "report" | null;
 
-function locationLabel(t: number | undefined, stopType?: string | null): string {
-  const st = String(stopType ?? "").toLowerCase();
-  if (st.includes("rail")) return "Railway Station";
-  if (st.includes("metro")) return "Metro / Subway Station";
-  if (st.includes("brt")) return "BRT Station";
-  if (st.includes("ferry")) return "Ferry Terminal";
-  switch (t) {
-    case 0:
-      return "Transit Stop & Stage";
-    case 1:
-      return "Major Transit Terminal";
-    case 2:
-      return "Station Entrance / Exit";
-    default:
-      return "Transit Stop";
-  }
-}
-
-// ── Location Picker Modal ────────────────────────────────────────────────────
-function LocationPickerModal({
-  visible,
-  onClose,
-  onConfirm,
-  initialLat = -1.2921,
-  initialLng = 36.8219,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onConfirm: (loc: { lat: number; lng: number }) => void;
-  initialLat?: number;
-  initialLng?: number;
-}) {
-  const insets = useSafeAreaInsets();
-  const cameraRef = useRef<MapboxCamera>(null);
-  const centerRef = useRef({ lat: initialLat, lng: initialLng });
-  const [displayCoords, setDisplayCoords] = useState({
-    lat: initialLat,
-    lng: initialLng,
-  });
-  const [gpsLoading, setGpsLoading] = useState(false);
-
-  const onRegionDidChange = (feature: any) => {
-    const [lng, lat] = feature?.geometry?.coordinates ?? [
-      initialLng,
-      initialLat,
-    ];
-    centerRef.current = { lat, lng };
-    setDisplayCoords({ lat, lng });
-  };
-
-  const handleMyLocation = async () => {
-    setGpsLoading(true);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Permission needed", "Enable location in Settings.");
-        return;
-      }
-      const pos = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      const { latitude, longitude } = pos.coords;
-      cameraRef.current?.setCamera({
-        centerCoordinate: [longitude, latitude],
-        zoomLevel: 16,
-        animationDuration: 500,
-      });
-      centerRef.current = { lat: latitude, lng: longitude };
-      setDisplayCoords({ lat: latitude, lng: longitude });
-    } catch {
-      Alert.alert("Error", "Could not get your location.");
-    } finally {
-      setGpsLoading(false);
-    }
-  };
-
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent={false}
-      onRequestClose={onClose}
-      statusBarTranslucent
-    >
-      <View style={{ flex: 1 }}>
-        <MapboxMapView
-          style={StyleSheet.absoluteFill}
-          styleURL={
-            process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL ??
-            "mapbox://styles/mapbox/streets-v12"
-          }
-          logoEnabled={false}
-          attributionEnabled={false}
-          onRegionDidChange={onRegionDidChange}
-        >
-          <MapboxCamera
-            ref={cameraRef}
-            defaultSettings={{
-              centerCoordinate: [initialLng, initialLat],
-              zoomLevel: 15,
-            }}
-          />
-        </MapboxMapView>
-        <View
-          pointerEvents="none"
-          style={[StyleSheet.absoluteFill, lpm.pinContainer]}
-        >
-          <Ionicons
-            name="location"
-            size={44}
-            color={ORANGE}
-            style={{ marginBottom: -4 }}
-          />
-          <View style={lpm.pinShadow} />
-        </View>
-        <View style={[lpm.topBar, { paddingTop: insets.top + 8 }]}>
-          <Pressable style={lpm.topBtn} onPress={onClose}>
-            <Ionicons name="arrow-back" size={20} color="#1C1C1E" />
-            <Text style={lpm.topBtnText}>Cancel</Text>
-          </Pressable>
-          <Pressable
-            style={lpm.topBtn}
-            onPress={handleMyLocation}
-            disabled={gpsLoading}
-          >
-            {gpsLoading ? (
-              <ActivityIndicator size="small" color="#1C1C1E" />
-            ) : (
-              <Ionicons name="locate-outline" size={20} color="#1C1C1E" />
-            )}
-            <Text style={lpm.topBtnText}>My Location</Text>
-          </Pressable>
-        </View>
-        <View style={[lpm.bottomCard, { paddingBottom: insets.bottom + 16 }]}>
-          <View style={lpm.coordChip}>
-            <Ionicons name="location-outline" size={14} color={GREY} />
-            <Text style={lpm.coordText}>
-              {displayCoords.lat.toFixed(6)}, {displayCoords.lng.toFixed(6)}
-            </Text>
-          </View>
-          <Pressable
-            style={lpm.confirmBtn}
-            onPress={() => {
-              onConfirm(centerRef.current);
-              onClose();
-            }}
-          >
-            <Ionicons name="checkmark-circle-outline" size={18} color="#FFF" />
-            <Text style={lpm.confirmText}>Confirm Location</Text>
-          </Pressable>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-const lpm = StyleSheet.create({
-  pinContainer: { alignItems: "center", justifyContent: "center" },
-  pinShadow: {
-    width: 10,
-    height: 5,
-    borderRadius: 5,
-    backgroundColor: "rgba(0,0,0,0.25)",
-  },
-  topBar: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-  },
-  topBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "rgba(255,255,255,0.92)",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-  },
-  topBtnText: { fontWeight: "600", fontSize: 14, color: "#1C1C1E" },
-  bottomCard: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: "#FFFFFF",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingTop: 16,
-    paddingHorizontal: 16,
-    gap: 12,
-    shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: -2 },
-    elevation: 8,
-  },
-  coordChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "#F3F4F6",
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    alignSelf: "center",
-  },
-  coordText: { fontSize: 13, fontWeight: "500", color: "#6B7280" },
-  confirmBtn: {
-    backgroundColor: ORANGE,
-    height: 50,
-    borderRadius: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  confirmText: { color: "#FFF", fontWeight: "700", fontSize: 16 },
-});
-
-// ── Inline mini bottom sheet ─────────────────────────────────────────────────
-function MiniSheet({
-  visible,
-  onClose,
-  title,
-  children,
-  C,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  title: string;
-  children: React.ReactNode;
-  C: ReturnType<typeof makeC>;
-}) {
-  const anim = useRef(new Animated.Value(400)).current;
-
-  useEffect(() => {
-    Animated.spring(anim, {
-      toValue: visible ? 0 : 400,
-      useNativeDriver: true,
-      damping: 22,
-      stiffness: 220,
-    }).start();
-  }, [visible, anim]);
-
-  if (!visible) return null;
-
-  return (
-    <Modal
-      transparent
-      animationType="none"
-      onRequestClose={onClose}
-      statusBarTranslucent
-    >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={{ flex: 1 }}
-      >
-        <TouchableWithoutFeedback onPress={onClose}>
-          <View style={ms.backdrop} />
-        </TouchableWithoutFeedback>
-        <Animated.View
-          style={[
-            ms.sheet,
-            { backgroundColor: C.sheetBg, transform: [{ translateY: anim }] },
-          ]}
-        >
-          <View style={ms.handle} />
-          <View style={ms.header}>
-            <Text style={[ms.title, { color: C.text }]}>{title}</Text>
-            <Pressable onPress={onClose} hitSlop={12}>
-              <Ionicons name="close" size={22} color={C.sub} />
-            </Pressable>
-          </View>
-          {children}
-        </Animated.View>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
-const ms = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)" },
-  sheet: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingBottom: 40,
-    maxHeight: "85%",
-  },
-  handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "#C7C7CC",
-    alignSelf: "center",
-    marginTop: 10,
-    marginBottom: 4,
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-  },
-  title: { fontSize: 18, fontWeight: "700" },
-  body: { paddingHorizontal: 20, paddingBottom: 20 },
-  label: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-    marginBottom: 8,
-  },
-  input: {
-    height: 44,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    fontSize: 15,
-  },
-  textArea: {
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    fontSize: 15,
-    minHeight: 76,
-    textAlignVertical: "top",
-  },
-  pillRow: { flexDirection: "row", gap: 8 },
-  pill: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    alignItems: "center",
-  },
-  pillText: { fontWeight: "600", fontSize: 14 },
-  hint: { fontSize: 12, textAlign: "center", marginTop: 12, marginBottom: 8 },
-  submitBtn: {
-    height: 50,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 6,
-    backgroundColor: ORANGE,
-  },
-  submitText: { color: "#FFF", fontWeight: "700", fontSize: 16 },
-  ratingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  ratingLabel: { fontSize: 14, fontWeight: "500" },
-  stars: { flexDirection: "row", gap: 6 },
-  ratingCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    overflow: "hidden",
-    marginBottom: 14,
-  },
-  dividerThin: { height: StyleSheet.hairlineWidth, marginHorizontal: 14 },
-});
-
-// ── Delay Report mini-sheet ──────────────────────────────────────────────────
-function DelaySheet({
-  stop,
-  onClose,
-  C,
-}: {
-  stop: Stop;
-  onClose: () => void;
-  C: ReturnType<typeof makeC>;
-}) {
-  const [severity, setSeverity] = useState<"minor" | "major" | "cancelled">(
-    "minor"
-  );
-  const [note, setNote] = useState("");
-  const [loading, setLoading] = useState(false);
-  const { submit } = useContributionStore();
-
-  const SEVS: {
-    key: "minor" | "major" | "cancelled";
-    label: string;
-    color: string;
-  }[] = [
-    { key: "minor", label: "Minor", color: AMBER },
-    { key: "major", label: "Major", color: RED },
-    { key: "cancelled", label: "Cancelled", color: GREY },
-  ];
-
-  const handleSubmit = async () => {
-    setLoading(true);
-    try {
-      const res = await submit({
-        type: "delay_report",
-        title: `${
-          severity.charAt(0).toUpperCase() + severity.slice(1)
-        } delay at ${stop.name}`,
-        data: { severity, note: note.trim() || undefined },
-      });
-      onClose();
-      setNote("");
-      setSeverity("minor");
-      if (res.points_awarded > 0)
-        Alert.alert("", `+${res.points_awarded} Navigo Points earned!`);
-    } catch {
-      Alert.alert("Error", "Could not submit. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <ScrollView
-      contentContainerStyle={[ms.body, { gap: 0 }]}
-      keyboardShouldPersistTaps="handled"
-    >
-      <Text style={[ms.label, { color: C.sub, marginBottom: 8 }]}>
-        SEVERITY
-      </Text>
-      <View style={[ms.pillRow, { marginBottom: 18 }]}>
-        {SEVS.map((sv) => (
-          <Pressable
-            key={sv.key}
-            onPress={() => setSeverity(sv.key)}
-            style={[
-              ms.pill,
-              { borderColor: severity === sv.key ? sv.color : C.border },
-              severity === sv.key && { backgroundColor: sv.color + "18" },
-            ]}
-          >
-            <Text
-              style={[
-                ms.pillText,
-                { color: severity === sv.key ? sv.color : C.sub },
-              ]}
-            >
-              {sv.label}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-
-      <Text style={[ms.label, { color: C.sub, marginBottom: 8 }]}>
-        NOTE (OPTIONAL)
-      </Text>
-      <TextInput
-        style={[
-          ms.textArea,
-          {
-            backgroundColor: C.card,
-            color: C.text,
-            borderColor: C.border,
-            marginBottom: 0,
-          },
-        ]}
-        placeholder={`Any detail about the delay at ${stop.name}…`}
-        placeholderTextColor={C.sub}
-        multiline
-        numberOfLines={3}
-        value={note}
-        onChangeText={setNote}
-        maxLength={250}
-      />
-
-      <Text style={[ms.hint, { color: C.sub }]}>
-        Awards +3 Navigo Points immediately
-      </Text>
-
-      <Pressable
-        style={[
-          ms.submitBtn,
-          { backgroundColor: RED },
-          loading && { opacity: 0.6 },
-        ]}
-        onPress={handleSubmit}
-        disabled={loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="#FFF" size="small" />
-        ) : (
-          <Text style={ms.submitText}>Submit Delay Report</Text>
-        )}
-      </Pressable>
-    </ScrollView>
-  );
-}
-
-// ── Review mini-sheet ────────────────────────────────────────────────────────
-function ReviewSheet({
-  stop,
-  onClose,
-  C,
-  existingReview,
-}: {
-  stop: Stop;
-  onClose: () => void;
-  C: ReturnType<typeof makeC>;
-  existingReview?: StopReview;
-}) {
-  const [safety, setSafety] = useState(existingReview?.data.safety ?? 0);
-  const [comfort, setComfort] = useState(existingReview?.data.comfort ?? 0);
-  const [clean, setClean] = useState(existingReview?.data.cleanliness ?? 0);
-  const [text, setText] = useState(existingReview?.data.text ?? "");
-  const [loading, setLoading] = useState(false);
-  const { submit } = useContributionStore();
-
-  useEffect(() => {
-    setSafety(existingReview?.data.safety ?? 0);
-    setComfort(existingReview?.data.comfort ?? 0);
-    setClean(existingReview?.data.cleanliness ?? 0);
-    setText(existingReview?.data.text ?? "");
-  }, [existingReview]);
-
-  const StarRating = ({
-    value,
-    onSet,
-  }: {
-    value: number;
-    onSet: (n: number) => void;
-  }) => (
-    <View style={ms.stars}>
-      {[1, 2, 3, 4, 5].map((n) => (
-        <Pressable key={n} onPress={() => onSet(n)} hitSlop={6}>
-          <Ionicons
-            name={n <= value ? "star" : "star-outline"}
-            size={24}
-            color={n <= value ? AMBER : C.sub}
-          />
-        </Pressable>
-      ))}
-    </View>
-  );
-
-  const handleSubmit = async () => {
-    if (!safety || !comfort || !clean) {
-      Alert.alert(
-        "Rate all categories",
-        "Please give a rating in all three categories."
-      );
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await submit({
-        type: "stop_review",
-        stop_id: stop.id,
-        title: `Review: ${stop.name}`,
-        data: {
-          safety,
-          comfort,
-          cleanliness: clean,
-          text: text.trim() || undefined,
-        },
-      });
-      onClose();
-      setSafety(0);
-      setComfort(0);
-      setClean(0);
-      setText("");
-      if (res.points_awarded > 0)
-        Alert.alert("", `+${res.points_awarded} Navigo Points earned!`);
-    } catch {
-      Alert.alert("Error", "Could not submit. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const isEdit = !!existingReview;
-
-  return (
-    <ScrollView
-      contentContainerStyle={ms.body}
-      keyboardShouldPersistTaps="handled"
-    >
-      <View
-        style={[
-          ms.ratingCard,
-          { backgroundColor: C.card, borderColor: C.border },
-        ]}
-      >
-        {(
-          [
-            { label: "Safety", value: safety, set: setSafety },
-            { label: "Comfort", value: comfort, set: setComfort },
-            { label: "Cleanliness", value: clean, set: setClean },
-          ] as const
-        ).map((row, i) => (
-          <React.Fragment key={row.label}>
-            {i > 0 && (
-              <View style={[ms.dividerThin, { backgroundColor: C.border }]} />
-            )}
-            <View style={ms.ratingRow}>
-              <Text style={[ms.ratingLabel, { color: C.text }]}>
-                {row.label}
-              </Text>
-              <StarRating value={row.value} onSet={row.set} />
-            </View>
-          </React.Fragment>
-        ))}
-      </View>
-
-      <Text style={[ms.label, { color: C.sub, marginBottom: 8 }]}>
-        COMMENTS (OPTIONAL)
-      </Text>
-      <TextInput
-        style={[
-          ms.textArea,
-          { backgroundColor: C.card, color: C.text, borderColor: C.border },
-        ]}
-        placeholder={`Share your experience at ${stop.name}…`}
-        placeholderTextColor={C.sub}
-        multiline
-        numberOfLines={3}
-        value={text}
-        onChangeText={setText}
-        maxLength={400}
-      />
-
-      <Text style={[ms.hint, { color: C.sub }]}>
-        {isEdit
-          ? "Updates your existing review"
-          : "Awards +10 Navigo Points immediately"}
-      </Text>
-
-      <Pressable
-        style={[ms.submitBtn, loading && { opacity: 0.6 }]}
-        onPress={handleSubmit}
-        disabled={loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="#FFF" size="small" />
-        ) : (
-          <Text style={ms.submitText}>
-            {isEdit ? "Update Review" : "Submit Review"}
-          </Text>
-        )}
-      </Pressable>
-    </ScrollView>
-  );
-}
-
-// ── Edit mini-sheet ──────────────────────────────────────────────────────────
-function EditSheet({
-  stop,
-  routes,
-  onClose,
-  onOpenMapPicker,
-  C,
-}: {
-  stop: Stop;
-  routes: StopRoute[];
-  onClose: () => void;
-  onOpenMapPicker: (cb: (loc: { lat: number; lng: number }) => void) => void;
-  C: ReturnType<typeof makeC>;
-}) {
-  const [field, setField] = useState<"name" | "location" | "routes">("name");
-  const [current, setCurrent] = useState("");
-  const [proposed, setProposed] = useState("");
-  const [note, setNote] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [gpsLoading, setGpsLoading] = useState(false);
-  const { submit } = useContributionStore();
-
-  const FIELDS: { key: "name" | "location" | "routes"; label: string }[] = [
-    { key: "name", label: "Name" },
-    { key: "location", label: "Location" },
-    { key: "routes", label: "Routes" },
-  ];
-
-  useEffect(() => {
-    switch (field) {
-      case "name":
-        setCurrent(stop.name);
-        break;
-      case "location":
-        setCurrent(`${stop.lat.toFixed(6)}, ${stop.lng.toFixed(6)}`);
-        break;
-      case "routes":
-        setCurrent(routes.map((r) => r.short_name).join(", "));
-        break;
-    }
-    setProposed("");
-  }, [field, stop, routes]);
-
-  const handleMyLocation = async () => {
-    setGpsLoading(true);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Permission needed", "Enable location in Settings.");
-        return;
-      }
-      const pos = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      setProposed(
-        `${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)}`
-      );
-    } catch {
-      Alert.alert("Error", "Could not get your location.");
-    } finally {
-      setGpsLoading(false);
-    }
-  };
-
-  const handleSubmit = async () => {
-    if (!proposed.trim()) {
-      Alert.alert("Missing info", "Please enter a proposed value.");
-      return;
-    }
-    setLoading(true);
-    try {
-      await submit({
-        type: "stop_edit",
-        title: `Edit ${field}: ${stop.name}`,
-        data: {
-          field,
-          current_value: current.trim() || undefined,
-          proposed_value: proposed.trim(),
-          note: note.trim() || undefined,
-        },
-      });
-      onClose();
-      setCurrent("");
-      setProposed("");
-      setNote("");
-      setField("name");
-      Alert.alert(
-        "Submitted",
-        "Your edit has been submitted for review. You'll earn +15 pts if approved."
-      );
-    } catch {
-      Alert.alert("Error", "Could not submit. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <ScrollView
-      contentContainerStyle={ms.body}
-      keyboardShouldPersistTaps="handled"
-    >
-      <Text style={[ms.label, { color: C.sub, marginBottom: 8 }]}>
-        WHAT TO EDIT
-      </Text>
-      <View style={[ms.pillRow, { marginBottom: 18 }]}>
-        {FIELDS.map((f) => (
-          <Pressable
-            key={f.key}
-            onPress={() => setField(f.key)}
-            style={[
-              ms.pill,
-              { borderColor: field === f.key ? ORANGE : C.border },
-              field === f.key && { backgroundColor: ORANGE + "18" },
-            ]}
-          >
-            <Text
-              style={[
-                ms.pillText,
-                { color: field === f.key ? ORANGE : C.sub },
-              ]}
-            >
-              {f.label}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-
-      <Text style={[ms.label, { color: C.sub, marginBottom: 8 }]}>
-        CURRENT VALUE
-      </Text>
-      <TextInput
-        style={[
-          ms.input,
-          {
-            backgroundColor: C.card,
-            color: C.text,
-            borderColor: C.border,
-            marginBottom: 14,
-            opacity: 0.65,
-          },
-        ]}
-        value={current}
-        editable={false}
-      />
-
-      <Text style={[ms.label, { color: C.sub, marginBottom: 8 }]}>
-        PROPOSED VALUE
-      </Text>
-      <TextInput
-        style={[
-          ms.input,
-          {
-            backgroundColor: C.card,
-            color: C.text,
-            borderColor: C.border,
-            marginBottom: field === "location" ? 10 : 14,
-          },
-        ]}
-        placeholder="What it should say…"
-        placeholderTextColor={C.sub}
-        value={proposed}
-        onChangeText={setProposed}
-      />
-
-      {field === "location" && (
-        <View style={[ms.pillRow, { marginBottom: 14 }]}>
-          <Pressable
-            style={[
-              ms2.locationBtn,
-              { borderColor: C.border, backgroundColor: C.card },
-            ]}
-            onPress={handleMyLocation}
-            disabled={gpsLoading}
-          >
-            {gpsLoading ? (
-              <ActivityIndicator size="small" color={ORANGE} />
-            ) : (
-              <Ionicons name="locate-outline" size={15} color={C.text} />
-            )}
-            <Text style={[ms2.locationBtnText, { color: C.text }]}>
-              My Location
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[
-              ms2.locationBtn,
-              { borderColor: C.border, backgroundColor: C.card },
-            ]}
-            onPress={() =>
-              onOpenMapPicker((loc) =>
-                setProposed(`${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}`)
-              )
-            }
-          >
-            <Ionicons name="map-outline" size={15} color={C.text} />
-            <Text style={[ms2.locationBtnText, { color: C.text }]}>
-              Pick on Map
-            </Text>
-          </Pressable>
-        </View>
-      )}
-
-      <Text style={[ms.label, { color: C.sub, marginBottom: 8 }]}>
-        NOTE (OPTIONAL)
-      </Text>
-      <TextInput
-        style={[
-          ms.textArea,
-          { backgroundColor: C.card, color: C.text, borderColor: C.border },
-        ]}
-        placeholder="Any context for this correction…"
-        placeholderTextColor={C.sub}
-        multiline
-        numberOfLines={2}
-        value={note}
-        onChangeText={setNote}
-        maxLength={250}
-      />
-
-      <Pressable
-        style={[ms.submitBtn, loading && { opacity: 0.6 }]}
-        onPress={handleSubmit}
-        disabled={loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="#FFF" size="small" />
-        ) : (
-          <Text style={ms.submitText}>Submit Edit</Text>
-        )}
-      </Pressable>
-    </ScrollView>
-  );
-}
-
-const ms2 = StyleSheet.create({
-  locationBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 9,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  locationBtnText: { fontWeight: "600", fontSize: 13 },
-});
-
-function AggregateRating({
-  reviews,
-  C,
-}: {
-  reviews: StopReview[];
-  C: ReturnType<typeof makeC>;
-}) {
-  if (reviews.length === 0) return null;
-  const avg = (key: "safety" | "comfort" | "cleanliness") =>
-    reviews.reduce((sum, r) => sum + (r.data[key] ?? 0), 0) / reviews.length;
-
-  const categories: {
-    label: string;
-    key: "safety" | "comfort" | "cleanliness";
-  }[] = [
-    { label: "Safety", key: "safety" },
-    { label: "Comfort", key: "comfort" },
-    { label: "Cleanliness", key: "cleanliness" },
-  ];
-
-  return (
-    <View
-      style={[
-        ar.card,
-        { backgroundColor: C.card, borderColor: C.border },
-      ]}
-    >
-      <Text style={[ar.heading, { color: C.text }]}>
-        {reviews.length} {reviews.length === 1 ? "Review" : "Reviews"}
-      </Text>
-      {categories.map((cat, i) => {
-        const val = avg(cat.key);
-        return (
-          <View key={cat.key}>
-            {i > 0 && (
-              <View style={[ar.divider, { backgroundColor: C.border }]} />
-            )}
-            <View style={ar.row}>
-              <Text style={[ar.label, { color: C.sub }]}>{cat.label}</Text>
-              <View style={[ar.barBg, { backgroundColor: C.input }]}>
-                <View
-                  style={[ar.barFill, { width: `${(val / 5) * 100}%` as any }]}
-                />
-              </View>
-              <Text style={[ar.score, { color: C.text }]}>
-                {val.toFixed(1)}
-              </Text>
-            </View>
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
-const ar = StyleSheet.create({
-  card: {
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: "hidden",
-    marginBottom: 14,
-  },
-  heading: {
-    fontSize: 13,
-    fontWeight: "700",
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingBottom: 4,
-  },
-  divider: { height: StyleSheet.hairlineWidth, marginHorizontal: 14 },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  label: { fontSize: 13, width: 88 },
-  barBg: { flex: 1, height: 6, borderRadius: 3, overflow: "hidden" },
-  barFill: { height: "100%", backgroundColor: ORANGE, borderRadius: 3 },
-  score: { fontSize: 13, fontWeight: "600", width: 28, textAlign: "right" },
-});
-
-function ReviewCard({
-  review,
-  isOwn = false,
-  onEdit,
-  C,
-}: {
-  review: StopReview;
-  isOwn?: boolean;
-  onEdit?: () => void;
-  C: ReturnType<typeof makeC>;
-}) {
-  const name = review.user?.name ?? "Anonymous";
-  const initials = name
-    .split(" ")
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-  const avatar = review.user?.avatar;
-  const showImg = avatar && !avatar.startsWith("data:");
-  const dateStr = new Date(review.created_at).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-
-  return (
-    <View
-      style={[
-        rv.card,
-        { backgroundColor: C.card, borderColor: C.border },
-        isOwn && rv.ownCard,
-      ]}
-    >
-      <View style={rv.header}>
-        <View style={rv.avatarRow}>
-          {showImg ? (
-            <Image
-              source={{ uri: avatar }}
-              style={rv.avatar}
-              contentFit="cover"
-            />
-          ) : (
-            <View
-              style={[
-                rv.avatar,
-                {
-                  backgroundColor: ORANGE,
-                  alignItems: "center",
-                  justifyContent: "center",
-                },
-              ]}
-            >
-              <Text style={rv.initials}>{initials}</Text>
-            </View>
-          )}
-          <View style={{ flex: 1 }}>
-            <Text style={[rv.name, { color: C.text }]}>{name}</Text>
-            <Text style={[rv.date, { color: C.sub }]}>{dateStr}</Text>
-          </View>
-        </View>
-        {isOwn && onEdit && (
-          <Pressable style={rv.editBtn} onPress={onEdit} hitSlop={8}>
-            <Ionicons name="create-outline" size={14} color={ORANGE} />
-            <Text style={rv.editBtnText}>Edit</Text>
-          </Pressable>
-        )}
-      </View>
-
-      {review.data.text ? (
-        <Text style={[rv.comment, { color: C.text, borderTopColor: C.border }]}>
-          {review.data.text}
-        </Text>
-      ) : null}
-    </View>
-  );
-}
-
-const rv = StyleSheet.create({
-  card: {
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: "hidden",
-    marginBottom: 10,
-  },
-  ownCard: { borderColor: ORANGE + "60" },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: 12,
-  },
-  avatarRow: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
-  avatar: { width: 34, height: 34, borderRadius: 17 },
-  initials: { color: "#FFF", fontWeight: "700", fontSize: 12 },
-  name: { fontSize: 14, fontWeight: "600" },
-  date: { fontSize: 11, marginTop: 1 },
-  editBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
-  editBtnText: { fontSize: 12, fontWeight: "600", color: ORANGE },
-  comment: {
-    fontSize: 13,
-    lineHeight: 19,
-    padding: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-});
-
-const DEFAULT_LISTS = [
+const SAVE_LISTS = [
   { key: "favorites", label: "Favorites" },
   { key: "want_to_go", label: "Want to go" },
   { key: "travel_plans", label: "Travel plans" },
-  { key: "labeled", label: "Labeled" },
 ] as const;
+
+function palette(dark: boolean) {
+  return {
+    bg: dark ? "#18181B" : "#FFFFFF",
+    text: dark ? "#F4F4F5" : "#111827",
+    sub: dark ? "#A1A1AA" : "#6B7280",
+    chip: dark ? "#27272A" : "#F1F5F9",
+    line: dark ? "#27272A" : "#EEF0F3",
+    skeleton: dark ? "#27272A" : "#EEF0F3",
+    segOn: dark ? "#3F3F46" : "#FFFFFF",
+  };
+}
+
+const TYPE_LABEL: Record<string, string> = {
+  bus: "Matatu & bus stop",
+  terminal: "Bus terminal",
+  rail: "Railway station",
+  metro: "Metro station",
+  brt: "BRT station",
+  tram: "Tram stop",
+  ferry: "Ferry terminal",
+  airport: "Airport",
+  sgr: "SGR station",
+};
+
+function mapboxStaticPhoto(lng: number, lat: number): string {
+  const token = process.env.EXPO_PUBLIC_MAPBOX_TOKEN ?? "";
+  return `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/pin-s+FF6F00(${lng},${lat})/${lng},${lat},17,0,40/400x240@2x?access_token=${token}`;
+}
+
+/** Overall rating of a review (older reviews have only the three aspects). */
+function overallOf(r: StopReview): number {
+  const d = r.data as StopReview["data"] & { overall?: number };
+  if (d.overall) return d.overall;
+  const parts = [d.safety, d.comfort, d.cleanliness].filter((n) => n > 0);
+  return parts.length ? parts.reduce((a, b) => a + b, 0) / parts.length : 0;
+}
+
+function timeAgo(iso: string): string {
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  if (s < 86400 * 30) return `${Math.round(s / 86400)} d ago`;
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", year: "numeric" });
+}
 
 export default function StopDetailsSheet({
   stop,
@@ -1209,1257 +142,952 @@ export default function StopDetailsSheet({
   onSelectRouteCorridor?: (routeId: string) => void;
   onClose: () => void;
   onGoToStop?: () => Promise<void>;
-  initialTab?: "arrivals" | "info" | "reviews";
-}): React.JSX.Element | null {
-  const insets = useSafeAreaInsets();
-  const translateY = useRef(new Animated.Value(SCREEN_H)).current;
-  // Floating map controls follow this sheet's top edge.
-  useReportSheetTop(translateY);
-  const currentY = useRef(PEEK_Y);
-  const [snapState, setSnapState] = useState<"peek" | "half" | "full">("peek");
-
+  initialTab?: Tab;
+}): React.JSX.Element {
   const dark = useColorScheme() === "dark";
-  const C = makeC(dark);
+  const C = palette(dark);
   const router = useRouter();
+  const sheet = useRef<MapSheetHandle>(null);
+  const snapIdx = useRef(0);
 
   const { user } = useAuthStore();
   const { places, addPlace, removePlace, customLists } = useSavedStore();
-  const savedEntry = places.find(
-    (p) => p.place_id === stop.id && p.pin === null
-  );
-  const [saving, setSaving] = useState(false);
+  const savedEntry = places.find((p) => p.place_id === stop.id && p.pin === null);
+
+  const [tab, setTab] = useState<Tab>(initialTab);
+  const [form, setForm] = useState<Form>(null);
+  const [reportRouteId, setReportRouteId] = useState<string | null>(null);
   const [directionsLoading, setDirectionsLoading] = useState(false);
 
   const [board, setBoard] = useState<StopDeparturesResponse | null>(null);
   const [boardLoading, setBoardLoading] = useState(true);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [routes, setRoutes] = useState<StopRoute[]>([]);
-
-  const [activeTab, setActiveTab] = useState<"arrivals" | "info" | "reviews">(
-    initialTab
-  );
   const [reviews, setReviews] = useState<StopReview[]>([]);
-  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [reviewsLoading, setReviewsLoading] = useState(true);
   const [photos, setPhotos] = useState<StopPhoto[]>([]);
-  const [photosLoading, setPhotosLoading] = useState(false);
+  const [photosLoading, setPhotosLoading] = useState(true);
 
-  const [activeSheet, setActiveSheet] = useState<
-    "delay" | "review" | "edit" | null
-  >(null);
-  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
-  const locationPickerCallbackRef = useRef<
-    ((loc: { lat: number; lng: number }) => void) | null
-  >(null);
+  const category = resolveStopCategory(stop as any);
+  const typeLabel = TYPE_LABEL[category.category] ?? "Transit stop";
 
-  const openLocationPicker = (
-    cb: (loc: { lat: number; lng: number }) => void
-  ) => {
-    locationPickerCallbackRef.current = cb;
-    setLocationPickerVisible(true);
-  };
-
-  // ── Neighbor Stops for Left/Right Swipe (Fixed dependencies!) ──────────
-  const { prevStop, nextStop } = useMemo(() => {
-    if (!allStops || allStops.length < 2) {
-      return { prevStop: null, nextStop: null };
-    }
-    const others = allStops
-      .filter((s) => s.id !== stop.id)
-      .map((s) => ({
-        stop: s,
-        dist: Math.hypot(s.lat - stop.lat, s.lng - stop.lng),
-        dx: s.lng - stop.lng,
-      }))
-      .sort((a, b) => a.dist - b.dist)
-      .slice(0, 8);
-
-    const westNeighbors = others.filter((o) => o.dx <= 0);
-    const eastNeighbors = others.filter((o) => o.dx > 0);
-
-    return {
-      prevStop: westNeighbors[0]?.stop ?? others[1]?.stop ?? null,
-      nextStop: eastNeighbors[0]?.stop ?? others[0]?.stop ?? null,
-    };
-  }, [allStops, stop.id, stop.lat, stop.lng]);
-
-  const prevStopRef = useRef<Stop | null>(null);
-  const nextStopRef = useRef<Stop | null>(null);
-  const onSelectStopRef = useRef(onSelectStop);
-  useEffect(() => {
-    prevStopRef.current = prevStop;
-    nextStopRef.current = nextStop;
-    onSelectStopRef.current = onSelectStop;
-  }, [prevStop, nextStop, onSelectStop]);
-
-  // ── 3-Step Vertical Drag + Horizontal Prev/Next Swipe Responder ──────────
-  const snapTo = useCallback(
-    (target: number, mode: "peek" | "half" | "full") => {
-      currentY.current = target;
-      setSnapState(mode);
-      Animated.spring(translateY, {
-        toValue: target,
-        useNativeDriver: true,
-        damping: 24,
-        stiffness: 240,
-      }).start();
+  // ── Data ────────────────────────────────────────────────────────────────
+  const loadBoard = useCallback(
+    async (quiet = false) => {
+      if (!quiet) setBoardLoading(true);
+      try {
+        const data = await StopService.getStopDepartures(stop.id);
+        setBoard(data);
+        setUpdatedAt(new Date());
+        setRoutes(
+          data.routes.map((r) => ({
+            id: r.route_id,
+            short_name: r.route_short_name,
+            long_name: r.route_long_name,
+            route_color: r.route_color,
+            route_type: r.route_type,
+          }))
+        );
+      } catch {
+        StopService.getStopDetails(stop.id)
+          .then((d) => setRoutes(d.routes))
+          .catch(() => {});
+      } finally {
+        setBoardLoading(false);
+      }
     },
-    [translateY]
+    [stop.id]
   );
 
-  const handleClose = useCallback(() => {
-    Animated.timing(translateY, {
-      toValue: SCREEN_H,
-      duration: 220,
-      useNativeDriver: true,
-    }).start(onClose);
-  }, [translateY, onClose]);
-
-  // ── Horizontal swipe between neighbouring stops ──────────────────────────
-  // The stop's content follows the finger, slides out on release and the next
-  // stop slides in from the other side. The gesture locks to one axis as soon
-  // as it starts, so a slightly diagonal drag never jitters between the two.
-  const slideX = useRef(new Animated.Value(0)).current;
-  const gestureAxis = useRef<"x" | "y" | null>(null);
-  /** Side the incoming stop enters from: 1 = from the right, -1 = left. */
-  const enterFrom = useRef<0 | 1 | -1>(0);
-
-  const slideBack = useCallback(() => {
-    Animated.spring(slideX, { toValue: 0, useNativeDriver: true, damping: 20, stiffness: 260 }).start();
-  }, [slideX]);
-
-  const headerPanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, g) =>
-        Math.abs(g.dx) > 8 || Math.abs(g.dy) > 8,
-      onPanResponderGrant: () => {
-        gestureAxis.current = null;
-        translateY.stopAnimation((v) => { currentY.current = v; });
-        slideX.stopAnimation();
-      },
-      onPanResponderMove: (_, g) => {
-        if (!gestureAxis.current) {
-          gestureAxis.current =
-            Math.abs(g.dx) > Math.abs(g.dy) * 1.15 && onSelectStopRef.current ? "x" : "y";
-        }
-        if (gestureAxis.current === "x") {
-          const neighbor = g.dx < 0 ? nextStopRef.current : prevStopRef.current;
-          // Resist when there is no stop on that side.
-          slideX.setValue(neighbor ? g.dx : g.dx * 0.22);
-        } else {
-          translateY.setValue(Math.max(FULL_Y, currentY.current + g.dy));
-        }
-      },
-      onPanResponderTerminate: () => {
-        if (gestureAxis.current === "x") slideBack();
-      },
-      onPanResponderRelease: (_, g) => {
-        // 1. Horizontal: switch to the previous / next stop, or settle back.
-        if (gestureAxis.current === "x") {
-          const dir = g.dx < 0 ? -1 : 1;
-          const neighbor = dir < 0 ? nextStopRef.current : prevStopRef.current;
-          const far = Math.abs(g.dx) > SWIPE_SWITCH_PX || Math.abs(g.vx) > 0.55;
-          if (neighbor && far && onSelectStopRef.current) {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            enterFrom.current = dir < 0 ? 1 : -1;
-            Animated.timing(slideX, {
-              toValue: dir * SCREEN_W,
-              duration: 170,
-              useNativeDriver: true,
-            }).start(() => onSelectStopRef.current?.(neighbor));
-          } else {
-            slideBack();
-          }
-          return;
-        }
-
-        // 2. Vertical Drag -> Snap to PEEK, HALF, or FULL (or dismiss if dragged far down)
-        const destY = currentY.current + g.dy;
-        if (g.vy > 1.2 && currentY.current >= PEEK_Y - 20) {
-          handleClose();
-          return;
-        }
-        if (g.vy < -0.5 || g.dy < -60) {
-          if (currentY.current > HALF_Y + 20) snapTo(HALF_Y, "half");
-          else snapTo(FULL_Y, "full");
-        } else if (g.vy > 0.5 || g.dy > 60) {
-          if (currentY.current < HALF_Y - 20) snapTo(HALF_Y, "half");
-          else snapTo(PEEK_Y, "peek");
-        } else {
-          const dFull = Math.abs(destY - FULL_Y);
-          const dHalf = Math.abs(destY - HALF_Y);
-          const dPeek = Math.abs(destY - PEEK_Y);
-          if (dFull <= dHalf && dFull <= dPeek) snapTo(FULL_Y, "full");
-          else if (dHalf <= dFull && dHalf <= dPeek) snapTo(HALF_Y, "half");
-          else snapTo(PEEK_Y, "peek");
-        }
-      },
-    })
-  ).current;
-
-  // Open at peek once. Switching stops keeps the current height; the new
-  // stop's content slides in from the side it was swiped from.
-  const opened = useRef(false);
-  useEffect(() => {
-    if (!opened.current) {
-      opened.current = true;
-      snapTo(PEEK_Y, "peek");
-      return;
-    }
-    if (enterFrom.current !== 0) {
-      slideX.setValue(enterFrom.current * SCREEN_W * 0.5);
-      enterFrom.current = 0;
-    }
-    slideBack();
-  }, [stop.id, snapTo, slideX, slideBack]);
-
-  // Content slides horizontally and fades a little while it is off-centre.
-  const slideStyle = {
-    transform: [{ translateX: slideX }],
-    opacity: slideX.interpolate({
-      inputRange: [-SCREEN_W, 0, SCREEN_W],
-      outputRange: [0.2, 1, 0.2],
-      extrapolate: "clamp" as const,
-    }),
-  };
-
-  const loadDeparturesAndInfo = useCallback(async () => {
-    setBoardLoading(true);
-    try {
-      const data = await StopService.getStopDepartures(stop.id);
-      setBoard(data);
-      setRoutes(
-        data.routes.map((r) => ({
-          id: r.route_id,
-          short_name: r.route_short_name,
-          long_name: r.route_long_name,
-          route_color: r.route_color,
-          route_type: r.route_type,
-        }))
-      );
-    } catch {
-      StopService.getStopDetails(stop.id)
-        .then((d) => setRoutes(d.routes))
-        .catch(() => {});
-    } finally {
-      setBoardLoading(false);
-    }
-  }, [stop.id]);
-
-  useEffect(() => {
-    loadDeparturesAndInfo();
-
+  const loadReviews = useCallback(() => {
     setReviewsLoading(true);
     ContributionService.getStopReviews(stop.id)
       .then(setReviews)
       .catch(() => setReviews([]))
       .finally(() => setReviewsLoading(false));
+  }, [stop.id]);
 
+  useEffect(() => {
+    setBoard(null);
+    loadBoard();
+    loadReviews();
     setPhotosLoading(true);
     ContributionService.getStopPhotos(stop.id)
       .then(setPhotos)
       .catch(() => setPhotos([]))
       .finally(() => setPhotosLoading(false));
-  }, [stop.id, loadDeparturesAndInfo]);
+  }, [stop.id, loadBoard, loadReviews]);
 
-  const saveToList = (listKey: string) => {
-    setSaving(true);
-    addPlace({
-      name: stop.name,
-      lat: stop.lat,
-      lng: stop.lng,
-      type: "stop",
-      place_id: stop.id,
-      pin: null,
-      list: listKey,
-      category: "Transit stop",
-      note: null,
+  // Live board: refresh quietly while the arrivals tab is open.
+  useEffect(() => {
+    if (tab !== "arrivals") return;
+    const t = setInterval(() => loadBoard(true), REFRESH_MS);
+    return () => clearInterval(t);
+  }, [tab, loadBoard]);
+
+  // ── Derived ─────────────────────────────────────────────────────────────
+  const stopCode = board?.stop?.stop_code ?? stop.stop_code ?? null;
+  const direction = board?.stop?.direction_label ?? stop.direction_label ?? null;
+  const platform = board?.stop?.platform_code ?? stop.platform_code ?? null;
+  const landmark = board?.stop?.landmark ?? stop.landmark ?? null;
+  const myReview = reviews.find((r) => r.user_id === user?.id);
+
+  const rating = useMemo(() => {
+    if (!reviews.length) return null;
+    const avg = reviews.reduce((s, r) => s + overallOf(r), 0) / reviews.length;
+    const aspect = (k: "safety" | "comfort" | "cleanliness") =>
+      reviews.reduce((s, r) => s + (r.data[k] ?? 0), 0) / reviews.length;
+    const tagCounts = new Map<string, number>();
+    for (const r of reviews) {
+      for (const t of ((r.data as any).tags as string[] | undefined) ?? []) {
+        tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1);
+      }
+    }
+    const topTags = [...tagCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+    return {
+      avg,
+      count: reviews.length,
+      safety: aspect("safety"),
+      comfort: aspect("comfort"),
+      cleanliness: aspect("cleanliness"),
+      topTags,
+    };
+  }, [reviews]);
+
+  const nextDeparture = useMemo(() => {
+    let best: { line: string; eta: number } | null = null;
+    for (const r of board?.routes ?? []) {
+      const a = r.arrivals[0];
+      if (a && (best == null || a.eta_seconds < best.eta)) best = { line: r.route_short_name, eta: a.eta_seconds };
+    }
+    return best;
+  }, [board]);
+
+  const reportLines = useMemo(() => {
+    const seen = new Set<string>();
+    return (board?.routes ?? [])
+      .filter((r) => (seen.has(r.route_id) ? false : (seen.add(r.route_id), true)))
+      .map((r) => ({ route_id: r.route_id, short_name: r.route_short_name, color: r.badge_color || r.route_color, headsign: r.headsign }));
+  }, [board]);
+
+  // ── Neighbouring stops (swipe sideways) ─────────────────────────────────
+  const { prevStop, nextStop } = useMemo(() => {
+    if (allStops.length < 2) return { prevStop: null, nextStop: null };
+    const others = allStops
+      .filter((s) => s.id !== stop.id)
+      .map((s) => ({ s, d: Math.hypot(s.lat - stop.lat, s.lng - stop.lng), dx: s.lng - stop.lng }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, 8);
+    return {
+      prevStop: others.find((o) => o.dx <= 0)?.s ?? null,
+      nextStop: others.find((o) => o.dx > 0)?.s ?? null,
+    };
+  }, [allStops, stop.id, stop.lat, stop.lng]);
+
+  const neighbors = useRef({ prevStop, nextStop, onSelectStop });
+  neighbors.current = { prevStop, nextStop, onSelectStop };
+
+  const slideX = useRef(new Animated.Value(0)).current;
+  const enterFrom = useRef<0 | 1 | -1>(0);
+  const settle = useCallback(
+    () => Animated.spring(slideX, { toValue: 0, useNativeDriver: true, damping: 20, stiffness: 260 }).start(),
+    [slideX]
+  );
+
+  // Claims only clearly horizontal drags; vertical ones go to MapSheet.
+  const swipe = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) =>
+        !!neighbors.current.onSelectStop && Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4,
+      onPanResponderMove: (_, g) => {
+        const n = g.dx < 0 ? neighbors.current.nextStop : neighbors.current.prevStop;
+        slideX.setValue(n ? g.dx : g.dx * 0.22);
+      },
+      onPanResponderTerminate: () => settle(),
+      onPanResponderRelease: (_, g) => {
+        const dir = g.dx < 0 ? -1 : 1;
+        const n = dir < 0 ? neighbors.current.nextStop : neighbors.current.prevStop;
+        if (n && (Math.abs(g.dx) > SWIPE_SWITCH_PX || Math.abs(g.vx) > 0.55)) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          enterFrom.current = dir < 0 ? 1 : -1;
+          Animated.timing(slideX, { toValue: dir * SW, duration: 170, useNativeDriver: true }).start(() =>
+            neighbors.current.onSelectStop?.(n)
+          );
+        } else {
+          settle();
+        }
+      },
     })
-      .catch(() => Alert.alert("Error", "Could not save this stop."))
-      .finally(() => setSaving(false));
+  ).current;
+
+  useEffect(() => {
+    if (enterFrom.current !== 0) {
+      slideX.setValue(enterFrom.current * SW * 0.5);
+      enterFrom.current = 0;
+    }
+    settle();
+  }, [stop.id, slideX, settle]);
+
+  const slideStyle = {
+    transform: [{ translateX: slideX }],
+    opacity: slideX.interpolate({ inputRange: [-SW, 0, SW], outputRange: [0.2, 1, 0.2], extrapolate: "clamp" as const }),
   };
 
-  const handleBookmarkPress = () => {
+  // ── Actions ─────────────────────────────────────────────────────────────
+  const openTab = (t: Tab) => {
+    Haptics.selectionAsync();
+    setTab(t);
+    if (t !== "arrivals" && snapIdx.current === 0) sheet.current?.snapTo(1);
+  };
+
+  const toggleSave = () => {
     Haptics.selectionAsync();
     if (savedEntry) {
       removePlace(savedEntry.id);
       return;
     }
-    const all = [
-      ...DEFAULT_LISTS,
-      ...customLists.map((l) => ({ key: l, label: l })),
-    ];
+    const lists = [...SAVE_LISTS, ...customLists.map((l) => ({ key: l, label: l }))];
     Alert.alert("Save to list", stop.name, [
-      ...all.map((l) => ({ text: l.label, onPress: () => saveToList(l.key) })),
+      ...lists.map((l) => ({
+        text: l.label,
+        onPress: () =>
+          addPlace({
+            name: stop.name, lat: stop.lat, lng: stop.lng, type: "stop", place_id: stop.id,
+            pin: null, list: l.key, category: typeLabel, note: null,
+          }).catch(() => Alert.alert("Couldn't save", "Please try again.")),
+      })),
       { text: "Cancel", style: "cancel" as const },
     ]);
   };
 
-  const stopCode =
-    board?.stop?.stop_code ??
-    stop.stop_code ??
-    stop.id.slice(-5).toUpperCase();
-  const directionLabel =
-    board?.stop?.direction_label ??
-    stop.direction_label ??
-    locationLabel(stop.location_t, board?.stop?.stop_type ?? stop.stop_type);
+  const share = () =>
+    Share.share({
+      message: `${stop.name}${landmark ? ` (${landmark})` : ""}\nhttps://navigo.co.ke/route?tLat=${stop.lat}&tLng=${stop.lng}&tName=${encodeURIComponent(stop.name)}`,
+    }).catch(() => {});
 
-  const myReview = reviews.find((r) => r.user_id === user?.id);
+  const go = async (role: "from" | "to") => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (role === "to" && onGoToStop) {
+      setDirectionsLoading(true);
+      try {
+        await onGoToStop();
+      } finally {
+        setDirectionsLoading(false);
+      }
+      return;
+    }
+    const params =
+      role === "from"
+        ? { fLat: String(stop.lat), fLng: String(stop.lng), fName: stop.name }
+        : { tLat: String(stop.lat), tLng: String(stop.lng), tName: stop.name };
+    router.push({ pathname: "/route" as any, params });
+  };
+
+  const openReport = (routeId: string | null = null) => {
+    setReportRouteId(routeId);
+    setForm("report");
+  };
+
+  // ── Header ──────────────────────────────────────────────────────────────
+  const header = (
+    <Animated.View style={slideStyle} {...swipe.panHandlers}>
+      {onSelectStop && (prevStop || nextStop) && (
+        <View style={s.neighbors}>
+          <NeighborPill stop={prevStop} side="prev" C={C} onPress={(n) => onSelectStop(n)} />
+          <NeighborPill stop={nextStop} side="next" C={C} onPress={(n) => onSelectStop(n)} />
+        </View>
+      )}
+
+      <View style={s.headerRow}>
+        <View style={[s.typeBadge, { backgroundColor: category.color }]}>
+          <StopTypeGlyph category={category.category as any} size={20} />
+        </View>
+        <View style={{ flex: 1, gap: 2 }}>
+          <View style={s.titleRow}>
+            <Text style={[s.title, { color: C.text }]} numberOfLines={2}>
+              {stop.name}
+            </Text>
+            {!!platform && (
+              <View style={[s.platform, { backgroundColor: category.color }]}>
+                <Text style={s.platformText}>Plat. {platform}</Text>
+              </View>
+            )}
+          </View>
+          <Text style={[s.meta, { color: C.sub }]} numberOfLines={1}>
+            {[typeLabel, stopCode, direction].filter(Boolean).join(" · ")}
+          </Text>
+          <View style={s.factsRow}>
+            {rating ? (
+              <Pressable onPress={() => openTab("reviews")} style={s.ratingInline} hitSlop={6}>
+                <Ionicons name="star" size={12} color={AMBER} />
+                <Text style={[s.fact, { color: C.text, fontWeight: "800" }]}>{rating.avg.toFixed(1)}</Text>
+                <Text style={[s.fact, { color: C.sub }]}>({rating.count})</Text>
+              </Pressable>
+            ) : null}
+            {rating && nextDeparture ? <Text style={[s.fact, { color: C.sub }]}>·</Text> : null}
+            {nextDeparture ? (
+              <Text style={[s.fact, { color: GREEN, fontWeight: "700" }]}>
+                {nextDeparture.line} in {formatEta(nextDeparture.eta)}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+        <PressableScale
+          onPress={() => sheet.current?.close()}
+          hitSlop={12}
+          style={[s.roundBtn, { backgroundColor: C.chip }]}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+        >
+          <Ionicons name="close" size={16} color={C.sub} />
+        </PressableScale>
+      </View>
+
+      <View style={s.actions}>
+        <Action icon={savedEntry ? "bookmark" : "bookmark-outline"} label={savedEntry ? "Saved" : "Save"} fg={savedEntry ? ORANGE : C.text} C={C} onPress={toggleSave} />
+        <Action icon="share-outline" label="Share" C={C} onPress={share} />
+        <Action icon="alert-circle-outline" label="Report" fg={RED} C={C} onPress={() => openReport()} />
+        <Action icon="create-outline" label="Edit" fg={BLUE} C={C} onPress={() => setForm("edit")} />
+        <Action icon={myReview ? "star" : "star-outline"} label="Review" fg={AMBER} C={C} onPress={() => setForm("review")} />
+      </View>
+
+      <View style={[s.segment, { backgroundColor: C.chip }]}>
+        {(
+          [
+            { key: "arrivals", label: "Arrivals" },
+            { key: "info", label: "Info" },
+            { key: "reviews", label: rating ? `Reviews · ${rating.count}` : "Reviews" },
+          ] as const
+        ).map((t) => {
+          const on = tab === t.key;
+          return (
+            <Pressable
+              key={t.key}
+              onPress={() => openTab(t.key)}
+              style={[s.segBtn, on && { backgroundColor: C.segOn }]}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: on }}
+            >
+              <Text style={[s.segText, { color: on ? C.text : C.sub }]}>{t.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </Animated.View>
+  );
+
+  const footer = (
+    <View style={s.footerRow}>
+      <PressableScale containerStyle={{ flex: 1 }} onPress={() => go("from")} style={[s.bigBtn, { backgroundColor: C.chip }]}>
+        <Text style={[s.bigBtnText, { color: C.text }]}>From here</Text>
+      </PressableScale>
+      <PressableScale
+        containerStyle={{ flex: 1.4 }}
+        onPress={() => go("to")}
+        disabled={directionsLoading}
+        style={[s.bigBtn, { backgroundColor: ORANGE }]}
+      >
+        {directionsLoading ? (
+          <ActivityIndicator color="#FFFFFF" size="small" />
+        ) : (
+          <>
+            <Ionicons name="navigate" size={16} color="#FFFFFF" />
+            <Text style={[s.bigBtnText, { color: "#FFFFFF" }]}>Directions</Text>
+          </>
+        )}
+      </PressableScale>
+    </View>
+  );
 
   return (
     <>
-      <Animated.View
-        style={[
-          s.panel,
-          {
-            backgroundColor: C.bg,
-            height: SCREEN_H - FULL_Y,
-            transform: [{ translateY }],
-          },
-        ]}
+      <MapSheet
+        ref={sheet}
+        snapPoints={[390, SH * 0.62, SH * 0.92]}
+        onClose={onClose}
+        onSnapChange={(i) => (snapIdx.current = i)}
+        header={header}
+        footer={footer}
       >
-        {/* ── DRAGGABLE & HORIZONTAL-SWIPEABLE KAKAOMAP HEADER ── */}
-        <View {...headerPanResponder.panHandlers}>
-          <View style={s.handleWrap}>
-            <View style={[s.handle, { backgroundColor: C.handle }]} />
-          </View>
-
-          <Animated.View style={slideStyle}>
-          {/* Visible Prev / Next Stop Swipe Strip (KakaoMap Neighbor Switcher)[cite: 3] */}
-          {onSelectStop && (prevStop || nextStop) && (
-            <View style={s.neighborStrip}>
-              {prevStop ? (
-                <Pressable
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    onSelectStop(prevStop);
-                  }}
-                  style={[s.neighborPill, { backgroundColor: C.card }]}
-                >
-                  <Ionicons name="chevron-back" size={13} color={ORANGE} />
-                  <Text
-                    style={[s.neighborText, { color: C.text }]}
-                    numberOfLines={1}
-                  >
-                    {prevStop.name}
-                  </Text>
-                </Pressable>
-              ) : (
-                <View style={{ flex: 1 }} />
-              )}
-
-              <View style={s.swipeHintBadge}>
-                <Ionicons name="swap-horizontal" size={12} color={C.sub} />
-                <Text style={[s.swipeHintText, { color: C.sub }]}>Swipe</Text>
-              </View>
-
-              {nextStop ? (
-                <Pressable
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    onSelectStop(nextStop);
-                  }}
-                  style={[
-                    s.neighborPill,
-                    { backgroundColor: C.card, justifyContent: "flex-end" },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      s.neighborText,
-                      { color: C.text, textAlign: "right" },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {nextStop.name}
-                  </Text>
-                  <Ionicons name="chevron-forward" size={13} color={ORANGE} />
-                </Pressable>
-              ) : (
-                <View style={{ flex: 1 }} />
-              )}
-            </View>
+        <Animated.View style={slideStyle}>
+          {tab === "arrivals" && (
+            <ArrivalsTab
+              board={board}
+              loading={boardLoading}
+              updatedAt={updatedAt}
+              C={C}
+              onRefresh={() => {
+                Haptics.selectionAsync();
+                loadBoard();
+              }}
+              onLine={(id) => {
+                if (!onSelectRouteCorridor) return;
+                Haptics.selectionAsync();
+                onSelectRouteCorridor(id);
+              }}
+              onReport={openReport}
+              onSuggest={() => setForm("edit")}
+            />
           )}
-
-          {/* KakaoMap Stop Title + Stop Code · Direction + Close[cite: 3] */}
-          <View style={s.header}>
-            <View style={{ flex: 1 }}>
-              <View style={s.titleRow}>
-                <Text
-                  style={[s.stopName, { color: C.text }]}
-                  numberOfLines={1}
-                >
-                  {stop.name}
-                </Text>
-                {(board?.stop?.platform_code || stop.platform_code) && (
-                  <View style={s.platBadge}>
-                    <Text style={s.platBadgeText}>
-                      Plat. {board?.stop?.platform_code ?? stop.platform_code}
-                    </Text>
-                  </View>
-                )}
-              </View>
-              <Text
-                style={[s.stopMeta, { color: C.sub }]}
-                numberOfLines={1}
-              >
-                {stopCode} · {directionLabel}
-              </Text>
-            </View>
-
-            <Pressable
-              onPress={handleBookmarkPress}
-              hitSlop={10}
-              style={[s.closeBtn, { backgroundColor: C.card }]}
-            >
-              <Ionicons
-                name={savedEntry ? "bookmark" : "bookmark-outline"}
-                size={16}
-                color={savedEntry ? ORANGE : C.text}
-              />
-            </Pressable>
-
-            <Pressable
-              onPress={handleClose}
-              hitSlop={14}
-              style={[s.closeBtn, { backgroundColor: C.card }]}
-            >
-              <Ionicons name="close" size={18} color={C.text} />
-            </Pressable>
-          </View>
-
-          {/* ── 3-TAB BAR: Live Arrivals | Stop Info & Photos | Reviews ── */}
-          <View style={[s.tabBar, { borderBottomColor: C.border }]}>
-            {(
-              [
-                {
-                  key: "arrivals",
-                  label: `Arrivals${
-                    board?.routes?.length ? ` (${board.routes.length})` : ""
-                  }`,
-                },
-                { key: "info", label: "Stop Info & Photos" },
-                {
-                  key: "reviews",
-                  label: `Reviews${
-                    reviews.length > 0 ? ` (${reviews.length})` : ""
-                  }`,
-                },
-              ] as const
-            ).map((tab) => (
-              <Pressable
-                key={tab.key}
-                style={s.tabItem}
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  setActiveTab(tab.key);
-                  if (tab.key !== "arrivals" && snapState === "peek") {
-                    snapTo(HALF_Y, "half");
-                  }
-                }}
-              >
-                <Text
-                  style={[
-                    s.tabLabel,
-                    { color: activeTab === tab.key ? ORANGE : C.sub },
-                  ]}
-                >
-                  {tab.label}
-                </Text>
-                {activeTab === tab.key && <View style={s.tabUnderline} />}
-              </Pressable>
-            ))}
-          </View>
-          </Animated.View>
-        </View>
-
-        {/* ── TAB CONTENT AREA (slides with the stop) ── */}
-        <Animated.View style={[{ flex: 1 }, slideStyle]}>
-          <ScrollView
-            contentContainerStyle={[
-              s.scrollContent,
-              { paddingBottom: Math.max(insets.bottom, 20) + 120 },
-            ]}
-            showsVerticalScrollIndicator={false}
-            nestedScrollEnabled
-          >
-            {/* ── TAB 1: KAKAOMAP LIVE ARRIVALS BOARD (IMG_6283.PNG)[cite: 3] ── */}
-            {activeTab === "arrivals" && (
-              <View>
-                {boardLoading && !board ? (
-                  <View style={s.loadingBox}>
-                    <ActivityIndicator size="small" color={ORANGE} />
-                    <Text style={{ color: C.sub, fontSize: 13 }}>
-                      Fetching live departures…
-                    </Text>
-                  </View>
-                ) : (board?.routes?.length ?? 0) === 0 ? (
-                  <NoDeparturesState
-                    actionLabel="Suggest edits"
-                    onAction={() => setActiveSheet("edit")}
-                  />
-                ) : (
-                  board!.routes.map((r: StopRouteBoardItem, idx: number) => (
-                    <Pressable
-                      key={`${r.route_id}-${r.direction_id}-${idx}`}
-                      onPress={() => {
-                        if (onSelectRouteCorridor) {
-                          Haptics.selectionAsync();
-                          onSelectRouteCorridor(r.route_id);
-                        }
-                      }}
-                      style={[
-                        s.arrivalRouteRow,
-                        { borderBottomColor: C.border },
-                      ]}
-                    >
-                      <View style={{ flex: 1, minWidth: 0 }}>
-                        <View style={s.arrivalBadgeRow}>
-                          <View
-                            style={[
-                              s.modeTag,
-                              { backgroundColor: r.badge_color || BLUE },
-                            ]}
-                          >
-                            <Text style={s.modeTagText}>{r.mode_badge}</Text>
-                          </View>
-                          <Text
-                            style={[s.routeShortName, { color: C.text }]}
-                          >
-                            {r.route_short_name}
-                          </Text>
-                        </View>
-                        <Text
-                          style={[s.routeHeadsign, { color: C.sub }]}
-                          numberOfLines={1}
-                        >
-                          {r.headsign}
-                        </Text>
-                      </View>
-
-                      <View style={s.arrivalsRightCol}>
-                        {r.arrivals.length === 0 ? (
-                          <LineNoDepartures status={r.arrivals_status} />
-                        ) : (
-                          r.arrivals.map((arr, aIdx) => (
-                            <Text
-                              key={aIdx}
-                              style={s.arrivalLine}
-                              numberOfLines={1}
-                            >
-                              <Text style={s.arrivalRedText}>
-                                {formatEta(arr.eta_seconds)}
-                              </Text>{" "}
-                              {!!departureMeta(arr) && (
-                                <Text style={{ color: C.sub, fontSize: 11.5 }}>
-                                  {departureMeta(arr)}
-                                </Text>
-                              )}
-                            </Text>
-                          ))
-                        )}
-                      </View>
-                    </Pressable>
-                  ))
-                )}
-
-                <Pressable
-                  onPress={() => setActiveSheet("edit")}
-                  style={s.suggestEditsRow}
-                >
-                  <Text style={[s.suggestEditsText, { color: C.sub }]}>
-                    Suggest edits &gt;
-                  </Text>
-                </Pressable>
-              </View>
-            )}
-
-            {/* ── TAB 2: STOP DESCRIPTION, INFO, PHOTOS & CONTRIBUTE ── */}
-            {activeTab === "info" && (
-              <View style={{ paddingTop: 12, gap: 18 }}>
-                {/* Stop Description & Accessibility Card */}
-                <View
-                  style={[
-                    s.infoCard,
-                    { backgroundColor: C.card, borderColor: C.border },
-                  ]}
-                >
-                  <View style={s.infoRowItem}>
-                    <Ionicons
-                      name="information-circle-outline"
-                      size={18}
-                      color={ORANGE}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[s.infoTitle, { color: C.text }]}>
-                        {locationLabel(
-                          stop.location_t,
-                          board?.stop?.stop_type ?? stop.stop_type
-                        )}
-                      </Text>
-                      <Text style={[s.infoDesc, { color: C.sub }]}>
-                        {board?.stop?.landmark || stop.landmark
-                          ? `Landmark: Near ${
-                              board?.stop?.landmark ?? stop.landmark
-                            }`
-                          : `Stop Code ${stopCode} · Coordinates ${stop.lat.toFixed(
-                              5
-                            )}, ${stop.lng.toFixed(5)}`}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View
-                    style={[
-                      s.infoRowItem,
-                      {
-                        borderTopWidth: StyleSheet.hairlineWidth,
-                        borderTopColor: C.border,
-                        paddingTop: 10,
-                      },
-                    ]}
-                  >
-                    <Ionicons
-                      name="body-outline"
-                      size={18}
-                      color={
-                        board?.stop?.wheelchair_boarding ? GREEN : C.sub
-                      }
-                    />
-                    <Text style={[s.infoDesc, { color: C.text }]}>
-                      {board?.stop?.wheelchair_boarding
-                        ? "Wheelchair accessible boarding available"
-                        : "Standard curbside / stage boarding"}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Routes Passing By (Tap any badge to view full corridor on map) */}
-                <View>
-                  <Text style={[s.secHeading, { color: C.sub }]}>
-                    LINES SERVING THIS STOP (TAP TO VIEW CORRIDOR)
-                  </Text>
-                  <View style={s.routesWrap}>
-                    {routes.map((r) => (
-                      <Pressable
-                        key={r.id}
-                        onPress={() => onSelectRouteCorridor?.(r.id)}
-                        style={[
-                          s.routeChip,
-                          {
-                            backgroundColor: C.card,
-                            borderColor: C.border,
-                          },
-                        ]}
-                      >
-                        <Ionicons
-                          name="bus-outline"
-                          size={12}
-                          color={ORANGE}
-                        />
-                        <Text style={[s.routeChipText, { color: C.text }]}>
-                          Line {r.short_name}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </View>
-
-                {/* Photos */}
-                <View>
-                  <Text style={[s.secHeading, { color: C.sub }]}>
-                    STAGE & STATION PHOTOS ({photos.length})
-                  </Text>
-                  {photosLoading ? (
-                    <ActivityIndicator size="small" color={ORANGE} />
-                  ) : (
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                    >
-                      {photos.map((p) => (
-                        <Image
-                          key={p.id}
-                          source={{ uri: p.data.photo_url }}
-                          style={s.photoTile}
-                          contentFit="cover"
-                        />
-                      ))}
-                      <Pressable
-                        onPress={() =>
-                          router.push({
-                            pathname: "/(account)/add-photo" as any,
-                            params: { stopName: stop.name, stopId: stop.id },
-                          })
-                        }
-                        style={[
-                          s.photoPlaceholder,
-                          { borderColor: ORANGE + "60" },
-                        ]}
-                      >
-                        <Ionicons name="camera" size={20} color={ORANGE} />
-                        <Text style={s.photoPlaceholderText}>Add photo</Text>
-                      </Pressable>
-                    </ScrollView>
-                  )}
-                </View>
-
-                {/* Quick Community Actions */}
-                <View style={s.quickContribRow}>
-                  <Pressable
-                    onPress={() => setActiveSheet("delay")}
-                    style={[
-                      s.contribBtn,
-                      { backgroundColor: C.softRed },
-                    ]}
-                  >
-                    <Ionicons name="time-outline" size={16} color={RED} />
-                    <Text style={[s.contribBtnText, { color: RED }]}>
-                      Report Delay
-                    </Text>
-                  </Pressable>
-
-                  <Pressable
-                    onPress={() => setActiveSheet("edit")}
-                    style={[
-                      s.contribBtn,
-                      { backgroundColor: C.softBlue },
-                    ]}
-                  >
-                    <Ionicons
-                      name="create-outline"
-                      size={16}
-                      color="#3B82F6"
-                    />
-                    <Text style={[s.contribBtnText, { color: "#3B82F6" }]}>
-                      Edit Stop Info
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
-            )}
-
-            {/* ── TAB 3: REVIEWS ── */}
-            {activeTab === "reviews" && (
-              <View style={{ paddingTop: 12 }}>
-                {reviewsLoading ? (
-                  <ActivityIndicator color={ORANGE} style={{ padding: 28 }} />
-                ) : (
-                  <>
-                    <AggregateRating reviews={reviews} C={C} />
-                    {myReview && (
-                      <ReviewCard
-                        review={myReview}
-                        isOwn
-                        onEdit={() => setActiveSheet("review")}
-                        C={C}
-                      />
-                    )}
-                    {reviews
-                      .filter((r) => r.user_id !== user?.id)
-                      .map((r) => (
-                        <ReviewCard key={r.id} review={r} C={C} />
-                      ))}
-                  </>
-                )}
-
-                <Pressable
-                  style={[
-                    s.writeReviewBtn,
-                    { backgroundColor: C.card, borderColor: C.border },
-                  ]}
-                  onPress={() => setActiveSheet("review")}
-                >
-                  <Ionicons name="star-outline" size={16} color={AMBER} />
-                  <Text style={[s.writeReviewText, { color: C.text }]}>
-                    {myReview ? "Edit Your Review" : "Write a Stop Review"}
-                  </Text>
-                  <Ionicons name="chevron-forward" size={14} color={C.sub} />
-                </Pressable>
-              </View>
-            )}
-          </ScrollView>
-
-          {/* ── STICKY KAKAOMAP BOTTOM ACTION BAR: [ℹ️ Info/Schedule] + [Refresh] + [From] [To][cite: 3] ── */}
-          <View
-            style={[
-              s.stickyFooter,
-              {
-                backgroundColor: C.bg,
-                borderTopColor: C.border,
-                paddingBottom: Math.max(insets.bottom, 12),
-              },
-            ]}
-          >
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <Pressable
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  const next = activeTab === "info" ? "arrivals" : "info";
-                  setActiveTab(next);
-                  if (next === "info" && snapState === "peek") {
-                    snapTo(HALF_Y, "half");
-                  }
-                }}
-                style={[s.schedulePill, { backgroundColor: C.card }]}
-              >
-                <Ionicons
-                  name={
-                    activeTab === "info"
-                      ? "time-outline"
-                      : "information-circle-outline"
-                  }
-                  size={16}
-                  color={BLUE}
-                />
-                <Text style={[s.schedulePillText, { color: C.text }]}>
-                  {activeTab === "info" ? "Live Arrivals" : "Stop Info"}
-                </Text>
-              </Pressable>
-
-              <Pressable
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  loadDeparturesAndInfo();
-                }}
-                style={[
-                  s.refreshCircle,
-                  { backgroundColor: C.card, borderColor: C.border },
-                ]}
-              >
-                <Ionicons name="refresh" size={16} color={C.text} />
-              </Pressable>
-            </View>
-
-            <View style={s.fromToGroup}>
-              <Pressable
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  router.push({
-                    pathname: "/route" as any,
-                    params: {
-                      fLat: String(stop.lat),
-                      fLng: String(stop.lng),
-                      fName: stop.name,
-                    },
-                  });
-                }}
-                style={s.fromBtn}
-              >
-                <Text style={s.fromToText}>From</Text>
-              </Pressable>
-
-              <Pressable
-                onPress={async () => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  if (onGoToStop) {
-                    setDirectionsLoading(true);
-                    try {
-                      await onGoToStop();
-                    } finally {
-                      setDirectionsLoading(false);
-                    }
-                  } else {
-                    router.push({
-                      pathname: "/route" as any,
-                      params: {
-                        tLat: String(stop.lat),
-                        tLng: String(stop.lng),
-                        tName: stop.name,
-                      },
-                    });
-                  }
-                }}
-                disabled={directionsLoading}
-                style={s.toBtn}
-              >
-                {directionsLoading ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={s.fromToText}>To</Text>
-                )}
-              </Pressable>
-            </View>
-          </View>
+          {tab === "info" && (
+            <InfoTab
+              stop={stop}
+              typeLabel={typeLabel}
+              typeColor={category.color}
+              stopCode={stopCode}
+              platform={platform}
+              landmark={landmark}
+              wheelchair={!!board?.stop?.wheelchair_boarding}
+              routes={routes}
+              photos={photos}
+              photosLoading={photosLoading}
+              C={C}
+              onLine={(id) => onSelectRouteCorridor?.(id)}
+              onAddPhoto={() =>
+                router.push({ pathname: "/(account)/add-photo" as any, params: { stopName: stop.name, stopId: stop.id } })
+              }
+              onSuggest={() => setForm("edit")}
+            />
+          )}
+          {tab === "reviews" && (
+            <ReviewsTab
+              reviews={reviews}
+              loading={reviewsLoading}
+              rating={rating}
+              myReviewId={myReview?.id ?? null}
+              C={C}
+              onWrite={() => setForm("review")}
+            />
+          )}
         </Animated.View>
-      </Animated.View>
+      </MapSheet>
 
-      {/* Mini Sheets */}
-      <MiniSheet
-        visible={activeSheet === "delay"}
-        onClose={() => setActiveSheet(null)}
-        title={`Delay at ${stop.name}`}
-        C={C}
-      >
-        <DelaySheet stop={stop} onClose={() => setActiveSheet(null)} C={C} />
-      </MiniSheet>
-
-      <MiniSheet
-        visible={activeSheet === "review"}
-        onClose={() => {
-          setActiveSheet(null);
-          ContributionService.getStopReviews(stop.id)
-            .then(setReviews)
-            .catch(() => {});
-        }}
-        title={myReview ? `Edit Review: ${stop.name}` : `Review ${stop.name}`}
-        C={C}
-      >
-        <ReviewSheet
-          stop={stop}
-          onClose={() => {
-            setActiveSheet(null);
-            ContributionService.getStopReviews(stop.id)
-              .then(setReviews)
-              .catch(() => {});
-          }}
-          C={C}
-          existingReview={myReview}
+      {form === "review" && (
+        <StopReviewForm visible onClose={() => setForm(null)} stop={stop} existing={myReview} onSubmitted={loadReviews} />
+      )}
+      {form === "edit" && (
+        <StopEditForm
+          visible
+          onClose={() => setForm(null)}
+          stop={{ ...stop, landmark }}
+          lines={routes.map((r) => ({ id: r.id, short_name: r.short_name }))}
         />
-      </MiniSheet>
-
-      <MiniSheet
-        visible={activeSheet === "edit"}
-        onClose={() => setActiveSheet(null)}
-        title={`Correct ${stop.name}`}
-        C={C}
-      >
-        <EditSheet
-          stop={stop}
-          routes={routes}
-          onClose={() => setActiveSheet(null)}
-          onOpenMapPicker={openLocationPicker}
-          C={C}
-        />
-      </MiniSheet>
-
-      <LocationPickerModal
-        visible={locationPickerVisible}
-        onClose={() => setLocationPickerVisible(false)}
-        onConfirm={(loc) => {
-          locationPickerCallbackRef.current?.(loc);
-          locationPickerCallbackRef.current = null;
-        }}
-        initialLat={stop.lat}
-        initialLng={stop.lng}
-      />
+      )}
+      {form === "report" && (
+        <StopReportForm visible onClose={() => setForm(null)} stop={stop} lines={reportLines} initialRouteId={reportRouteId} />
+      )}
     </>
   );
 }
 
+// ─── Tabs ────────────────────────────────────────────────────────────────────
+
+type P = ReturnType<typeof palette>;
+
+function ArrivalsTab({
+  board,
+  loading,
+  updatedAt,
+  C,
+  onRefresh,
+  onLine,
+  onReport,
+  onSuggest,
+}: {
+  board: StopDeparturesResponse | null;
+  loading: boolean;
+  updatedAt: Date | null;
+  C: P;
+  onRefresh: () => void;
+  onLine: (routeId: string) => void;
+  onReport: (routeId: string) => void;
+  onSuggest: () => void;
+}) {
+  if (loading && !board) return <SkeletonRows color={C.skeleton} />;
+  if (!board?.routes?.length) {
+    return <NoDeparturesState actionLabel="Suggest edits" onAction={onSuggest} />;
+  }
+  return (
+    <View>
+      <View style={s.boardHead}>
+        <View style={s.liveDot} />
+        <Text style={[s.boardHeadText, { color: C.sub }]}>
+          {updatedAt
+            ? `Updated ${updatedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · refreshes every 30 s`
+            : "Departures"}
+        </Text>
+        <PressableScale onPress={onRefresh} hitSlop={10} style={[s.refresh, { backgroundColor: C.chip }]} accessibilityLabel="Refresh departures">
+          {loading ? <ActivityIndicator size="small" color={C.sub} /> : <Ionicons name="refresh" size={14} color={C.sub} />}
+        </PressableScale>
+      </View>
+
+      {board.routes.map((r: StopRouteBoardItem, i: number) => {
+        const color = r.badge_color || r.route_color || BLUE;
+        const [first, ...rest] = r.arrivals;
+        return (
+          <PressableScale
+            key={`${r.route_id}-${r.direction_id}-${i}`}
+            onPress={() => onLine(r.route_id)}
+            onLongPress={() => onReport(r.route_id)}
+            pressedScale={0.985}
+            style={[s.lineRow, { borderBottomColor: C.line }]}
+            accessibilityRole="button"
+            accessibilityLabel={`Line ${r.route_short_name} to ${r.headsign}`}
+            accessibilityHint="Shows the line on the map. Long-press to report a delay."
+          >
+            <View style={[s.lineBadge, { backgroundColor: color }]}>
+              <Text style={s.lineBadgeMode}>{r.mode_badge}</Text>
+              <Text style={s.lineBadgeName} numberOfLines={1}>
+                {r.route_short_name}
+              </Text>
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[s.headsign, { color: C.text }]} numberOfLines={1}>
+                {r.headsign}
+              </Text>
+              {!!r.agency_name && (
+                <Text style={[s.agency, { color: C.sub }]} numberOfLines={1}>
+                  {r.agency_name}
+                </Text>
+              )}
+            </View>
+            <View style={s.etaCol}>
+              {!first ? (
+                <LineNoDepartures status={r.arrivals_status} />
+              ) : (
+                <>
+                  <Text style={[s.etaMain, { color: first.eta_seconds <= 120 ? RED : C.text }]}>
+                    {first.eta_seconds <= 60 ? "Now" : formatEta(first.eta_seconds)}
+                  </Text>
+                  <Text style={[s.etaSub, { color: C.sub }]} numberOfLines={1}>
+                    {[departureMeta(first), rest[0] ? `then ${formatEta(rest[0].eta_seconds)}` : null]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </Text>
+                </>
+              )}
+            </View>
+          </PressableScale>
+        );
+      })}
+
+      <Text style={[s.footNote, { color: C.sub }]}>Tap a line to see its route · long-press to report a delay</Text>
+    </View>
+  );
+}
+
+function InfoTab({
+  stop,
+  typeLabel,
+  typeColor,
+  stopCode,
+  platform,
+  landmark,
+  wheelchair,
+  routes,
+  photos,
+  photosLoading,
+  C,
+  onLine,
+  onAddPhoto,
+  onSuggest,
+}: {
+  stop: Stop;
+  typeLabel: string;
+  typeColor: string;
+  stopCode: string | null;
+  platform: string | null;
+  landmark: string | null;
+  wheelchair: boolean;
+  routes: StopRoute[];
+  photos: StopPhoto[];
+  photosLoading: boolean;
+  C: P;
+  onLine: (id: string) => void;
+  onAddPhoto: () => void;
+  onSuggest: () => void;
+}) {
+  return (
+    <View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.photoStrip}>
+        {photosLoading
+          ? [0, 1].map((i) => <View key={i} style={[s.photo, { backgroundColor: C.skeleton }]} />)
+          : (photos.length
+              ? photos.map((p) => ({ key: String(p.id), uri: p.data.photo_url }))
+              : [{ key: "map", uri: mapboxStaticPhoto(stop.lng, stop.lat) }]
+            ).map((p) => (
+              <Image
+                key={p.key}
+                source={{ uri: p.uri }}
+                style={[s.photo, { backgroundColor: C.chip }]}
+                contentFit="cover"
+                transition={180}
+                cachePolicy="memory-disk"
+              />
+            ))}
+        <PressableScale onPress={onAddPhoto} style={[s.addPhoto, { borderColor: ORANGE + "66" }]} accessibilityLabel="Add a photo">
+          <Ionicons name="camera" size={20} color={ORANGE} />
+          <Text style={s.addPhotoText}>Add photo</Text>
+        </PressableScale>
+      </ScrollView>
+
+      <View style={[s.infoList, { borderTopColor: C.line }]}>
+        <InfoRow icon="location-outline" color={typeColor} C={C} text={landmark ? landmark.replace(/^./, (c) => c.toUpperCase()) : "No landmark yet"} sub={landmark ? "Landmark riders use" : "Know one? Suggest it"} onPress={landmark ? undefined : onSuggest} />
+        <InfoRow icon="pricetag-outline" color={C.sub} C={C} text={[typeLabel, stopCode && `code ${stopCode}`, platform && `platform ${platform}`].filter(Boolean).join(" · ")} />
+        <InfoRow
+          icon={wheelchair ? "accessibility" : "accessibility-outline"}
+          color={wheelchair ? GREEN : C.sub}
+          C={C}
+          text={wheelchair ? "Step-free boarding" : "Accessibility not confirmed"}
+          sub={wheelchair ? undefined : "Riders can help by suggesting an edit"}
+        />
+        <InfoRow icon="navigate-circle-outline" color={C.sub} C={C} text={`${stop.lat.toFixed(5)}, ${stop.lng.toFixed(5)}`} />
+      </View>
+
+      {routes.length > 0 && (
+        <View style={{ paddingHorizontal: 18, paddingTop: 16 }}>
+          <Text style={[s.section, { color: C.sub }]}>LINES AT THIS STOP</Text>
+          <View style={s.lineChips}>
+            {routes.map((r) => (
+              <PressableScale
+                key={r.id}
+                onPress={() => onLine(r.id)}
+                style={[s.lineChip, { backgroundColor: r.route_color ? `#${String(r.route_color).replace("#", "")}` : BLUE }]}
+                accessibilityLabel={`Line ${r.short_name}`}
+              >
+                <Text style={s.lineChipText}>{r.short_name}</Text>
+              </PressableScale>
+            ))}
+          </View>
+        </View>
+      )}
+
+      <Pressable onPress={onSuggest} style={s.suggestRow}>
+        <Ionicons name="create-outline" size={15} color={BLUE} />
+        <Text style={[s.suggestText, { color: BLUE }]}>Something wrong here? Suggest an edit</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function ReviewsTab({
+  reviews,
+  loading,
+  rating,
+  myReviewId,
+  C,
+  onWrite,
+}: {
+  reviews: StopReview[];
+  loading: boolean;
+  rating: {
+    avg: number; count: number; safety: number; comfort: number; cleanliness: number; topTags: [string, number][];
+  } | null;
+  myReviewId: number | null;
+  C: P;
+  onWrite: () => void;
+}) {
+  if (loading) return <SkeletonRows color={C.skeleton} />;
+  const mine = reviews.find((r) => r.id === myReviewId);
+  const others = reviews.filter((r) => r.id !== myReviewId);
+  return (
+    <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 14 }}>
+      {rating ? (
+        <View style={[s.summary, { backgroundColor: C.chip }]}>
+          <View style={{ alignItems: "center", width: 88 }}>
+            <Text style={[s.summaryAvg, { color: C.text }]}>{rating.avg.toFixed(1)}</Text>
+            <Stars value={Math.round(rating.avg * 2) / 2} size={13} idle={C.sub} />
+            <Text style={[s.summaryCount, { color: C.sub }]}>
+              {rating.count} review{rating.count === 1 ? "" : "s"}
+            </Text>
+          </View>
+          <View style={{ flex: 1, gap: 7 }}>
+            {(
+              [
+                ["Safety", rating.safety],
+                ["Comfort", rating.comfort],
+                ["Cleanliness", rating.cleanliness],
+              ] as const
+            ).map(([label, v]) => (
+              <View key={label} style={s.barRow}>
+                <Text style={[s.barLabel, { color: C.sub }]}>{label}</Text>
+                <View style={[s.barTrack, { backgroundColor: C.bg }]}>
+                  <View style={[s.barFill, { width: `${(v / 5) * 100}%`, backgroundColor: v >= 3.5 ? GREEN : v >= 2.5 ? AMBER : RED }]} />
+                </View>
+                <Text style={[s.barValue, { color: C.text }]}>{v.toFixed(1)}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : (
+        <View style={s.emptyReviews}>
+          <Ionicons name="chatbubbles-outline" size={34} color={C.sub} />
+          <Text style={[s.emptyTitle, { color: C.text }]}>No reviews yet</Text>
+          <Text style={[s.emptySub, { color: C.sub }]}>{"Tell other riders if it's safe, sheltered and easy to find."}</Text>
+        </View>
+      )}
+
+      {!!rating?.topTags.length && (
+        <View style={s.tagRow}>
+          {rating.topTags.map(([key, n]) => {
+            const t = REVIEW_TAGS.find((x) => x.key === key);
+            if (!t) return null;
+            const color = t.good ? GREEN : RED;
+            return (
+              <View key={key} style={[s.tag, { backgroundColor: color + "16" }]}>
+                <Text style={[s.tagText, { color }]}>
+                  {t.label} · {n}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
+      <PressableScale onPress={onWrite} style={[s.writeBtn, { borderColor: AMBER }]} accessibilityRole="button">
+        <Ionicons name={mine ? "create-outline" : "star-outline"} size={16} color={AMBER} />
+        <Text style={[s.writeText, { color: C.text }]}>{mine ? "Edit your review" : "Write a review"}</Text>
+      </PressableScale>
+
+      {mine && <ReviewCard review={mine} own C={C} onEdit={onWrite} />}
+      {others.map((r) => (
+        <ReviewCard key={r.id} review={r} C={C} />
+      ))}
+    </View>
+  );
+}
+
+// ─── Small parts ─────────────────────────────────────────────────────────────
+
+function ReviewCard({ review, own, C, onEdit }: { review: StopReview; own?: boolean; C: P; onEdit?: () => void }) {
+  const name = own ? "You" : review.user?.name ?? "Rider";
+  const tags = ((review.data as any).tags as string[] | undefined) ?? [];
+  return (
+    <View style={[s.reviewCard, { borderColor: own ? AMBER + "66" : C.line }]}>
+      <View style={s.reviewHead}>
+        {review.user?.avatar ? (
+          <Image source={{ uri: review.user.avatar }} style={s.avatar} />
+        ) : (
+          <View style={[s.avatar, { backgroundColor: ORANGE + "26", alignItems: "center", justifyContent: "center" }]}>
+            <Text style={{ color: ORANGE, fontWeight: "800" }}>{name.charAt(0).toUpperCase()}</Text>
+          </View>
+        )}
+        <View style={{ flex: 1 }}>
+          <Text style={[s.reviewName, { color: C.text }]}>{name}</Text>
+          <View style={s.reviewMeta}>
+            <Stars value={Math.round(overallOf(review) * 2) / 2} size={11} idle={C.sub} />
+            <Text style={[s.reviewDate, { color: C.sub }]}>{timeAgo(review.created_at)}</Text>
+          </View>
+        </View>
+        {own && onEdit && (
+          <Pressable onPress={onEdit} hitSlop={8}>
+            <Text style={{ color: BLUE, fontWeight: "700", fontSize: 12.5 }}>Edit</Text>
+          </Pressable>
+        )}
+      </View>
+      {!!review.data.text && <Text style={[s.reviewText, { color: C.text }]}>{review.data.text}</Text>}
+      {tags.length > 0 && (
+        <View style={s.tagRow}>
+          {tags.map((k) => {
+            const t = REVIEW_TAGS.find((x) => x.key === k);
+            return t ? (
+              <Text key={k} style={[s.reviewTag, { color: t.good ? GREEN : RED, backgroundColor: (t.good ? GREEN : RED) + "12" }]}>
+                {t.label}
+              </Text>
+            ) : null;
+          })}
+        </View>
+      )}
+    </View>
+  );
+}
+
+function Action({
+  icon, label, fg, C, onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  fg?: string;
+  C: P;
+  onPress: () => void;
+}) {
+  return (
+    <PressableScale onPress={onPress} hitSlop={4} style={s.action} accessibilityRole="button" accessibilityLabel={label}>
+      <View style={[s.actionCircle, { backgroundColor: C.chip }]}>
+        <Ionicons name={icon} size={17} color={fg ?? C.text} />
+      </View>
+      <Text style={[s.actionLabel, { color: C.sub }]}>{label}</Text>
+    </PressableScale>
+  );
+}
+
+function NeighborPill({
+  stop, side, C, onPress,
+}: {
+  stop: Stop | null;
+  side: "prev" | "next";
+  C: P;
+  onPress: (s: Stop) => void;
+}) {
+  if (!stop) return <View style={{ flex: 1 }} />;
+  return (
+    <PressableScale
+      containerStyle={{ flex: 1 }}
+      onPress={() => {
+        Haptics.selectionAsync();
+        onPress(stop);
+      }}
+      style={[s.neighbor, { backgroundColor: C.chip, justifyContent: side === "next" ? "flex-end" : "flex-start" }]}
+      accessibilityLabel={`${side === "prev" ? "Previous" : "Next"} stop: ${stop.name}`}
+    >
+      {side === "prev" && <Ionicons name="chevron-back" size={13} color={ORANGE} />}
+      <Text style={[s.neighborText, { color: C.text, textAlign: side === "next" ? "right" : "left" }]} numberOfLines={1}>
+        {stop.name}
+      </Text>
+      {side === "next" && <Ionicons name="chevron-forward" size={13} color={ORANGE} />}
+    </PressableScale>
+  );
+}
+
+function InfoRow({
+  icon, color, text, sub, C, onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  color: string;
+  text: string;
+  sub?: string;
+  C: P;
+  onPress?: () => void;
+}) {
+  const body = (
+    <View style={[s.infoRow, { borderBottomColor: C.line }]}>
+      <Ionicons name={icon} size={18} color={color} />
+      <View style={{ flex: 1 }}>
+        <Text style={[s.infoText, { color: C.text }]} numberOfLines={2}>
+          {text}
+        </Text>
+        {!!sub && <Text style={[s.infoSub, { color: onPress ? BLUE : C.sub }]}>{sub}</Text>}
+      </View>
+      {onPress && <Ionicons name="chevron-forward" size={14} color={C.sub} />}
+    </View>
+  );
+  return onPress ? <PressableScale onPress={onPress}>{body}</PressableScale> : body;
+}
+
+function SkeletonRows({ color }: { color: string }) {
+  const pulse = useRef(new Animated.Value(0.45)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 650, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.45, duration: 650, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+  return (
+    <Animated.View style={{ opacity: pulse, paddingHorizontal: 18 }}>
+      {[0, 1, 2, 3].map((i) => (
+        <View key={i} style={s.skelRow}>
+          <View style={[s.skelBadge, { backgroundColor: color }]} />
+          <View style={{ flex: 1, gap: 7 }}>
+            <View style={[s.skelLine, { width: "64%", backgroundColor: color }]} />
+            <View style={[s.skelLine, { width: "38%", backgroundColor: color }]} />
+          </View>
+          <View style={[s.skelLine, { width: 44, height: 18, backgroundColor: color }]} />
+        </View>
+      ))}
+    </Animated.View>
+  );
+}
+
 const s = StyleSheet.create({
-  panel: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    borderTopLeftRadius: 26,
-    borderTopRightRadius: 26,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.16,
-    shadowRadius: 18,
-    elevation: 24,
-    zIndex: 20,
-    flexDirection: "column",
-    overflow: "hidden",
-  },
-  handleWrap: { alignItems: "center", paddingTop: 10, paddingBottom: 8 },
-  handle: { width: 40, height: 4, borderRadius: 2 },
-  neighborStrip: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-    gap: 8,
-  },
-  neighborPill: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 14,
-  },
-  neighborText: {
-    fontSize: 11.5,
-    fontWeight: "600",
-    flex: 1,
-  },
-  swipeHintBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    paddingHorizontal: 6,
-  },
-  swipeHintText: {
-    fontSize: 10,
-    fontWeight: "700",
-    textTransform: "uppercase",
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    paddingHorizontal: 18,
-    paddingBottom: 12,
-    gap: 8,
-  },
-  titleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  stopName: {
-    fontSize: 19,
-    fontWeight: "800",
-    letterSpacing: -0.3,
-    flexShrink: 1,
-  },
-  platBadge: {
-    backgroundColor: "#DCFCE7",
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  platBadgeText: {
-    color: "#15803D",
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  stopMeta: { fontSize: 13, marginTop: 3, fontWeight: "500" },
-  closeBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  tabBar: {
-    flexDirection: "row",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  tabItem: {
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: 10,
-    position: "relative",
-  },
-  tabLabel: { fontSize: 13.5, fontWeight: "700" },
-  tabUnderline: {
-    position: "absolute",
-    bottom: 0,
-    left: 16,
-    right: 16,
-    height: 2.5,
-    backgroundColor: ORANGE,
-    borderRadius: 2,
-  },
-  scrollContent: { paddingHorizontal: 18, paddingTop: 4 },
-  loadingBox: {
-    height: 110,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  arrivalRouteRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 13,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 10,
-  },
-  arrivalBadgeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  modeTag: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  modeTagText: {
-    color: "#FFFFFF",
-    fontSize: 10,
-    fontWeight: "800",
-  },
-  routeShortName: {
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  routeHeadsign: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  arrivalsRightCol: {
-    alignItems: "flex-end",
-    gap: 2,
-  },
-  arrivalLine: {
-    fontSize: 12.5,
-  },
-  arrivalRedText: {
-    color: RED,
-    fontWeight: "700",
-  },
-  suggestEditsRow: {
-    paddingVertical: 12,
-  },
-  suggestEditsText: {
-    fontSize: 13,
-    fontWeight: "500",
-  },
-  infoCard: {
-    padding: 14,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    gap: 10,
-  },
-  infoRowItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  infoTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  infoDesc: {
-    fontSize: 12.5,
-    marginTop: 2,
-  },
-  secHeading: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-    marginBottom: 8,
-  },
-  routesWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  routeChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  routeChipText: {
-    fontSize: 12.5,
-    fontWeight: "700",
-  },
-  photoTile: {
-    width: 115,
-    height: 84,
-    borderRadius: 12,
-    marginRight: 10,
-  },
-  photoPlaceholder: {
-    width: 115,
-    height: 84,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderStyle: "dashed",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-  },
-  photoPlaceholderText: {
-    fontSize: 11,
-    color: ORANGE,
-    fontWeight: "600",
-  },
-  quickContribRow: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  contribBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 11,
-    borderRadius: 12,
-  },
-  contribBtnText: {
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  writeReviewBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginTop: 10,
-  },
-  writeReviewText: {
-    flex: 1,
-    fontWeight: "600",
-    fontSize: 14,
-  },
-  stickyFooter: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 18,
-    paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  schedulePill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 20,
-  },
-  schedulePillText: {
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  refreshCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  fromToGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  fromBtn: {
-    backgroundColor: BLUE,
-    paddingHorizontal: 18,
-    paddingVertical: 9,
-    borderRadius: 20,
-  },
-  toBtn: {
-    backgroundColor: ORANGE,
-    paddingHorizontal: 22,
-    paddingVertical: 9,
-    borderRadius: 20,
-    minWidth: 68,
-    alignItems: "center",
-  },
-  fromToText: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "700",
-  },
+  neighbors: { flexDirection: "row", gap: 8, paddingHorizontal: 18, paddingBottom: 8 },
+  neighbor: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10 },
+  neighborText: { flex: 1, fontSize: 12, fontWeight: "600" },
+
+  headerRow: { flexDirection: "row", alignItems: "flex-start", gap: 12, paddingHorizontal: 18 },
+  typeBadge: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "#FFFFFF", marginTop: 2 },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  title: { fontSize: 19, fontWeight: "800", letterSpacing: -0.3, flexShrink: 1 },
+  platform: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
+  platformText: { color: "#FFFFFF", fontSize: 11, fontWeight: "800" },
+  meta: { fontSize: 12.5 },
+  factsRow: { flexDirection: "row", alignItems: "center", gap: 5, flexWrap: "wrap" },
+  ratingInline: { flexDirection: "row", alignItems: "center", gap: 3 },
+  fact: { fontSize: 12.5 },
+  roundBtn: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },
+
+  actions: { flexDirection: "row", justifyContent: "space-around", paddingHorizontal: 10, paddingTop: 14, paddingBottom: 10 },
+  action: { alignItems: "center", gap: 5, minWidth: 56 },
+  actionCircle: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center" },
+  actionLabel: { fontSize: 11.5, fontWeight: "600" },
+
+  segment: { flexDirection: "row", marginHorizontal: 18, marginBottom: 6, padding: 3, borderRadius: 12 },
+  segBtn: { flex: 1, alignItems: "center", paddingVertical: 7, borderRadius: 9 },
+  segText: { fontSize: 13, fontWeight: "700" },
+
+  boardHead: { flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 18, paddingVertical: 8 },
+  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: GREEN },
+  boardHeadText: { flex: 1, fontSize: 11.5 },
+  refresh: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  lineRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 18, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  lineBadge: { minWidth: 54, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 10, alignItems: "center" },
+  lineBadgeMode: { color: "rgba(255,255,255,0.85)", fontSize: 9, fontWeight: "800", letterSpacing: 0.4 },
+  lineBadgeName: { color: "#FFFFFF", fontSize: 15, fontWeight: "900" },
+  headsign: { fontSize: 14.5, fontWeight: "700" },
+  agency: { fontSize: 12, marginTop: 2 },
+  etaCol: { alignItems: "flex-end", maxWidth: 130 },
+  etaMain: { fontSize: 17, fontWeight: "900" },
+  etaSub: { fontSize: 11.5, marginTop: 1 },
+  footNote: { fontSize: 11.5, textAlign: "center", paddingVertical: 14 },
+
+  photoStrip: { paddingHorizontal: 18, gap: 10, paddingTop: 6 },
+  photo: { width: 190, height: 120, borderRadius: 14 },
+  addPhoto: { width: 110, height: 120, borderRadius: 14, borderWidth: 1.5, borderStyle: "dashed", alignItems: "center", justifyContent: "center", gap: 6 },
+  addPhotoText: { color: ORANGE, fontSize: 12, fontWeight: "700" },
+  infoList: { marginTop: 16, marginHorizontal: 18, borderTopWidth: StyleSheet.hairlineWidth },
+  infoRow: { flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  infoText: { fontSize: 14, fontWeight: "500" },
+  infoSub: { fontSize: 12, marginTop: 2 },
+  section: { fontSize: 11, fontWeight: "800", letterSpacing: 0.6, marginBottom: 10 },
+  lineChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  lineChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, minWidth: 44, alignItems: "center" },
+  lineChipText: { color: "#FFFFFF", fontSize: 13, fontWeight: "800" },
+  suggestRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 18 },
+  suggestText: { fontSize: 13, fontWeight: "700" },
+
+  summary: { flexDirection: "row", alignItems: "center", gap: 14, padding: 14, borderRadius: 16 },
+  summaryAvg: { fontSize: 32, fontWeight: "900", letterSpacing: -1 },
+  summaryCount: { fontSize: 11.5, marginTop: 3 },
+  barRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  barLabel: { width: 74, fontSize: 12 },
+  barTrack: { flex: 1, height: 7, borderRadius: 4, overflow: "hidden" },
+  barFill: { height: 7, borderRadius: 4 },
+  barValue: { width: 26, fontSize: 12, fontWeight: "700", textAlign: "right" },
+  emptyReviews: { alignItems: "center", gap: 6, paddingVertical: 18 },
+  emptyTitle: { fontSize: 15, fontWeight: "800" },
+  emptySub: { fontSize: 12.5, textAlign: "center", maxWidth: 260 },
+  tagRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  tag: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 },
+  tagText: { fontSize: 12, fontWeight: "700" },
+  writeBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 44, borderRadius: 12, borderWidth: 1.5 },
+  writeText: { fontSize: 14, fontWeight: "700" },
+  reviewCard: { borderWidth: 1, borderRadius: 14, padding: 12, gap: 8 },
+  reviewHead: { flexDirection: "row", alignItems: "center", gap: 10 },
+  avatar: { width: 34, height: 34, borderRadius: 17 },
+  reviewName: { fontSize: 13.5, fontWeight: "700" },
+  reviewMeta: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
+  reviewDate: { fontSize: 11.5 },
+  reviewText: { fontSize: 13.5, lineHeight: 19 },
+  reviewTag: { fontSize: 11, fontWeight: "700", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, overflow: "hidden" },
+
+  footerRow: { flexDirection: "row", gap: 10 },
+  bigBtn: { height: 48, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  bigBtnText: { fontSize: 15, fontWeight: "800" },
+
+  skelRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 14 },
+  skelBadge: { width: 54, height: 38, borderRadius: 10 },
+  skelLine: { height: 11, borderRadius: 6 },
 });
