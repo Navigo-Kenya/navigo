@@ -6,6 +6,7 @@ import type { RouteInfo, Step } from "@/utils/mapHelpers";
 import { detectManeuver } from "@/utils/mapHelpers";
 import type { LatLng } from "@/providers/map/types";
 import { asLandmark, withLandmark } from "@/utils/landmarks";
+import { isStreetMode, streetVerb } from "@/utils/streetModes";
 import { useEffect, useReducer, useRef } from "react";
 
 type ActiveJourney = {
@@ -116,15 +117,15 @@ export function useRouteOverlay(
 
           allCoords = allCoords.concat(coords);
 
-          const isStreet = seg.mode === "WALK" || seg.mode === "BICYCLE" || seg.mode === "CAR";
+          const isStreet = isStreetMode(seg.mode);
           if (isStreet) {
-            // Walks draw as walk legs; bike / car journeys keep their solid line.
+            // Walks draw as walk legs; bike / car / boda journeys keep their solid line.
             if (seg.mode === "WALK") {
               newWalkLegs.push({ id: `walk-${i}`, coords });
             } else {
               newTransitLegs.push({ id: `street-${i}`, coords, color: sanitizeHex(seg.route_color, seg.mode) });
             }
-            const verb = seg.mode === "CAR" ? "Drive" : seg.mode === "BICYCLE" ? "Cycle" : "Walk";
+            const verb = streetVerb(seg.mode);
             const target = seg.to.name === "Destination" ? toLoc.name : seg.to.name;
             // Walking to a stop: anchor it ("Walk to Koja, opposite Masinde Muliro University").
             const nextSeg = segments[i + 1];

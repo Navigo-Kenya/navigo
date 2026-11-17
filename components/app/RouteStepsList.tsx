@@ -44,6 +44,7 @@ function resolveTransitIcon(
   if (m === "FERRY") return "directions-boat";
   if (m === "BICYCLE") return "directions-bike";
   if (m === "CAR") return "directions-car";
+  if (m === "MOTORBIKE") return "two-wheeler";
   return "directions-bus";
 }
 

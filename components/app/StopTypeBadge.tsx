@@ -38,11 +38,12 @@ export function StopTypeBadge({ stop, size = 32 }: { stop: StopLike; size?: numb
 }
 
 /** Transit mode of a line (route_type / mode / badge) as an icon name. */
-export function modeIconName(mode?: string | null, badge?: string | null): "train" | "bus" | "car" | "bicycle" | "walk" {
+export function modeIconName(mode?: string | null, badge?: string | null): "train" | "bus" | "car" | "motorbike" | "bicycle" | "walk" {
   const m = String(mode ?? "").toUpperCase();
   const b = String(badge ?? "").toUpperCase();
   if (["RAIL", "SUBWAY", "TRAM", "METRO"].includes(m) || ["SGR", "RAIL", "METRO", "COMMUTER"].includes(b)) return "train";
   if (m === "CAR") return "car";
+  if (m === "MOTORBIKE") return "motorbike";
   if (m === "BICYCLE") return "bicycle";
   if (m === "WALK") return "walk";
   return "bus";

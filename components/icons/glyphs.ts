@@ -16,7 +16,10 @@
 // `filled: "solid"` makes the filled variant a solid shape (stars, pins,
 // bookmarks, status circles); otherwise it is duotone.
 
-export type GlyphPart = { k: "line" | "shape" | "solid" | "knock"; d: string; w?: number; o?: number };
+/** Glyphs with no Ionicons counterpart: names <Icon/> accepts on top of Ionicons'. */
+export type NavigoOnlyGlyph = "motorbike";
+
+export type GlyphPart ={ k: "line" | "shape" | "solid" | "knock"; d: string; w?: number; o?: number };
 export type Glyph = { parts: GlyphPart[]; filled?: "duotone" | "solid" };
 
 /** Circle as a path (keeps every part a single path). */
@@ -120,6 +123,8 @@ export const GLYPHS: Record<string, Glyph> = {
   train: { parts: [S("M7 4.4h10a2 2 0 0 1 2 2v8.6a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6.4a2 2 0 0 1 2-2Z"), K("M5 11h14"), D(c(8.6, 14, 1.05)), D(c(15.4, 14, 1.05)), L("M8.6 20.2l1.4-3.2M15.4 20.2 14 17")] },
   walk: { parts: [D(c(13.1, 4.6, 1.9)), L("M12.6 8.4 10.2 13l3 2.6 1 5M10.2 13l-2.6 7.6M12.6 8.4l3.4 3 2.6.6M12.6 8.4 9.1 10l-1.6 3")] },
   bicycle: { parts: [L(c(6, 16, 3.6)), L(c(18, 16, 3.6)), L("M6 16l4-7h6l2 7M10 9 8.6 6.4H7M16 9l-4 7")] },
+  // Boda boda: two wheels, tank-and-seat body, front fork and handlebar.
+  motorbike: { parts: [L(c(5.8, 16.2, 3.1)), L(c(18.2, 16.2, 3.1)), S("M7.6 12.2 9 10.2h4.4l1.8 1.6H17l-1.6 2.6h-5.6Z"), L("M5.8 16.2 8 12.6M18.2 16.2l-1.4-7.4M14.4 6.8h2.2l.2 2")] },
   car: { parts: [S("M4.4 13.4l1.65-4.25A2 2 0 0 1 7.9 7.9h8.2a2 2 0 0 1 1.85 1.25l1.65 4.25V17a1 1 0 0 1-1 1H5.4a1 1 0 0 1-1-1Z"), K("M4.6 13.4h14.8"), D(c(7.8, 15.6, 1.2)), D(c(16.2, 15.6, 1.2)), L("M6.4 18v1.6M17.6 18v1.6")] },
 };
 
