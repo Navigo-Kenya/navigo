@@ -10,6 +10,8 @@ export interface PoiGooglePhoto {
   name: string;
   width: number | null;
   height: number | null;
+  /** Direct short-lived Google CDN URL when the API already resolved it. */
+  url?: string | null;
   attributions: { name: string | null; uri: string | null }[];
 }
 
