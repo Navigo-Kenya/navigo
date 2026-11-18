@@ -58,6 +58,7 @@ import { useRouter }      from "expo-router";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { useSavedStore }  from "@/store/savedStore";
 import { usePrefsStore }  from "@/store/prefsStore";
+import { legProfile, roleSwitchable, type Role } from "@/services/navProfile";
 import { useAuthStore }   from "@/store/authStore";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Dimensions, Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
@@ -176,7 +177,7 @@ export default function MapScreen() {
   const dark = useColorScheme() === "dark";
   const BG = dark ? "#0F0F0F" : "#F6F7F8";
 
-  const { location: me, navState, locationPermissionDenied, openLocationSettings, gpsLost, wrongDirection, startNavigation, stopNavigation, pauseNavigation, resumeNavigation, isIndoor, canBoardTransit, boardTransit } = useNavigation();
+  const { location: me, navState, locationPermissionDenied, openLocationSettings, gpsLost, wrongDirection, startNavigation, stopNavigation, pauseNavigation, resumeNavigation, isIndoor, canBoardTransit, boardTransit, turn, headingAway, phase, phaseNotice, undoPhase, canAlight, alightTransit, startRide } = useNavigation();
   const { visible: rateVisible, onJourneyComplete, onRate, onLater } = useRatePrompt();
   const [showPostJourney, setShowPostJourney] = useState(false);
   // Snapshot of the finished journey — PostJourneySheet must not read
@@ -200,17 +201,42 @@ export default function MapScreen() {
   const navigating    = tripStatus === "IN_TRANSIT";
   const tripPaused    = tripStatus === "PAUSED";
   
+  // Vehicle mode once the user is in the vehicle (services/legPhase): on board,
+  // or moving in their own car, on their bike, on the boda. Waiting at the
+  // stage or for the boda they're on foot. Never from the speed alone: a
+  // cyclist going downhill stays a cyclist, a GPS jump stays a walk.
   const isVehicleMode = navigating && (
-    (navState?.currentSegmentMode != null && navState.currentSegmentMode !== "WALK")
-    || (me?.speed ?? 0) > 4.0
+    phase === "ride"
+    || (phase === "go" && navState?.currentSegmentMode != null && navState.currentSegmentMode !== "WALK")
   );
 
+  // Who controls the vehicle on this leg (services/navProfile): a driver gets
+  // turn-by-turn, a passenger is kept informed. Car and boda remember the choice.
+  const carRole  = usePrefsStore((s) => s.prefs.carRole);
+  const bodaRole = usePrefsStore((s) => s.prefs.bodaRole);
+  const legProf = useMemo(
+    () => (navigating ? legProfile(navState?.currentSegmentMode ?? "WALK", { carRole, bodaRole }) : null),
+    [navigating, navState?.currentSegmentMode, carRole, bodaRole]
+  );
+  const passengerOnStreet = legProf?.role === "passenger" && legProf.kind !== "transit";
+  const switchRole = useCallback(() => {
+    if (!legProf || !roleSwitchable(legProf.kind)) return;
+    const next: Role = legProf.role === "driver" ? "passenger" : "driver";
+    Haptics.selectionAsync().catch(() => {});
+    usePrefsStore.getState().set(legProf.kind === "car" ? "carRole" : "bodaRole", next);
+  }, [legProf]);
+
   // Immersive navigation: the camera frames each mode its own way (the
-  // vehicle's family is enough here; the route picks the exact model below).
+  // vehicle's family is enough here; the route picks the exact model below),
+  // higher and wider for a passenger.
+  const legMode = navState?.currentSegmentMode ?? "WALK";
   const navFamily = navigating
-    ? vehicleFor(navState?.currentSegmentMode ?? (isVehicleMode ? "BUS" : "WALK"))
+    ? vehicleFor(!isVehicleMode ? "WALK" : legMode === "WALK" ? "BUS" : legMode) // on a walk but riding: boarded early
     : null;
-  const navCamera = useMemo(() => (navFamily ? cameraFor(navFamily) : null), [navFamily]);
+  const navCamera = useMemo(
+    () => (navFamily ? cameraFor(navFamily, passengerOnStreet) : null),
+    [navFamily, passengerOnStreet]
+  );
 
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const layers          = useMapLayersStore((s) => s.layers);
@@ -1213,9 +1239,19 @@ export default function MapScreen() {
     if (b) fetchReportsForBounds(b.north, b.south, b.east, b.west);
   }, [layers.reports, layers.traffic, fetchReportsForBounds]);
 
-  const nextStep    = steps[navState?.stepIndex ?? 0];
+  // Engine steps are one per leg; the overlay's steps are two per ride (board,
+  // alight). Index them by leg, or after the first ride the banner ran a step
+  // behind ("Board Line 45K" while on board, "Alight at…" on the last walk).
+  const legIdx = navState?.stepIndex ?? 0;
+  const nextStep = useMemo(() => {
+    const ofLeg = steps.filter((s) => s.segIndex === legIdx);
+    return ofLeg.length ? ofLeg[ofLeg.length - 1] : steps[legIdx];
+  }, [steps, legIdx]);
   const nextPreview = prefs.navHints === "off" || !nextStep ? null : humanizeStep(nextStep);
-  const nextNextStep = steps[(navState?.stepIndex ?? 0) + 1];
+  const nextNextStep = useMemo(
+    () => steps.find((s) => (s.segIndex ?? -1) > legIdx) ?? null,
+    [steps, legIdx]
+  );
 
   const nextNextPreview = useMemo(() => {
     if (prefs.navHints === "off" || !nextNextStep) return null;
@@ -1244,37 +1280,40 @@ export default function MapScreen() {
 
   const stepEta = (navState?.stepETAs?.[navState?.stepIndex ?? 0]) ?? null;
 
-  const walkInstruction = useMemo(() => {
-    if (!isNavigationMode || navState?.currentSegmentMode !== "WALK") return null;
-    const step = steps[navState.stepIndex ?? 0];
-    if (!step?.subSteps?.length) return null;
-    if (meLat == null || meLng == null) return step.subSteps[0].instruction;
-    
-    let nearestIdx = 0, nearestDist = Infinity;
-    for (let i = 0; i < step.subSteps.length; i++) {
-      const d = Math.hypot(meLat - step.subSteps[i].lat, meLng - step.subSteps[i].lng);
-      if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
-    }
-    
-    const isStandingAtStart = nearestIdx === 0 && nearestDist < (30 / 111_320);
-    const isPassingWaypoint = !isStandingAtStart && nearestDist < (20 / 111_320);
-    const idx = isPassingWaypoint ? Math.min(nearestIdx + 1, step.subSteps.length - 1) : nearestIdx;
-      
-    return step.subSteps[idx].instruction;
-  }, [isNavigationMode, navState, steps, meLat, meLng]);
+  // Street legs: the next turn, from the progress along the road (useNavigation).
+  const navTurn = isNavigationMode && legProf?.turns ? turn : null;
 
+  // Waiting at the stage: which line, where, and the next departure.
+  const waitInfo = useMemo(() => {
+    if (!isNavigationMode || phase !== "wait") return null;
+    const segs = (activeJourney?.route?.segments as any[] | undefined) ?? [];
+    const ride = segs[legIdx]?.mode !== "WALK" ? segs[legIdx] : segs[legIdx + 1];
+    if (!ride) return null;
+    return {
+      line: ride.route_name ?? null,
+      stop: ride.from?.name ?? null,
+      next: ride.next_departures?.[0]?.eta_label ?? null,
+      mode: String(ride.mode ?? "BUS"),
+    };
+  }, [isNavigationMode, phase, activeJourney?.route, legIdx]);
+
+  // Waiting for a boda or a taxi: where to (to show the rider) and the usual fare.
+  const pickupInfo = useMemo(() => {
+    if (!isNavigationMode || phase !== "pickup") return null;
+    const fare = (activeJourney?.route as any)?.fare;
+    return {
+      destination: activeJourney?.toLoc?.name ?? null,
+      fare: fare?.min != null && fare?.max != null ? `About KES ${fare.min}–${fare.max}` : null,
+    };
+  }, [isNavigationMode, phase, activeJourney?.route, activeJourney?.toLoc?.name]);
+
+  // Walking to a stage: where the walk ends ("· To Kencom").
   const walkDestination = useMemo(() => {
     if (!isNavigationMode || navState?.currentSegmentMode !== "WALK") return null;
-    const si = navState.stepIndex ?? 0;
-    for (let i = si + 1; i < steps.length; i++) {
-      if (steps[i].type === "depart") {
-        const m = steps[i].instruction?.match(/at (.+)$/);
-        return m?.[1] ?? null;
-      }
-      if (steps[i].type === "arrive") break;
-    }
-    return null;
-  }, [isNavigationMode, navState, steps]);
+    const segs = activeJourney?.route?.segments as any[] | undefined;
+    const nextSeg = segs?.[legIdx + 1];
+    return nextSeg && nextSeg.mode !== "WALK" ? (nextSeg.from?.name ?? null) : null;
+  }, [isNavigationMode, navState?.currentSegmentMode, activeJourney?.route, legIdx]);
 
   // AR guidance is a walk-leg tool: auto-dismiss when boarding or ending.
   useEffect(() => {
@@ -1282,7 +1321,7 @@ export default function MapScreen() {
   }, [arOpen, isVehicleMode, isNavigationMode]);
 
   // AR arrow target: the current step's endpoint (stage / boarding stop).
-  const arTarget = steps[navState?.stepIndex ?? 0]?.location ?? null; // [lng, lat]
+  const arTarget = nextStep?.location ?? null; // [lng, lat]
 
   const boardingNodeId = (tripStatus === "WAITING_FOR_BUS" && navStarted)
     ? (() => {
@@ -1336,10 +1375,38 @@ export default function MapScreen() {
     () => (activeSegIdx < 0 ? null : transitLegs.find((l) => Number(l.id.split("-")[1]) === activeSegIdx) ?? null),
     [transitLegs, activeSegIdx]
   );
+  // The ride being taken: this leg, or, boarded at an earlier stage, the next one.
+  const rideLeg = useMemo(
+    () => navLeg ?? (phase === "ride"
+      ? transitLegs.find((l) => Number(l.id.split("-")[1]) > activeSegIdx) ?? null
+      : null),
+    [navLeg, phase, transitLegs, activeSegIdx]
+  );
   const navMode = isNavigationMode
-    ? (navLeg?.mode ?? navState?.currentSegmentMode ?? (isVehicleMode ? "BUS" : "WALK"))
+    ? (isVehicleMode ? (rideLeg?.mode ?? navState?.currentSegmentMode ?? "BUS") : "WALK")
     : null;
-  const navModel = navMode ? vehicleFor(navMode, navLeg?.routeId, navLeg?.routeName) : null;
+  const navModel = navMode ? vehicleFor(navMode, rideLeg?.routeId, rideLeg?.routeName) : null;
+
+  // The models drawn now: the vehicle, or a whole train (locomotive + coaches).
+  const liveModels = useMemo(
+    () => new Set<string>(
+      navModel && isRailMode(navMode) && rideLeg ? trainConsist(rideLeg.routeId) : navModel ? [navModel] : []
+    ),
+    [navModel, navMode, rideLeg]
+  );
+
+  // Boarding and getting off crossfade the walking marker and the vehicle
+  // (600 ms) instead of swapping them in one frame.
+  const [fadeFrom, setFadeFrom] = useState<string | null>(null);
+  const shownModelRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = shownModelRef.current;
+    shownModelRef.current = navModel;
+    if (!prev || !navModel || prev === navModel) return;
+    setFadeFrom(prev);
+    const id = setTimeout(() => setFadeFrom(null), 650);
+    return () => clearTimeout(id);
+  }, [navModel]);
   // Every model the journey can need, registered while navigating only.
   const journeyModels = useMemo(() => (isNavigationMode ? modelsFor(transitLegs) : []), [isNavigationMode, transitLegs]);
   const journeyModelAssets = useMemo(
@@ -1374,8 +1441,8 @@ export default function MapScreen() {
     if (!isNavigationMode || meLat == null || meLng == null || !navModel) return null;
 
     // A train is drawn car by car along its line, so it bends through curves.
-    if (isRailMode(navMode) && navLeg) {
-      const cars = trainCars(navLeg.coords, { latitude: meLat, longitude: meLng }, trainConsist(navLeg.routeId), followZoom);
+    if (isRailMode(navMode) && rideLeg) {
+      const cars = trainCars(rideLeg.coords, { latitude: meLat, longitude: meLng }, trainConsist(rideLeg.routeId), followZoom);
       return {
         type: "FeatureCollection",
         features: cars.map((c) => ({
@@ -1389,17 +1456,15 @@ export default function MapScreen() {
     // Vehicles face their course over ground (the route bearing when snapped);
     // the walking marker points where the phone points (the compass).
     const heading = navModel === "puck" ? beamHeading : (me?.heading ?? 0);
-    return {
-      type: "FeatureCollection",
-      features: [
-        {
-          type: "Feature",
-          geometry: { type: "Point", coordinates: [meLng, meLat] },
-          properties: { model: navModel, modelRot: [MODEL_TILT_X, 0, modelYaw(heading)] },
-        },
-      ],
-    } as GeoJSON.FeatureCollection;
-  }, [meLat, meLng, me?.heading, beamHeading, isNavigationMode, navModel, navMode, navLeg, followZoom]);
+    const at = (model: string) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [meLng, meLat] },
+      properties: { model, modelRot: [MODEL_TILT_X, 0, modelYaw(model === "puck" ? beamHeading : heading)] },
+    });
+    // While crossfading, the model going away stays drawn until it has faded.
+    const features = fadeFrom && fadeFrom !== navModel ? [at(fadeFrom), at(navModel)] : [at(navModel)];
+    return { type: "FeatureCollection", features } as GeoJSON.FeatureCollection;
+  }, [meLat, meLng, me?.heading, beamHeading, isNavigationMode, navModel, navMode, rideLeg, followZoom, fadeFrom]);
 
 
   return (
@@ -1503,7 +1568,9 @@ export default function MapScreen() {
                         modelId: m,
                         modelScale: modelScaleExpr(m),
                         modelRotation: ["get", "modelRot"],
-                        modelOpacity: 1,
+                        // The current model shows; the others fade out (boarding, getting off).
+                        modelOpacity: liveModels.has(m) ? 1 : 0,
+                        modelOpacityTransition: { duration: 600, delay: 0 },
                         modelCastShadows: true,
                         modelReceiveShadows: true,
                         // Head and tail lights, neon and lit signs glow after dark.
@@ -1686,7 +1753,20 @@ export default function MapScreen() {
         onResetNorth={handleCompassPress}
         headingUp={headingUp}
         stepEta={stepEta}
-        walkInstruction={walkInstruction}
+        turn={navTurn}
+        legKind={legProf?.kind ?? null}
+        legRole={legProf?.role ?? null}
+        onSwitchRole={legProf && roleSwitchable(legProf.kind) ? switchRole : undefined}
+        headingAway={headingAway && isNavigationMode}
+        phase={isNavigationMode ? phase : null}
+        phaseNotice={isNavigationMode ? phaseNotice : null}
+        onUndoPhase={undoPhase}
+        waitInfo={waitInfo}
+        pickupInfo={pickupInfo}
+        canAlight={canAlight && isNavigationMode}
+        onAlight={alightTransit}
+        onStartRide={startRide}
+        destinationName={activeJourney?.toLoc?.name ?? null}
         walkDestination={walkDestination}
         canBoardTransit={canBoardTransit && (isNavigationMode || tripStatus === "WAITING_FOR_BUS")}
         onBoardTransit={boardTransit}
@@ -1727,8 +1807,8 @@ export default function MapScreen() {
         targetLat={arTarget ? arTarget[1] : null}
         targetLng={arTarget ? arTarget[0] : null}
         targetName={walkDestination ?? activeJourney?.toLoc?.name ?? null}
-        instruction={walkInstruction ?? nextPreview}
-        distanceM={navState?.distanceToNextStepM ?? null}
+        instruction={navTurn?.instruction ?? nextPreview}
+        distanceM={navTurn?.distanceM ?? navState?.distanceToNextStepM ?? null}
       />
 
       <PostJourneySheet

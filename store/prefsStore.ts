@@ -23,6 +23,14 @@ export interface TravelPrefs {
    * stalls). Rollback flag: false restores the JS glide/camera loops.
    */
   nativeFollow:  boolean;
+  /**
+   * Who controls the vehicle, remembered per mode: on a car trip the user
+   * usually drives (a taxi or a friend's car: passenger); on a boda they're
+   * usually the passenger (their own motorbike: driver). Navigation guides a
+   * driver turn by turn and keeps a passenger informed (services/navProfile).
+   */
+  carRole:       "driver" | "passenger";
+  bodaRole:      "driver" | "passenger";
 }
 
 const DEFAULTS: TravelPrefs = {
@@ -37,6 +45,8 @@ const DEFAULTS: TravelPrefs = {
   voiceOutput:   "default",
   devTraces:     false,
   nativeFollow:  true,
+  carRole:       "driver",
+  bodaRole:      "passenger",
 };
 
 interface PrefsStore {

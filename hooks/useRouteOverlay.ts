@@ -136,6 +136,7 @@ export function useRouteOverlay(
               duration: seg.duration,
               location: [seg.to.lng, seg.to.lat],
               type: "walk",
+              segIndex: i,
               subSteps: (seg.walk_steps ?? []).map((ws: any) => ({
                 // "Turn left onto Kimathi St, after Java House"
                 instruction: withLandmark(ws.instruction, asLandmark(ws.landmark)),
@@ -186,6 +187,7 @@ export function useRouteOverlay(
                 duration: 0,
                 location: [seg.from.lng, seg.from.lat],
                 type: "depart",
+                segIndex: i,
                 mode: seg.mode,
                 modeBadge: seg.mode_badge ?? "Bus",
                 stopCode: seg.from.stop_code ?? null,
@@ -203,6 +205,7 @@ export function useRouteOverlay(
                 duration: seg.duration,
                 location: [seg.to.lng, seg.to.lat],
                 type: "arrive",
+                segIndex: i,
                 mode: seg.mode,
                 landmarksAlong: seg.landmarks_along ?? [],
                 legCoords: seg.coordinates,

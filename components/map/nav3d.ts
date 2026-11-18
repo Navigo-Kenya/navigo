@@ -123,7 +123,18 @@ const lerpBy = (kph: number, pts: [number, number][]) => {
   return pts[pts.length - 1][1];
 };
 
-export function cameraFor(model: VehicleModel): CameraProfile {
+/**
+ * The camera per vehicle. A passenger in a car or on a boda isn't driving:
+ * the camera sits higher and further back, so they see where they're being
+ * taken rather than the next metres of road.
+ */
+export function cameraFor(model: VehicleModel, passenger = false): CameraProfile {
+  const base = cameraForModel(model);
+  if (!passenger || !["car", "boda"].includes(model)) return base;
+  return { ...base, pitch: base.pitch - 10, zoom: (k) => base.zoom(k) - 0.7 };
+}
+
+function cameraForModel(model: VehicleModel): CameraProfile {
   switch (model) {
     case "puck":
       return { pitch: 55, paddingBottom: 220, zoom: (k) => lerpBy(k, [[5, 19.0], [15, 18.3]]) };

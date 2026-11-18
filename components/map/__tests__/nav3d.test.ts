@@ -72,6 +72,11 @@ describe("drawing", () => {
   it("frames trains wider than road vehicles", () => {
     expect(cameraFor("train_sgr_coach").zoom(80)).toBeLessThan(cameraFor("matatu").zoom(80));
     expect(cameraFor("puck").pitch).toBeLessThan(cameraFor("car").pitch);
+    // A passenger in a car or on a boda sees further: higher, wider. Transit is unchanged.
+    expect(cameraFor("car", true).pitch).toBeLessThan(cameraFor("car").pitch);
+    expect(cameraFor("boda", true).zoom(30)).toBeLessThan(cameraFor("boda").zoom(30));
+    expect(cameraFor("matatu", true).pitch).toBe(cameraFor("matatu").pitch);
+    expect(cameraFor("matatu", true).zoom(30)).toBe(cameraFor("matatu").zoom(30));
   });
 });
 
