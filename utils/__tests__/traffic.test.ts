@@ -1,5 +1,30 @@
-import { incidentLine, trafficSummary } from "../traffic";
-import type { RouteTraffic } from "@/services/route";
+import { incidentLine, legTrafficLine, trafficSummary } from "../traffic";
+import type { LegTraffic, RouteTraffic } from "@/services/route";
+
+describe("legTrafficLine", () => {
+  const leg: LegTraffic = {
+    source: "tomtom",
+    delay_s: 420,
+    level: "moderate",
+    note: "~7 min slower than usual: stationary traffic on Thika Road",
+  };
+
+  it("uses the API's note, amber unless heavy", () => {
+    expect(legTrafficLine(leg)).toEqual({ tone: "moderate", text: leg.note });
+    expect(legTrafficLine({ ...leg, level: "heavy" })?.tone).toBe("heavy");
+    expect(legTrafficLine({ ...leg, level: "low" })?.tone).toBe("moderate");
+  });
+
+  it("falls back to the delay when there is no note", () => {
+    expect(legTrafficLine({ ...leg, note: null })?.text).toBe("~7 min slower than usual");
+  });
+
+  it("says nothing for usual traffic or no data", () => {
+    expect(legTrafficLine({ ...leg, delay_s: 0, note: null })).toBeNull();
+    expect(legTrafficLine(null)).toBeNull();
+    expect(legTrafficLine(undefined)).toBeNull();
+  });
+});
 
 const base: RouteTraffic = {
   source: "tomtom",

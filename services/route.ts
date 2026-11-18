@@ -71,6 +71,8 @@ export interface RouteSegment {
   stop_count?: number;
   next_departures?: NextDepartureItem[];
   traffic_segments?: TrafficSegment[];
+  /** Matatu / BRT leg timed with live traffic (only when the API checked it). */
+  traffic?: LegTraffic | null;
   from: {
     stop_id?: string | null;
     stop_code?: string | null;
@@ -115,7 +117,10 @@ export interface Route {
   route_options?: string[];
   /** Cars on the Nairobi Expressway: estimated toll for the distance on it. */
   toll?: { estimate_kes: number; distance_m: number | null } | null;
-  /** Car / boda: live traffic (TomTom) and incidents on this route. */
+  /**
+   * Car / boda: live traffic (TomTom) and incidents on this route. Transit:
+   * only { source, live, delay_s }, the total of its legs' `traffic`.
+   */
   traffic?: RouteTraffic | null;
   /** Boda boda: typical street fare range (negotiated, so an estimate). */
   fare?: { currency: "KES"; min: number; max: number; typical: number; estimate: true } | null;
@@ -148,7 +153,21 @@ export interface RouteTraffic {
   incidents: TrafficIncident[];
 }
 
-export type JourneyMode ="transit" | "bus" | "rail" | "walk" | "bicycle" | "car" | "motorbike";
+/**
+ * A transit leg compared with a usual day at this hour. `delay_s` is the extra
+ * time already added to the leg's times (0 = usual traffic); `note` is set
+ * only when there is a delay: "~7 min slower than usual: stationary traffic
+ * on Thika Road".
+ */
+export interface LegTraffic {
+  source: "tomtom";
+  delay_s: number;
+  level: "low" | "moderate" | "heavy" | null;
+  note: string | null;
+  incident?: Omit<TrafficIncident, "source"> | null;
+}
+
+export type JourneyMode = "transit" | "bus" | "rail" | "walk" | "bicycle" | "car" | "motorbike";
 
 function getLocalDate(): string {
   const d = new Date();

@@ -1,9 +1,16 @@
 // utils/traffic.ts
 // Plain-language traffic lines for a car / boda route (from the API's
 // `traffic`, timed live by TomTom). Nothing is shown without live data.
-import type { RouteTraffic, TrafficIncident } from "@/services/route";
+import type { LegTraffic, RouteTraffic, TrafficIncident } from "@/services/route";
 
 export type TrafficTone = "low" | "moderate" | "heavy";
+
+/** Traffic text colours (amber darkened so it reads on white cards too). */
+export const TRAFFIC_TONE: Record<TrafficTone, string> = {
+  low: "#16A34A",
+  moderate: "#D97706",
+  heavy: "#DC2626",
+};
 
 export interface TrafficSummary {
   tone: TrafficTone;
@@ -22,6 +29,23 @@ export function incidentLine(i: TrafficIncident): string {
   const where = i.from && i.to ? `${i.from} → ${i.to}` : i.from ?? i.to ?? i.road ?? "";
   const delay = i.delay_s && i.delay_s >= 60 ? `${mins(i.delay_s)} min` : null;
   return [i.description, where, delay].filter(Boolean).join(" · ");
+}
+
+export interface LegTrafficLine {
+  tone: TrafficTone;
+  /** "~7 min slower than usual: stationary traffic on Thika Road". */
+  text: string;
+}
+
+/**
+ * Matatu leg: a line only when today's traffic adds time (the API already
+ * added it to the leg's times). Usual traffic says nothing.
+ */
+export function legTrafficLine(t?: LegTraffic | null): LegTrafficLine | null {
+  if (!t || !t.delay_s || t.delay_s < 60) return null;
+  const text = t.note?.trim() || `~${mins(t.delay_s)} min slower than usual`;
+  const tone: TrafficTone = t.level === "heavy" ? "heavy" : "moderate";
+  return { tone, text };
 }
 
 export function trafficSummary(t?: RouteTraffic | null): TrafficSummary | null {
