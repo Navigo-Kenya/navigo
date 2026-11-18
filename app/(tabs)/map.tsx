@@ -1387,6 +1387,14 @@ export default function MapScreen() {
     : null;
   const navModel = navMode ? vehicleFor(navMode, rideLeg?.routeId, rideLeg?.routeName) : null;
 
+  // The models drawn now: the vehicle, or a whole train (locomotive + coaches).
+  const liveModels = useMemo(
+    () => new Set<string>(
+      navModel && isRailMode(navMode) && rideLeg ? trainConsist(rideLeg.routeId) : navModel ? [navModel] : []
+    ),
+    [navModel, navMode, rideLeg]
+  );
+
   // Boarding and getting off crossfade the walking marker and the vehicle
   // (600 ms) instead of swapping them in one frame.
   const [fadeFrom, setFadeFrom] = useState<string | null>(null);
@@ -1561,7 +1569,7 @@ export default function MapScreen() {
                         modelScale: modelScaleExpr(m),
                         modelRotation: ["get", "modelRot"],
                         // The current model shows; the others fade out (boarding, getting off).
-                        modelOpacity: m === navModel ? 1 : 0,
+                        modelOpacity: liveModels.has(m) ? 1 : 0,
                         modelOpacityTransition: { duration: 600, delay: 0 },
                         modelCastShadows: true,
                         modelReceiveShadows: true,
