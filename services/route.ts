@@ -233,4 +233,43 @@ export const RouteService = {
       throw error;
     }
   },
+
+  /**
+   * Best time to leave for a car / boda route: its roads timed now (live) and
+   * at 4 later departures, up to ~2 h ahead. Sends the route's own geometry,
+   * thinned (the API reconstructs the route from it).
+   */
+  async getDepartureTimes(route: Route): Promise<DepartureAdvice> {
+    const coords = route.segments?.[0]?.coordinates ?? [];
+    const step = Math.max(1, Math.ceil(coords.length / 300));
+    const thinned = coords.filter((_, i) => i % step === 0);
+    const last = coords[coords.length - 1];
+    if (last && thinned[thinned.length - 1] !== last) thinned.push(last);
+
+    const res = await fetchApi<{ data: DepartureAdvice }>("/journey/departure-times", {
+      method: "POST",
+      body: JSON.stringify({ coordinates: thinned }),
+      timeout: 15000,
+    });
+    return res.data;
+  },
 };
+
+export interface DepartureSlot {
+  label: string; // "Now", "6:45 PM"
+  depart_at: string;
+  arrive_label: string;
+  duration_s: number;
+  vs_now_s: number;
+  live: boolean;
+  /** 0–1: this departure's time over the slowest one checked. */
+  relative: number;
+}
+
+export interface DepartureAdvice {
+  /** "Leave at 6:45 PM to save 9 min", "Now is a good time to leave"… */
+  advice: string;
+  best_index: number;
+  saves_s: number;
+  slots: DepartureSlot[];
+}
