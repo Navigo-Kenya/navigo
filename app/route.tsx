@@ -39,6 +39,7 @@ import { departureMeta } from "@/utils/departures";
 import { Icon } from "@/components/icons/Icon";
 import { StopTypeBadge, modeIconName } from "@/components/app/StopTypeBadge";
 import { isStreetMode } from "@/utils/streetModes";
+import { BestTimeToLeave } from "@/components/app/BestTimeToLeave";
 import { TRAFFIC_TONE, legTrafficLine, trafficSummary } from "@/utils/traffic";
 
 const NativeShapeSource = ShapeSource as unknown as React.ComponentType<any>;
@@ -1851,6 +1852,20 @@ export default function MultiModalRoutePlannerScreen() {
                           </View>
                         </View>
                       )}
+
+                      {/* Leaving now and timed live: offer a later departure check. */}
+                      {(topMode === "car" || topMode === "motorbike") &&
+                        rt.traffic?.live &&
+                        !timeConfig.date &&
+                        !timeConfig.time && (
+                          <BestTimeToLeave
+                            key={`${topMode}-${index}-${rt.total_distance}`}
+                            route={rt}
+                            dark={dark}
+                            textPrimary={textPrimary}
+                            textMuted={textMuted}
+                          />
+                        )}
 
                       <Pressable
                         onPress={() => handleStartJourney(rt)}
