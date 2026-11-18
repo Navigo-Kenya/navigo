@@ -177,7 +177,7 @@ export default function MapScreen() {
   const dark = useColorScheme() === "dark";
   const BG = dark ? "#0F0F0F" : "#F6F7F8";
 
-  const { location: me, navState, locationPermissionDenied, openLocationSettings, gpsLost, wrongDirection, startNavigation, stopNavigation, pauseNavigation, resumeNavigation, isIndoor, canBoardTransit, boardTransit, turn, headingAway } = useNavigation();
+  const { location: me, navState, locationPermissionDenied, openLocationSettings, gpsLost, wrongDirection, startNavigation, stopNavigation, pauseNavigation, resumeNavigation, isIndoor, canBoardTransit, boardTransit, turn, headingAway, phase, phaseNotice, undoPhase, canAlight, alightTransit, startRide } = useNavigation();
   const { visible: rateVisible, onJourneyComplete, onRate, onLater } = useRatePrompt();
   const [showPostJourney, setShowPostJourney] = useState(false);
   // Snapshot of the finished journey — PostJourneySheet must not read
@@ -201,10 +201,14 @@ export default function MapScreen() {
   const navigating    = tripStatus === "IN_TRANSIT";
   const tripPaused    = tripStatus === "PAUSED";
   
-  // Vehicle mode comes from the leg being travelled, never from the speed
-  // alone: a cyclist going downhill stays a cyclist, a GPS jump stays a walk.
-  const isVehicleMode = navigating
-    && navState?.currentSegmentMode != null && navState.currentSegmentMode !== "WALK";
+  // Vehicle mode once the user is in the vehicle (services/legPhase): on board,
+  // or moving in their own car, on their bike, on the boda. Waiting at the
+  // stage or for the boda they're on foot. Never from the speed alone: a
+  // cyclist going downhill stays a cyclist, a GPS jump stays a walk.
+  const isVehicleMode = navigating && (
+    phase === "ride"
+    || (phase === "go" && navState?.currentSegmentMode != null && navState.currentSegmentMode !== "WALK")
+  );
 
   // Who controls the vehicle on this leg (services/navProfile): a driver gets
   // turn-by-turn, a passenger is kept informed. Car and boda remember the choice.
@@ -225,7 +229,10 @@ export default function MapScreen() {
   // Immersive navigation: the camera frames each mode its own way (the
   // vehicle's family is enough here; the route picks the exact model below),
   // higher and wider for a passenger.
-  const navFamily = navigating ? vehicleFor(navState?.currentSegmentMode ?? "WALK") : null;
+  const legMode = navState?.currentSegmentMode ?? "WALK";
+  const navFamily = navigating
+    ? vehicleFor(!isVehicleMode ? "WALK" : legMode === "WALK" ? "BUS" : legMode) // on a walk but riding: boarded early
+    : null;
   const navCamera = useMemo(
     () => (navFamily ? cameraFor(navFamily, passengerOnStreet) : null),
     [navFamily, passengerOnStreet]
@@ -1276,6 +1283,30 @@ export default function MapScreen() {
   // Street legs: the next turn, from the progress along the road (useNavigation).
   const navTurn = isNavigationMode && legProf?.turns ? turn : null;
 
+  // Waiting at the stage: which line, where, and the next departure.
+  const waitInfo = useMemo(() => {
+    if (!isNavigationMode || phase !== "wait") return null;
+    const segs = (activeJourney?.route?.segments as any[] | undefined) ?? [];
+    const ride = segs[legIdx]?.mode !== "WALK" ? segs[legIdx] : segs[legIdx + 1];
+    if (!ride) return null;
+    return {
+      line: ride.route_name ?? null,
+      stop: ride.from?.name ?? null,
+      next: ride.next_departures?.[0]?.eta_label ?? null,
+      mode: String(ride.mode ?? "BUS"),
+    };
+  }, [isNavigationMode, phase, activeJourney?.route, legIdx]);
+
+  // Waiting for a boda or a taxi: where to (to show the rider) and the usual fare.
+  const pickupInfo = useMemo(() => {
+    if (!isNavigationMode || phase !== "pickup") return null;
+    const fare = (activeJourney?.route as any)?.fare;
+    return {
+      destination: activeJourney?.toLoc?.name ?? null,
+      fare: fare?.min != null && fare?.max != null ? `About KES ${fare.min}–${fare.max}` : null,
+    };
+  }, [isNavigationMode, phase, activeJourney?.route, activeJourney?.toLoc?.name]);
+
   // Walking to a stage: where the walk ends ("· To Kencom").
   const walkDestination = useMemo(() => {
     if (!isNavigationMode || navState?.currentSegmentMode !== "WALK") return null;
@@ -1344,10 +1375,30 @@ export default function MapScreen() {
     () => (activeSegIdx < 0 ? null : transitLegs.find((l) => Number(l.id.split("-")[1]) === activeSegIdx) ?? null),
     [transitLegs, activeSegIdx]
   );
+  // The ride being taken: this leg, or, boarded at an earlier stage, the next one.
+  const rideLeg = useMemo(
+    () => navLeg ?? (phase === "ride"
+      ? transitLegs.find((l) => Number(l.id.split("-")[1]) > activeSegIdx) ?? null
+      : null),
+    [navLeg, phase, transitLegs, activeSegIdx]
+  );
   const navMode = isNavigationMode
-    ? (navLeg?.mode ?? navState?.currentSegmentMode ?? "WALK")
+    ? (isVehicleMode ? (rideLeg?.mode ?? navState?.currentSegmentMode ?? "BUS") : "WALK")
     : null;
-  const navModel = navMode ? vehicleFor(navMode, navLeg?.routeId, navLeg?.routeName) : null;
+  const navModel = navMode ? vehicleFor(navMode, rideLeg?.routeId, rideLeg?.routeName) : null;
+
+  // Boarding and getting off crossfade the walking marker and the vehicle
+  // (600 ms) instead of swapping them in one frame.
+  const [fadeFrom, setFadeFrom] = useState<string | null>(null);
+  const shownModelRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = shownModelRef.current;
+    shownModelRef.current = navModel;
+    if (!prev || !navModel || prev === navModel) return;
+    setFadeFrom(prev);
+    const id = setTimeout(() => setFadeFrom(null), 650);
+    return () => clearTimeout(id);
+  }, [navModel]);
   // Every model the journey can need, registered while navigating only.
   const journeyModels = useMemo(() => (isNavigationMode ? modelsFor(transitLegs) : []), [isNavigationMode, transitLegs]);
   const journeyModelAssets = useMemo(
@@ -1382,8 +1433,8 @@ export default function MapScreen() {
     if (!isNavigationMode || meLat == null || meLng == null || !navModel) return null;
 
     // A train is drawn car by car along its line, so it bends through curves.
-    if (isRailMode(navMode) && navLeg) {
-      const cars = trainCars(navLeg.coords, { latitude: meLat, longitude: meLng }, trainConsist(navLeg.routeId), followZoom);
+    if (isRailMode(navMode) && rideLeg) {
+      const cars = trainCars(rideLeg.coords, { latitude: meLat, longitude: meLng }, trainConsist(rideLeg.routeId), followZoom);
       return {
         type: "FeatureCollection",
         features: cars.map((c) => ({
@@ -1397,17 +1448,15 @@ export default function MapScreen() {
     // Vehicles face their course over ground (the route bearing when snapped);
     // the walking marker points where the phone points (the compass).
     const heading = navModel === "puck" ? beamHeading : (me?.heading ?? 0);
-    return {
-      type: "FeatureCollection",
-      features: [
-        {
-          type: "Feature",
-          geometry: { type: "Point", coordinates: [meLng, meLat] },
-          properties: { model: navModel, modelRot: [MODEL_TILT_X, 0, modelYaw(heading)] },
-        },
-      ],
-    } as GeoJSON.FeatureCollection;
-  }, [meLat, meLng, me?.heading, beamHeading, isNavigationMode, navModel, navMode, navLeg, followZoom]);
+    const at = (model: string) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [meLng, meLat] },
+      properties: { model, modelRot: [MODEL_TILT_X, 0, modelYaw(model === "puck" ? beamHeading : heading)] },
+    });
+    // While crossfading, the model going away stays drawn until it has faded.
+    const features = fadeFrom && fadeFrom !== navModel ? [at(fadeFrom), at(navModel)] : [at(navModel)];
+    return { type: "FeatureCollection", features } as GeoJSON.FeatureCollection;
+  }, [meLat, meLng, me?.heading, beamHeading, isNavigationMode, navModel, navMode, rideLeg, followZoom, fadeFrom]);
 
 
   return (
@@ -1511,7 +1560,9 @@ export default function MapScreen() {
                         modelId: m,
                         modelScale: modelScaleExpr(m),
                         modelRotation: ["get", "modelRot"],
-                        modelOpacity: 1,
+                        // The current model shows; the others fade out (boarding, getting off).
+                        modelOpacity: m === navModel ? 1 : 0,
+                        modelOpacityTransition: { duration: 600, delay: 0 },
                         modelCastShadows: true,
                         modelReceiveShadows: true,
                         // Head and tail lights, neon and lit signs glow after dark.
@@ -1699,6 +1750,14 @@ export default function MapScreen() {
         legRole={legProf?.role ?? null}
         onSwitchRole={legProf && roleSwitchable(legProf.kind) ? switchRole : undefined}
         headingAway={headingAway && isNavigationMode}
+        phase={isNavigationMode ? phase : null}
+        phaseNotice={isNavigationMode ? phaseNotice : null}
+        onUndoPhase={undoPhase}
+        waitInfo={waitInfo}
+        pickupInfo={pickupInfo}
+        canAlight={canAlight && isNavigationMode}
+        onAlight={alightTransit}
+        onStartRide={startRide}
         destinationName={activeJourney?.toLoc?.name ?? null}
         walkDestination={walkDestination}
         canBoardTransit={canBoardTransit && (isNavigationMode || tripStatus === "WAITING_FOR_BUS")}

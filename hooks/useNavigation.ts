@@ -41,6 +41,7 @@ import {
   type TurnCue,
 } from "@/services/maneuvers";
 import type { Maneuver } from "@/utils/mapHelpers";
+import { PhaseTracker, phaseProfile, type NavPhase, type PhaseEvent } from "@/services/legPhase";
 import { AppState, AppStateStatus, DeviceEventEmitter } from "react-native";
 
 const EMA_LOC_WALK    = 0.25;
@@ -92,6 +93,14 @@ export interface NavTurn {
   /** The turn after this one, when it follows within 300 m. */
   then: string | null;
   rider: { word: string; detail: string | null };
+}
+
+/** A phase change to show (and undo): "On board the 45K · Undo". */
+export interface PhaseNotice {
+  event: PhaseEvent;
+  text: string;
+  at: number;
+  undoable: boolean;
 }
 
 function rolePrefs() {
@@ -212,6 +221,16 @@ export function useNavigation() {
   const resumeProgressRef = useRef<{ highWaterMark: number; engineStrikes: number } | null>(null);
   const [turn, setTurn] = useState<NavTurn | null>(null);
   const [headingAway, setHeadingAway] = useState(false);
+  /** Which part of the trip the user is in (services/legPhase): walking, waiting, on board… */
+  const phaseRef = useRef(new PhaseTracker());
+  const phaseLegRef = useRef(-1);
+  const phaseValueRef = useRef<NavPhase>("walk");
+  const lastPhaseEventRef = useRef<PhaseEvent | null>(null);
+  /** Progress before an automatic "got off", to put back on undo. */
+  const alightUndoRef = useRef<{ hwm: number; leg: number } | null>(null);
+  const [phase, setPhase] = useState<NavPhase>("walk");
+  const [phaseNotice, setPhaseNotice] = useState<PhaseNotice | null>(null);
+  const [canAlight, setCanAlight] = useState(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -307,6 +326,7 @@ export function useNavigation() {
     );
     spokenCuesRef.current = new Map();
     setTurn(null);
+    phaseLegRef.current = -1;
 
     // Progress saved with a session belongs to that session's route: apply it
     // once, when resuming. (Applied to every new route, a reroute inherited the
@@ -345,6 +365,83 @@ export function useNavigation() {
     }
     armAlightGeofence(regions).catch(() => {});
   }, []);
+
+  const syncPhase = useCallback((p: NavPhase) => {
+    if (phaseValueRef.current === p) return;
+    phaseValueRef.current = p;
+    setPhase(p);
+  }, []);
+
+  /** What a phase change does: move the engine on if needed, say it, show it (with Undo). */
+  const applyPhaseEvent = useCallback((ev: PhaseEvent, leg: number) => {
+    const engine = engineRef.current;
+    const segs = (useJourneyStore.getState().activeJourney?.route?.segments as any[] | undefined) ?? [];
+    const hints = usePrefsStore.getState().prefs.navHints;
+    const say = (text: string, always = false) => { if (always || hints !== "off") VoiceGuide.announce(text); };
+    const notice = (text: string, undoable = true) => setPhaseNotice({ event: ev, text, at: Date.now(), undoable });
+    // The ride concerned: this leg if it's a ride; else the next (boarding) or the previous (getting off).
+    const rideIdx = legKind(segs[leg]?.mode) === "transit" ? leg
+      : ev === "alighted" || ev === "missed_stop" ? leg - 1 : leg + 1;
+    const ride = segs[rideIdx];
+    const rail = ["RAIL", "SUBWAY", "TRAM"].includes(String(ride?.mode ?? "").toUpperCase());
+    const line = ride?.route_name ? `the ${ride.route_name}` : rail ? "the train" : "the matatu";
+    lastPhaseEventRef.current = ev;
+    NavMetrics.event(`phase_${ev}`, null, { leg });
+
+    switch (ev) {
+      case "waiting": {
+        const at = ride?.from?.name ?? "the stop";
+        notice(`Waiting for ${line} at ${at}`);
+        say(`You're at ${at}. Wait for ${line}.`);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        break;
+      }
+      case "boarded":
+      case "boarded_early": {
+        // Waited short of the stop's end: the engine is still on the walk. Move it onto the ride.
+        if (engine && ev === "boarded" && rideIdx === leg + 1 && engine.steps[rideIdx]) {
+          engine.forceProgressTo((engine.steps[leg].routeOffset ?? 0) + 2);
+          stepIndexRef.current = rideIdx;
+          prevStepIndexRef.current = rideIdx;
+          phaseLegRef.current = rideIdx;
+          lastAnnouncedRef.current = "";
+          lastAlightAlertRef.current = -1;
+        }
+        if (ride) armGeofenceForLeg(rideIdx);
+        notice(`On board ${line}`);
+        say(`On board ${line}. I'll tell you when to get off.`);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+        LiveActivity.update({ instruction: `Riding ${line}`, force: true }).catch(() => {});
+        break;
+      }
+      case "alighted": {
+        // Still on the ride's leg: move on to what follows it.
+        if (engine && legKind(segs[leg]?.mode) === "transit") {
+          alightUndoRef.current = { hwm: engine.getHighWaterMark(), leg };
+          engine.forceProgressTo((engine.steps[leg].routeOffset ?? engine.totalDistM) + 2);
+        }
+        const at = ride?.to?.name ?? "your stop";
+        notice(`Off at ${at}`);
+        say(`Off at ${at}.`);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        break;
+      }
+      case "back_to_stop":
+        notice(`Still waiting for ${line}`);
+        break;
+      case "missed_stop": {
+        const at = ride?.to?.name ?? "your stop";
+        notice(`You've passed ${at}: get off at the next stop`, false);
+        say(`You've passed ${at}. Get off at the next stop, and I'll find the way from there.`, true);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+        break;
+      }
+      case "ride_started":
+        notice("Ride started");
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        break;
+    }
+  }, [armGeofenceForLeg]);
 
 const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
     if (!mountedRef.current) return;
@@ -510,6 +607,7 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
           }
         }
       }
+      if (phaseRef.current.phase === "wait") boardable = true;
       setCanBoardTransit((prev) => (prev === boardable ? prev : boardable));
     }
 
@@ -519,7 +617,46 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
       const stepType = engineRef.current.steps[result.stepIndex]?.type;
       // The leg decides: on foot, on a bike, in a car or on a boda, leaving the
       // line replans; on a matatu or a train the driver picks the road.
-      const profile: LegProfile = legProfile(stepType, rolePrefs());
+      const legProf: LegProfile = legProfile(stepType, rolePrefs());
+
+      // ── PHASE: walking, waiting at the stage, on board, off again (services/legPhase) ──
+      const tracker = phaseRef.current;
+      {
+        const engine = engineRef.current;
+        const leg = result.stepIndex;
+        if (leg !== phaseLegRef.current) {
+          phaseLegRef.current = leg;
+          tracker.enterLeg(legProf.kind, legProf.role, { at: { lat: finalLocation.latitude, lng: finalLocation.longitude } });
+        }
+        const segs = (useJourneyStore.getState().activeJourney?.route?.segments as any[] | undefined) ?? [];
+        const seg = segs[leg];
+        const legStart = leg > 0 ? (engine.steps[leg - 1].routeOffset ?? 0) : 0;
+        const legEnd = engine.steps[leg]?.routeOffset ?? engine.totalDistM;
+        const toEnd = seg?.to ? distM(finalLocation.latitude, finalLocation.longitude, seg.to.lat, seg.to.lng) : Infinity;
+        const gpsHeading = loc.coords.heading;
+        const ev = tracker.update({
+          now: Date.now(),
+          lat: finalLocation.latitude,
+          lng: finalLocation.longitude,
+          speed: rawSpeed,
+          heading: gpsHeading != null && gpsHeading >= 0 ? gpsHeading : null,
+          legKind: legProf.kind,
+          prevIsTransit: leg > 0 && legKind(segs[leg - 1]?.mode) === "transit",
+          nextIsTransit: legKind(segs[leg + 1]?.mode) === "transit",
+          distFromLineM: result.distanceFromRouteM,
+          routeBearing: result.routeBearing,
+          alongM: Math.max(0, engine.totalDistM - result.remainingDistanceM - legStart),
+          legLengthM: Math.max(0, legEnd - legStart),
+          toLegStartM: seg?.from ? distM(finalLocation.latitude, finalLocation.longitude, seg.from.lat, seg.from.lng) : Infinity,
+          toLegEndM: toEnd,
+        });
+        if (ev) applyPhaseEvent(ev, leg);
+        syncPhase(tracker.phase);
+        // "I got off" within reach of the alight stop.
+        const alightable = tracker.phase === "ride" && legProf.kind === "transit" && toEnd <= 400;
+        setCanAlight((prev) => (prev === alightable ? prev : alightable));
+      }
+      const profile: LegProfile = phaseProfile(legProf, tracker.phase, tracker.inVehicleMotion);
       if (result.status === "off_route" && !profile.reroute) {
         result.status = "active";
       }
@@ -906,7 +1043,7 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
         }
       }
     }
-  }, [navHints]);
+  }, [navHints, applyPhaseEvent, syncPhase]);
 
   useEffect(() => {
     const gpsOptions = isNavigating
@@ -1062,6 +1199,17 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
       wrongDirNotifIdRef.current    = null;
       spokenCuesRef.current         = new Map();
       lastRerouteAtRef.current      = 0;
+      phaseRef.current.reset();
+      alightUndoRef.current         = null;
+      lastPhaseEventRef.current     = null;
+      setPhaseNotice(null);
+      setCanAlight(false);
+      {
+        const first = legProfile(engineRef.current?.steps[0]?.type, rolePrefs());
+        phaseRef.current.enterLeg(first.kind, first.role);
+        phaseLegRef.current = 0;
+        syncPhase(phaseRef.current.phase);
+      }
       awayRef.current.reset();
       headingAwayRef.current        = false;
       setHeadingAway(false);
@@ -1113,7 +1261,7 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
         }
       }
     }
-  }, [activeJourney, setTripStatus]);
+  }, [activeJourney, setTripStatus, syncPhase]);
 
   /**
    * Pause mid-trip (duka stop, phone call). Freezes engine progress and
@@ -1148,13 +1296,18 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
     setTurn(null);
     setHeadingAway(false);
     headingAwayRef.current = false;
+    phaseRef.current.reset();
+    phaseLegRef.current = -1;
+    syncPhase("walk");
+    setPhaseNotice(null);
+    setCanAlight(false);
     stationaryAnchorRef.current = null;
     useNavStateStore.getState().clear();
     TraceRecorder.end().catch(() => {});
     NavMetrics.endSession(lastRemainingMRef.current).catch(() => {});
     disarmAlightGeofence().catch(() => {});
     VoiceGuide.stop();
-  }, [setTripStatus]);
+  }, [setTripStatus, syncPhase]);
 
   /**
    * Manual boarding trigger ("I'm on board"). GPS-based transit detection is
@@ -1184,6 +1337,10 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
     lastAlightAlertRef.current   = -1;
     setCanBoardTransit(false);
     useJourneyStore.getState().setTripStatus("IN_TRANSIT");
+    phaseRef.current.set("ride");
+    phaseLegRef.current = idx;
+    syncPhase("ride");
+    setPhaseNotice(null);
 
     NavMetrics.event("board_manual");
     armGeofenceForLeg(idx);
@@ -1205,7 +1362,54 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
       stepIndexRef.current = r.stepIndex;
       setNavState(r);
     }
-  }, []);
+  }, [syncPhase]);
+
+  /** "I got off": leave the ride's leg now (GPS stops lag behind the doors). */
+  const alightTransit = useCallback(() => {
+    const engine = engineRef.current;
+    const leg = stepIndexRef.current;
+    const seg = (useJourneyStore.getState().activeJourney?.route?.segments as any[] | undefined)?.[leg];
+    if (!engine || legKind(seg?.mode) !== "transit") return;
+    engine.forceProgressTo((engine.steps[leg].routeOffset ?? engine.totalDistM) + 2);
+    phaseRef.current.set("walk");
+    syncPhase("walk");
+    setCanAlight(false);
+    setPhaseNotice(null);
+    NavMetrics.event("alight_manual");
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    if (usePrefsStore.getState().prefs.navHints !== "off") VoiceGuide.announce(`Off at ${seg.to?.name ?? "your stop"}.`);
+    if (meSmoothRef.current) {
+      const r = engine.update(meSmoothRef.current.longitude, meSmoothRef.current.latitude, meSmoothRef.current.speed ?? 0, leg);
+      stepIndexRef.current = r.stepIndex;
+      setNavState(r);
+    }
+  }, [syncPhase]);
+
+  /** "We're off": a boda or taxi passenger's ride has started. */
+  const startRide = useCallback(() => {
+    phaseRef.current.set("go");
+    syncPhase("go");
+    setPhaseNotice(null);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  }, [syncPhase]);
+
+  /** Undo the last automatic phase change ("Not yet" on "On board the 45K"). */
+  const undoPhase = useCallback(() => {
+    const back = phaseRef.current.undo(Date.now());
+    if (!back) return;
+    const undo = alightUndoRef.current;
+    if (lastPhaseEventRef.current === "alighted" && undo && engineRef.current) {
+      engineRef.current.forceProgressTo(undo.hwm);
+      stepIndexRef.current = undo.leg;
+      prevStepIndexRef.current = undo.leg;
+      phaseLegRef.current = undo.leg;
+    }
+    alightUndoRef.current = null;
+    lastPhaseEventRef.current = null;
+    syncPhase(back);
+    setPhaseNotice(null);
+    Haptics.selectionAsync().catch(() => {});
+  }, [syncPhase]);
 
   const openLocationSettings = useCallback(() => {
     Linking.openSettings();
@@ -1227,5 +1431,11 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
     boardTransit,
     turn,
     headingAway,
+    phase,
+    phaseNotice,
+    undoPhase,
+    canAlight,
+    alightTransit,
+    startRide,
   };
 }
