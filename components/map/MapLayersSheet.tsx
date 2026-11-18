@@ -144,7 +144,7 @@ export function MapLayersSheet({ visible, onDismiss, dark }: MapLayersSheetProps
           })}
         </View>
         <Text style={[s.credit, { color: C.sub }]}>
-          Live reports include traffic incidents © TomTom.
+          Traffic and live incidents © TomTom.
         </Text>
       </View>
     </MapSheet>
