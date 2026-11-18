@@ -25,6 +25,22 @@ import * as Linking from "expo-linking";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { asLandmark, progressAlong, withLandmark, PASSING_WINDOW_M } from "@/utils/landmarks";
 import { isStreetMode, streetVerb } from "@/utils/streetModes";
+import { journeyModeOf, legKind, legProfile, pickReroute, type LegProfile } from "@/services/navProfile";
+import {
+  AwayTracker,
+  CUE_RANK,
+  chainDistance,
+  cueDistances,
+  cueFor,
+  legTurns,
+  nextTurnIndex,
+  riderCue,
+  spokenDistance,
+  turnSpeech,
+  type LegTurn,
+  type TurnCue,
+} from "@/services/maneuvers";
+import type { Maneuver } from "@/utils/mapHelpers";
 import { AppState, AppStateStatus, DeviceEventEmitter } from "react-native";
 
 const EMA_LOC_WALK    = 0.25;
@@ -57,6 +73,57 @@ const INDOOR_ENTER_ACC_M = 32;
 const INDOOR_EXIT_ACC_M  = 22;
 /** Show the "I'm on board" button within this distance of the boarding stop (m). */
 const BOARD_PROXIMITY_M  = 120;
+/** At most one reroute per this long: each one is a routing call (and TomTom for cars). */
+const REROUTE_MIN_INTERVAL_MS = 12_000;
+/** Heading samples against the route before "wrong way". More in a vehicle: its route bends at junctions. */
+const WRONG_WAY_STRIKES_ON_FOOT = 4;
+const WRONG_WAY_STRIKES_VEHICLE = 6;
+/** Closer than this, the arrival itself is the cue ("You have arrived"). */
+const ARRIVAL_CUE_MIN_M = 30;
+
+/** The next turn on a street leg: the banner, and the boda passenger's rider card. */
+export interface NavTurn {
+  leg: number;
+  /** Index in the leg's turns; -1 when no turns are left (heading for the leg's end). */
+  index: number;
+  instruction: string;
+  maneuver: Maneuver;
+  distanceM: number;
+  /** The turn after this one, when it follows within 300 m. */
+  then: string | null;
+  rider: { word: string; detail: string | null };
+}
+
+function rolePrefs() {
+  const { carRole, bodaRole } = usePrefsStore.getState().prefs;
+  return { carRole, bodaRole };
+}
+
+const sameTurn = (a: NavTurn | null, b: NavTurn) =>
+  !!a && a.leg === b.leg && a.index === b.index && a.instruction === b.instruction &&
+  a.then === b.then && Math.round(a.distanceM / 5) === Math.round(b.distanceM / 5);
+
+/**
+ * On foot and on a bike: left = two taps, right = one strong, at the turn.
+ * A boda passenger: two buzzes when the turn is near (time to tap the rider),
+ * one strong at the turn.
+ */
+function turnHaptic(cue: TurnCue, maneuver: Maneuver, forRider: boolean) {
+  const tap = (style: Haptics.ImpactFeedbackStyle) => Haptics.impactAsync(style).catch(() => {});
+  const double = () => {
+    tap(Haptics.ImpactFeedbackStyle.Medium);
+    setTimeout(() => tap(Haptics.ImpactFeedbackStyle.Medium), 160);
+  };
+  if (forRider) {
+    if (cue === "near") double();
+    else if (cue === "now") tap(Haptics.ImpactFeedbackStyle.Heavy);
+    return;
+  }
+  if (cue !== "now") return;
+  if (maneuver.includes("left")) double();
+  else if (maneuver.includes("right")) tap(Haptics.ImpactFeedbackStyle.Heavy);
+  else tap(Haptics.ImpactFeedbackStyle.Medium);
+}
 
 function ema(prev: number, next: number, a: number) {
   return prev + a * (next - prev);
@@ -134,6 +201,17 @@ export function useNavigation() {
   const [canBoardTransit, setCanBoardTransit]   = useState(false);
   
   const fetchingRouteRef = useRef<boolean>(false);
+  /** Each leg's turns, placed along it (street legs; empty for transit). */
+  const legTurnsRef = useRef<LegTurn[][]>([]);
+  /** Most urgent cue already given per turn ("leg:turn" → CUE_RANK). */
+  const spokenCuesRef = useRef<Map<string, number>>(new Map());
+  const awayRef = useRef(new AwayTracker());
+  const headingAwayRef = useRef(false);
+  const lastRerouteAtRef = useRef(0);
+  /** Engine progress from a restored session: applied once, to that session's route. */
+  const resumeProgressRef = useRef<{ highWaterMark: number; engineStrikes: number } | null>(null);
+  const [turn, setTurn] = useState<NavTurn | null>(null);
+  const [headingAway, setHeadingAway] = useState(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -157,6 +235,7 @@ export function useNavigation() {
     navSession.restore().then((session) => {
       if (!session || session.tripStatus !== "IN_TRANSIT") return;
       const store = useJourneyStore.getState();
+      resumeProgressRef.current = { highWaterMark: session.highWaterMark, engineStrikes: session.engineStrikes };
       store.setJourney(session.activeJourney.fromLoc, session.activeJourney.toLoc, session.activeJourney.route);
       store.setTripStatus("IN_TRANSIT");
       stepIndexRef.current     = session.stepIndex;
@@ -223,12 +302,20 @@ export function useNavigation() {
     allCoordsRef.current = allCoords; 
     engineRef.current = new NavigationEngine(allCoords, engineSteps);
     announcedLandmarksRef.current = new Set();
+    legTurnsRef.current = segments.map((seg: any) =>
+      legKind(seg.mode) === "transit" ? [] : legTurns(seg.coordinates ?? [], seg.walk_steps),
+    );
+    spokenCuesRef.current = new Map();
+    setTurn(null);
 
-    navSession.restore().then((session) => {
-      if (session && engineRef.current) {
-        engineRef.current.restore(session.highWaterMark, session.engineStrikes);
-      }
-    });
+    // Progress saved with a session belongs to that session's route: apply it
+    // once, when resuming. (Applied to every new route, a reroute inherited the
+    // old route's progress; past the new route's length, the trip "arrived".)
+    const resume = resumeProgressRef.current;
+    if (resume) {
+      resumeProgressRef.current = null;
+      engineRef.current.restore(resume.highWaterMark, resume.engineStrikes);
+    }
   }, [activeJourney, maxWalkMeters, updateRoute]);
 
   /**
@@ -239,7 +326,7 @@ export function useNavigation() {
   const armGeofenceForLeg = useCallback((legIdx: number) => {
     const journey = useJourneyStore.getState().activeJourney;
     const seg = (journey?.route?.segments as any[] | undefined)?.[legIdx];
-    if (!journey || !seg || seg.mode === "WALK") return;
+    if (!journey || !seg || legKind(seg.mode) !== "transit") return;
 
     const regions: AlightRegion[] = [];
     if (seg.to?.lat && seg.to?.lng) {
@@ -416,7 +503,7 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
         const curIdx  = status === "IN_TRANSIT" ? stepIndexRef.current : 0;
         const curType = engine.steps[curIdx]?.type ?? "WALK";
         if (status === "WAITING_FOR_BUS" || curType === "WALK") {
-          const nextTransitIdx = engine.steps.findIndex((s, i) => i >= curIdx && s.type != null && s.type !== "WALK");
+          const nextTransitIdx = engine.steps.findIndex((s, i) => i >= curIdx && legKind(s.type) === "transit");
           const seg = nextTransitIdx >= 0 ? (journey.route.segments as any[])[nextTransitIdx] : null;
           if (seg?.from) {
             boardable = distM(finalLocation.latitude, finalLocation.longitude, seg.from.lat, seg.from.lng) <= BOARD_PROXIMITY_M;
@@ -430,7 +517,10 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
       const result = engineResult;
 
       const stepType = engineRef.current.steps[result.stepIndex]?.type;
-      if (result.status === "off_route" && stepType && stepType !== "WALK") {
+      // The leg decides: on foot, on a bike, in a car or on a boda, leaving the
+      // line replans; on a matatu or a train the driver picks the road.
+      const profile: LegProfile = legProfile(stepType, rolePrefs());
+      if (result.status === "off_route" && !profile.reroute) {
         result.status = "active";
       }
 
@@ -440,10 +530,15 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
         // endless "Recalculating…".
         if (!useNetworkStore.getState().isOnline) {
           result.status = "active";
-        } else if (!reroutingRef.current) {
+        } else if (!reroutingRef.current && Date.now() - lastRerouteAtRef.current >= REROUTE_MIN_INTERVAL_MS) {
           reroutingRef.current = true;
-          NavMetrics.event("reroute", null, { stepIndex: result.stepIndex });
+          lastRerouteAtRef.current = Date.now();
           const journey = useJourneyStore.getState().activeJourney;
+          // Replan in the trip's own mode, keeping the user's choice (No tolls,
+          // Safest, Step-free…): a driver must not come back with a matatu trip.
+          const mode = journeyModeOf(journey?.route);
+          const silent = profile.silentReroute;
+          NavMetrics.event("reroute", null, { stepIndex: result.stepIndex, mode, silent });
           if (journey && meSmoothRef.current) {
             const fromLoc = {
               ...journey.fromLoc,
@@ -452,12 +547,14 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
               lng: meSmoothRef.current.longitude,
             };
             const maxWalk = usePrefsStore.getState().prefs.maxWalkMeters;
-            RouteService.calculateJourney(fromLoc, journey.toLoc, maxWalk)
+            RouteService.calculateJourney(fromLoc, journey.toLoc, maxWalk, mode)
               .then((routes) => {
-                if (routes.length > 0 && mountedRef.current) {
-                  useJourneyStore.getState().updateRoute(routes[0]);
+                const next = pickReroute(routes, journey.route);
+                if (next && mountedRef.current) {
+                  useJourneyStore.getState().updateRoute(next);
                   const hints = usePrefsStore.getState().prefs.navHints;
-                  if (hints !== "off") VoiceGuide.announce("Route recalculated.");
+                  // A passenger didn't choose the way: follow the driver quietly.
+                  if (hints !== "off" && !silent) VoiceGuide.announce("Route recalculated.");
                   stepIndexRef.current     = 0;
                   prevStepIndexRef.current = 0;
                   lastAnnouncedRef.current = "";
@@ -485,7 +582,7 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
 
         // Geofence backup follows the leg type: armed for transit, off for walks.
         const newStepType = engineRef.current.steps[result.stepIndex]?.type ?? "WALK";
-        if (newStepType !== "WALK") armGeofenceForLeg(result.stepIndex);
+        if (legKind(newStepType) === "transit") armGeofenceForLeg(result.stepIndex);
         else disarmAlightGeofence().catch(() => {});
       }
 
@@ -533,6 +630,75 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
           }
         }
+      }
+
+      // ── TURN BY TURN (street legs) ──
+      // The next manoeuvre from the progress along the road, cues timed to the
+      // mode and speed. A driver hears them; a boda passenger feels a buzz to
+      // tap the rider and reads the rider card; a car passenger sees them.
+      if (profile.turns) {
+        const engine = engineRef.current;
+        const leg = result.stepIndex;
+        const turns = legTurnsRef.current[leg] ?? [];
+        const legStart = leg > 0 ? (engine.steps[leg - 1].routeOffset ?? 0) : 0;
+        const legEnd = engine.steps[leg]?.routeOffset ?? engine.totalDistM;
+        const along = Math.max(0, engine.totalDistM - result.remainingDistanceM - legStart);
+        const ti = nextTurnIndex(turns, along, profile.kind);
+        const cues = cueDistances(profile.kind, speed);
+        const onWheels = profile.kind !== "walk";
+        // concise: the turn itself, plus one heads-up on wheels; detailed: every cue.
+        const allowCue = (c: TurnCue) =>
+          navHints === "detailed" || (navHints === "concise" && (c === "now" || (c === "near" && onWheels)));
+
+        if (ti >= 0) {
+          const t = turns[ti];
+          const dist = Math.max(0, t.offsetM - along);
+          const following = turns[ti + 1] ?? null;
+          const gap = following ? following.offsetM - t.offsetM : Infinity;
+          const chained = following && gap <= chainDistance(profile.kind, cues) ? following : null;
+          const cue = cueFor(dist, cues);
+          const key = `${leg}:${ti}`;
+          if (cue && CUE_RANK[cue] > (spokenCuesRef.current.get(key) ?? 0)) {
+            spokenCuesRef.current.set(key, CUE_RANK[cue]);
+            // "Turn left, then turn right": the second turn's heads-up is already given.
+            if (cue === "now" && chained) {
+              const k2 = `${leg}:${ti + 1}`;
+              spokenCuesRef.current.set(k2, Math.max(spokenCuesRef.current.get(k2) ?? 0, CUE_RANK.near));
+            }
+            if (profile.voiceTurns && navHints !== "off" && allowCue(cue)) {
+              VoiceGuide.announce(turnSpeech(cue, t, dist, cue === "now" ? chained : null));
+            }
+            if (profile.hapticTurns) turnHaptic(cue, t.maneuver, profile.showTheRider);
+          }
+          const next: NavTurn = {
+            leg, index: ti, instruction: t.instruction, maneuver: t.maneuver, distanceM: dist,
+            then: following && gap <= 300 ? following.instruction : null,
+            rider: riderCue(t),
+          };
+          setTurn((prev) => (sameTurn(prev, next) ? prev : next));
+        } else {
+          // No turns left on this leg: heading for its end (the destination, or the stage).
+          const journey = useJourneyStore.getState().activeJourney;
+          const seg = (journey?.route?.segments as any[] | undefined)?.[leg];
+          const isLastLeg = leg === engine.steps.length - 1;
+          const endName = isLastLeg ? (journey?.toLoc?.name ?? "your destination") : (seg?.to?.name ?? "the stop");
+          const dist = Math.max(0, legEnd - legStart - along);
+          const key = `${leg}:end`;
+          if (isLastLeg && profile.voiceTurns && navHints !== "off" && dist <= cues.near && dist > ARRIVAL_CUE_MIN_M
+              && !spokenCuesRef.current.has(key)) {
+            spokenCuesRef.current.set(key, CUE_RANK.near);
+            VoiceGuide.announce(`${endName} is ${spokenDistance(dist)} ahead.`);
+          }
+          const next: NavTurn = {
+            leg, index: -1,
+            instruction: isLastLeg ? `Arrive at ${endName}` : (engine.steps[leg]?.instruction ?? `Continue to ${endName}`),
+            maneuver: "straight", distanceM: dist, then: null,
+            rider: { word: "Straight on", detail: `to ${endName}` },
+          };
+          setTurn((prev) => (sameTurn(prev, next) ? prev : next));
+        }
+      } else {
+        setTurn((prev) => (prev ? null : prev));
       }
 
       stepIndexRef.current = result.stepIndex;
@@ -626,19 +792,25 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
       }
 
       const smoothedHeading = rawSmoothed.heading ?? -1;
-      const isWalkLeg  = result.currentSegmentMode === "WALK" || result.currentSegmentMode == null;
-      // Bumped to 1.2 m/s to prevent false-alarms from GPS wobble
-      const moving     = (rawSmoothed.speed ?? 0) > 1.2; 
+      // Whoever is in control can turn round: on foot, on a bike, at the wheel.
+      const canTurnRound = profile.wrongWay === "turn-around" || profile.wrongWay === "u-turn";
+      // Below the profile's speed a heading is GPS wobble, not a direction.
+      const moving     = (rawSmoothed.speed ?? 0) > profile.wrongWayMinSpeed;
+      const strikesNeeded = profile.kind === "walk" ? WRONG_WAY_STRIKES_ON_FOOT : WRONG_WAY_STRIKES_VEHICLE;
 
-      if (isWalkLeg && moving && smoothedHeading >= 0) {
+      if (canTurnRound && moving && smoothedHeading >= 0) {
         const delta = Math.abs(((smoothedHeading - result.routeBearing + 180) % 360) - 180);
         if (delta > 120) {
           wrongDirStrikesRef.current++;
-          if (wrongDirStrikesRef.current >= 4 && !wrongDirAnnouncedRef.current) {
+          if (wrongDirStrikesRef.current >= strikesNeeded && !wrongDirAnnouncedRef.current) {
             wrongDirAnnouncedRef.current = true;
-            NavMetrics.event("wrong_direction");
+            NavMetrics.event("wrong_direction", null, { mode: profile.kind });
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-            if (navHints !== "off") VoiceGuide.announce("You're heading the wrong way. Turn around.");
+            if (navHints !== "off") VoiceGuide.announce(
+              profile.wrongWay === "u-turn"
+                ? "You're going the wrong way. Make a U-turn when it's safe."
+                : "You're heading the wrong way. Turn around.",
+            );
             if (appStateRef.current !== "active" && !wrongDirNotifIdRef.current) {
               scheduleWrongDirectionAlert()
                 .then((id) => { wrongDirNotifIdRef.current = id; })
@@ -658,7 +830,31 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
       } else {
         wrongDirStrikesRef.current = 0;
       }
-      setWrongDirection(wrongDirStrikesRef.current >= 4);
+      setWrongDirection(wrongDirStrikesRef.current >= strikesNeeded);
+
+      // A passenger can't turn round, but should know when the car or the boda
+      // is carrying them away from where they're going.
+      if (profile.wrongWay === "heading-away") {
+        const end = (useJourneyStore.getState().activeJourney?.route?.segments as any[] | undefined)?.[result.stepIndex]?.to;
+        if (end?.lat != null && end?.lng != null) {
+          const away = awayRef.current.update(
+            Date.now(),
+            distM(finalLocation.latitude, finalLocation.longitude, end.lat, end.lng),
+            rawSmoothed.speed ?? 0,
+          );
+          if (away && !headingAwayRef.current) {
+            NavMetrics.event("heading_away", null, { mode: profile.kind });
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+          }
+          if (away !== headingAwayRef.current) {
+            headingAwayRef.current = away;
+            setHeadingAway(away);
+          }
+        }
+      } else if (headingAwayRef.current) {
+        headingAwayRef.current = false;
+        setHeadingAway(false);
+      }
 
       const nowMs = Date.now();
       const stepChanged = result.stepIndex !== prevSavedStepRef.current;
@@ -684,14 +880,14 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
     if (useJourneyStore.getState().tripStatus === "WAITING_FOR_BUS") {
       const journey = useJourneyStore.getState().activeJourney;
       if (journey && engineRef.current) {
-        const firstTransit = journey.route.segments.find((s: any) => s.mode !== "WALK");
+        const firstTransit = journey.route.segments.find((s: any) => legKind(s.mode) === "transit");
         if (firstTransit) {
           const d   = distM(finalLocation.latitude, finalLocation.longitude, firstTransit.from.lat, firstTransit.from.lng);
           const spd   = rawSmoothed.speed ?? 0;
 
           if (spd > 2.2 && d > 40) {
             NavMetrics.event("board_auto");
-            const transitIdx = (journey.route.segments as any[]).findIndex((s: any) => s.mode !== "WALK");
+            const transitIdx = (journey.route.segments as any[]).findIndex((s: any) => legKind(s.mode) === "transit");
             if (transitIdx >= 0) armGeofenceForLeg(transitIdx);
             useJourneyStore.getState().setTripStatus("IN_TRANSIT");
             engineRef.current.resetProgress();
@@ -864,6 +1060,11 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
       alightWarningFiredRef.current = false;
       alightNotifIdRef.current      = null;
       wrongDirNotifIdRef.current    = null;
+      spokenCuesRef.current         = new Map();
+      lastRerouteAtRef.current      = 0;
+      awayRef.current.reset();
+      headingAwayRef.current        = false;
+      setHeadingAway(false);
 
       glideTargetRef.current  = meSmoothRef.current;
       glideDisplayRef.current = meSmoothRef.current;
@@ -944,6 +1145,9 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
     setTripStatus("IDLE");
     setNavState(null);
     setCanBoardTransit(false);
+    setTurn(null);
+    setHeadingAway(false);
+    headingAwayRef.current = false;
     stationaryAnchorRef.current = null;
     useNavStateStore.getState().clear();
     TraceRecorder.end().catch(() => {});
@@ -965,7 +1169,7 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
 
     const status = useJourneyStore.getState().tripStatus;
     const curIdx = status === "IN_TRANSIT" ? stepIndexRef.current : 0;
-    const idx    = engine.steps.findIndex((s, i) => i >= curIdx && s.type != null && s.type !== "WALK");
+    const idx    = engine.steps.findIndex((s, i) => i >= curIdx && legKind(s.type) === "transit");
     if (idx < 0) return;
 
     // The transit leg starts where the previous step ends.
@@ -1021,5 +1225,7 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
     isIndoor,
     canBoardTransit,
     boardTransit,
+    turn,
+    headingAway,
   };
 }

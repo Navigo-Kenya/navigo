@@ -9,7 +9,7 @@ import {
   View,
   useColorScheme,
 } from "react-native";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
@@ -25,7 +25,9 @@ import type { RideCue } from "@/utils/landmarks";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import type { Step } from "@/utils/mapHelpers";
-import { mToNice } from "@/utils/mapHelpers";
+import { maneuverIcon, mToNice } from "@/utils/mapHelpers";
+import type { NavTurn } from "@/hooks/useNavigation";
+import type { LegKind, Role } from "@/services/navProfile";
 import type { ApproachPhase, EngineStatus } from "@/services/navigationEngine";
 import {
   useExploreSearchStore,
@@ -128,7 +130,16 @@ export interface MapFloatingUIProps {
   onResetNorth: () => void;
   headingUp: boolean;
   stepEta: Date | null;
-  walkInstruction: string | null;
+  /** Street legs: the next turn, along the road. */
+  turn?: NavTurn | null;
+  /** The leg being travelled, and whether the user controls the vehicle on it. */
+  legKind?: LegKind | null;
+  legRole?: Role | null;
+  /** Car and boda legs: switch between driving and being a passenger. */
+  onSwitchRole?: () => void;
+  /** A passenger's car or boda is carrying them away from the destination. */
+  headingAway?: boolean;
+  destinationName?: string | null;
   walkDestination: string | null;
   canBoardTransit: boolean;
   onBoardTransit: () => void;
@@ -168,7 +179,12 @@ export default function MapFloatingUI({
   cameraHeading,
   onResetNorth,
   headingUp,
-  walkInstruction,
+  turn,
+  legKind,
+  legRole,
+  onSwitchRole,
+  headingAway = false,
+  destinationName,
   walkDestination,
   canBoardTransit,
   onBoardTransit,
@@ -689,32 +705,93 @@ export default function MapFloatingUI({
           </View>
         )
       ) : navigating ? (
-        /* Active Turn-by-Turn Navigation Top Guidance Banner */
+        /* Navigation banner: turn-by-turn for whoever is in control, the
+           rider card for a boda passenger, stops and alight cues on a ride. */
         <View
           pointerEvents="box-none"
           style={[styles.topContainer, { paddingTop: insets.top + 8 }]}
         >
+          {turn && legKind === "motorbike" && legRole === "passenger" ? (
+            <View style={styles.riderCard}>
+              <View style={styles.riderTop}>
+                <Text style={styles.riderLabel}>SHOW THE RIDER</Text>
+                <PressableScale onPress={onClearJourney} hitSlop={10} style={styles.riderCloseBtn}>
+                  <Icon name="close" size={18} color="#111827" />
+                </PressableScale>
+              </View>
+              <View style={styles.riderMain}>
+                <MaterialIcons name={maneuverIcon(turn.maneuver) as any} size={58} color={ORANGE} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.riderWord} numberOfLines={1} adjustsFontSizeToFit>
+                    {turn.rider.word}
+                  </Text>
+                  {turn.rider.detail ? (
+                    <Text style={styles.riderDetail} numberOfLines={2}>
+                      {turn.rider.detail}
+                    </Text>
+                  ) : null}
+                </View>
+                <Text style={styles.riderDistance}>{turnDistanceLabel(turn.distanceM)}</Text>
+              </View>
+              {turn.then ? (
+                <Text style={styles.riderThen} numberOfLines={1}>
+                  Then: {turn.then}
+                </Text>
+              ) : null}
+              {onSwitchRole ? (
+                <RoleStrip kind={legKind} role={legRole} onPress={onSwitchRole} light />
+              ) : null}
+              {(headingAway || navStatus === "rerouting" || gpsLost || paused) && (
+                <View style={styles.statusAlertStrip}>
+                  <Icon name="alert-circle" size={16} color="#FEF08A" />
+                  <Text style={styles.statusAlertText}>
+                    {paused
+                      ? "Navigation paused"
+                      : headingAway
+                      ? `Heading away from ${destinationName ?? "your destination"}`
+                      : navStatus === "rerouting"
+                      ? "Following the rider's way…"
+                      : "Weak GPS signal"}
+                  </Text>
+                  {paused && (
+                    <PressableScale onPress={onResume} style={styles.resumePill}>
+                      <Text style={styles.resumePillText}>Resume</Text>
+                    </PressableScale>
+                  )}
+                </View>
+              )}
+            </View>
+          ) : (
           <View style={styles.navBanner}>
             <View style={styles.navBannerMain}>
-              <View style={styles.navIconBox}>
-                <Icon
-                  name={
-                    nextStep?.type === "walk"
-                      ? "walk"
-                      : nextStep?.type === "arrive"
-                      ? "location"
-                      : "train"
-                  }
-                  size={24}
-                  color="#FFFFFF"
-                />
+              <View style={[styles.navIconBox, turn && legRole === "driver" && styles.navIconBoxTurn]}>
+                {turn && legRole === "driver" ? (
+                  <MaterialIcons name={maneuverIcon(turn.maneuver) as any} size={34} color="#FFFFFF" />
+                ) : (
+                  <Icon name={bannerIcon(legKind, nextStep) as any} size={24} color="#FFFFFF" />
+                )}
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.navPrimaryText} numberOfLines={2}>
-                  {walkInstruction ?? nextPreview ?? "Follow highlighted route"}
+                {turn && legRole === "driver" ? (
+                  <Text style={styles.navTurnDistance}>{turnDistanceLabel(turn.distanceM)}</Text>
+                ) : null}
+                <Text
+                  style={[styles.navPrimaryText, turn && legRole === "passenger" && styles.navPrimaryQuiet]}
+                  numberOfLines={2}
+                >
+                  {turn
+                    ? (legRole === "passenger" ? `Next: ${turn.instruction}` : turn.instruction)
+                    : nextPreview ?? "Follow highlighted route"}
                 </Text>
                 <View style={styles.navMetaRow}>
-                  {distanceToNextStepM != null && (
+                  {turn ? (
+                    legRole === "passenger" ? (
+                      <Text style={styles.navSubText} numberOfLines={1}>
+                        In {mToNice(turn.distanceM)}
+                        {destinationName ? ` · To ${destinationName}` : ""}
+                      </Text>
+                    ) : null
+                  ) : distanceToNextStepM != null && (
                     <Text style={styles.navSubText}>
                       In {mToNice(distanceToNextStepM)}
                     </Text>
@@ -769,15 +846,18 @@ export default function MapFloatingUI({
               </View>
             )}
 
-            {nextNextPreview && (
+            {(turn ? turn.then : nextNextPreview) && (
               <View style={styles.navThenStrip}>
                 <Text style={styles.navThenText} numberOfLines={1}>
-                  Then: {nextNextPreview}
+                  Then: {turn ? turn.then : nextNextPreview}
                 </Text>
               </View>
             )}
 
+            {onSwitchRole ? <RoleStrip kind={legKind ?? null} role={legRole ?? null} onPress={onSwitchRole} /> : null}
+
             {(wrongDirection ||
+              headingAway ||
               gpsLost ||
               navStatus === "rerouting" ||
               isIndoor ||
@@ -788,9 +868,13 @@ export default function MapFloatingUI({
                   {paused
                     ? "Navigation paused"
                     : wrongDirection
-                    ? "Wrong direction — turn around"
+                    ? (legRole === "driver" && (legKind === "car" || legKind === "motorbike")
+                        ? "Wrong way · make a U-turn when it's safe"
+                        : "Wrong direction — turn around")
+                    : headingAway
+                    ? `Heading away from ${destinationName ?? "your destination"}`
                     : navStatus === "rerouting"
-                    ? "Recalculating best route…"
+                    ? (legRole === "passenger" ? "Following your driver's way…" : "Recalculating best route…")
                     : gpsLost
                     ? "Weak GPS signal — dead-reckoning"
                     : "Indoor signal — head outside for lock"}
@@ -803,6 +887,7 @@ export default function MapFloatingUI({
               </View>
             )}
           </View>
+          )}
         </View>
       ) : null}
       </Animated.View>
@@ -960,6 +1045,59 @@ export default function MapFloatingUI({
         onWeatherLoaded={setLiveMeteo}
       />
     </View>
+  );
+}
+
+/** "300 m", "1.2 km", or "Now" at the turn. */
+function turnDistanceLabel(m: number): string {
+  return m < 15 ? "Now" : mToNice(m);
+}
+
+/** The banner's icon when there's no turn arrow: the leg's own mode. */
+function bannerIcon(kind: LegKind | null | undefined, step?: Step): string {
+  switch (kind) {
+    case "walk": return "walk";
+    case "bicycle": return "bicycle";
+    case "car": return "car";
+    case "motorbike": return "motorbike";
+    default: {
+      const mode = String((step as any)?.mode ?? "").toUpperCase();
+      if (["RAIL", "SUBWAY", "TRAM", "MONORAIL"].includes(mode)) return "train";
+      if (mode === "FERRY") return "boat";
+      if (step?.type === "walk") return "walk";
+      return "bus";
+    }
+  }
+}
+
+const ROLE_TEXT: Record<"car" | "motorbike", Record<Role, { now: string; other: string; icon: string }>> = {
+  car: {
+    driver: { now: "You're driving", other: "I'm a passenger", icon: "car" },
+    passenger: { now: "You're a passenger", other: "I'm driving", icon: "person" },
+  },
+  motorbike: {
+    driver: { now: "You're riding", other: "I'm the passenger", icon: "motorbike" },
+    passenger: { now: "You're the passenger", other: "I'm riding", icon: "person" },
+  },
+};
+
+/** Car and boda legs: who's in control, switchable in one tap (remembered). */
+function RoleStrip({ kind, role, onPress, light = false }: {
+  kind: LegKind | null; role: Role | null; onPress: () => void; light?: boolean;
+}) {
+  if ((kind !== "car" && kind !== "motorbike") || !role) return null;
+  const t = ROLE_TEXT[kind][role];
+  return (
+    <PressableScale
+      onPress={onPress}
+      style={[styles.roleStrip, light && styles.roleStripLight]}
+      accessibilityRole="button"
+      accessibilityLabel={`${t.now}. Switch to: ${t.other}`}
+    >
+      <Icon name={t.icon as any} size={15} color={light ? "#374151" : "#D1D5DB"} />
+      <Text style={[styles.roleText, light && styles.roleTextLight]} numberOfLines={1}>{t.now}</Text>
+      <Text style={styles.roleSwitch} numberOfLines={1}>{t.other}</Text>
+    </PressableScale>
   );
 }
 
@@ -1159,6 +1297,73 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "700",
+  },
+  /** A passenger's banner informs, it doesn't command. */
+  navPrimaryQuiet: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#E5E7EB",
+  },
+  navIconBoxTurn: {
+    width: 56,
+    height: 56,
+    borderRadius: 14,
+  },
+  navTurnDistance: {
+    color: "#FFFFFF",
+    fontSize: 24,
+    fontWeight: "800",
+    letterSpacing: -0.3,
+  },
+  roleStrip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: "#0B1220",
+  },
+  roleStripLight: { backgroundColor: "#F3F4F6" },
+  roleText: { flex: 1, color: "#D1D5DB", fontSize: 12.5, fontWeight: "600" },
+  roleTextLight: { color: "#374151" },
+  roleSwitch: { color: ORANGE, fontSize: 12.5, fontWeight: "700" },
+  // Boda passenger: a card to show the rider, readable in the sun at arm's length.
+  riderCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 14,
+  },
+  riderTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
+  riderLabel: { color: ORANGE, fontSize: 12, fontWeight: "800", letterSpacing: 1.2 },
+  riderCloseBtn: { padding: 6, borderRadius: 16, backgroundColor: "#F3F4F6" },
+  riderMain: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingTop: 6,
+    paddingBottom: 14,
+  },
+  riderWord: { color: "#111827", fontSize: 34, fontWeight: "800", letterSpacing: -0.5 },
+  riderDetail: { color: "#374151", fontSize: 17, fontWeight: "600", marginTop: 2 },
+  riderDistance: { color: "#111827", fontSize: 18, fontWeight: "800" },
+  riderThen: {
+    color: "#4B5563",
+    fontSize: 13,
+    fontWeight: "600",
+    paddingHorizontal: 16,
+    paddingBottom: 12,
   },
   navMetaRow: {
     flexDirection: "row",

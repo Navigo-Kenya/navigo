@@ -56,6 +56,8 @@ export type Step = {
   duration: number;
   location: [number, number];
   type?: "walk" | "depart" | "arrive" | string;
+  /** The route segment (= navigation leg) this step belongs to: a ride has two steps, board and alight. */
+  segIndex?: number;
   mode?: string;
   modeBadge?: string;
   stopCode?: string | null;

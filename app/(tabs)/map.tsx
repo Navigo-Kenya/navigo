@@ -58,6 +58,7 @@ import { useRouter }      from "expo-router";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { useSavedStore }  from "@/store/savedStore";
 import { usePrefsStore }  from "@/store/prefsStore";
+import { legProfile, roleSwitchable, type Role } from "@/services/navProfile";
 import { useAuthStore }   from "@/store/authStore";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Dimensions, Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
@@ -176,7 +177,7 @@ export default function MapScreen() {
   const dark = useColorScheme() === "dark";
   const BG = dark ? "#0F0F0F" : "#F6F7F8";
 
-  const { location: me, navState, locationPermissionDenied, openLocationSettings, gpsLost, wrongDirection, startNavigation, stopNavigation, pauseNavigation, resumeNavigation, isIndoor, canBoardTransit, boardTransit } = useNavigation();
+  const { location: me, navState, locationPermissionDenied, openLocationSettings, gpsLost, wrongDirection, startNavigation, stopNavigation, pauseNavigation, resumeNavigation, isIndoor, canBoardTransit, boardTransit, turn, headingAway } = useNavigation();
   const { visible: rateVisible, onJourneyComplete, onRate, onLater } = useRatePrompt();
   const [showPostJourney, setShowPostJourney] = useState(false);
   // Snapshot of the finished journey — PostJourneySheet must not read
@@ -200,17 +201,35 @@ export default function MapScreen() {
   const navigating    = tripStatus === "IN_TRANSIT";
   const tripPaused    = tripStatus === "PAUSED";
   
-  const isVehicleMode = navigating && (
-    (navState?.currentSegmentMode != null && navState.currentSegmentMode !== "WALK")
-    || (me?.speed ?? 0) > 4.0
+  // Vehicle mode comes from the leg being travelled, never from the speed
+  // alone: a cyclist going downhill stays a cyclist, a GPS jump stays a walk.
+  const isVehicleMode = navigating
+    && navState?.currentSegmentMode != null && navState.currentSegmentMode !== "WALK";
+
+  // Who controls the vehicle on this leg (services/navProfile): a driver gets
+  // turn-by-turn, a passenger is kept informed. Car and boda remember the choice.
+  const carRole  = usePrefsStore((s) => s.prefs.carRole);
+  const bodaRole = usePrefsStore((s) => s.prefs.bodaRole);
+  const legProf = useMemo(
+    () => (navigating ? legProfile(navState?.currentSegmentMode ?? "WALK", { carRole, bodaRole }) : null),
+    [navigating, navState?.currentSegmentMode, carRole, bodaRole]
   );
+  const passengerOnStreet = legProf?.role === "passenger" && legProf.kind !== "transit";
+  const switchRole = useCallback(() => {
+    if (!legProf || !roleSwitchable(legProf.kind)) return;
+    const next: Role = legProf.role === "driver" ? "passenger" : "driver";
+    Haptics.selectionAsync().catch(() => {});
+    usePrefsStore.getState().set(legProf.kind === "car" ? "carRole" : "bodaRole", next);
+  }, [legProf]);
 
   // Immersive navigation: the camera frames each mode its own way (the
-  // vehicle's family is enough here; the route picks the exact model below).
-  const navFamily = navigating
-    ? vehicleFor(navState?.currentSegmentMode ?? (isVehicleMode ? "BUS" : "WALK"))
-    : null;
-  const navCamera = useMemo(() => (navFamily ? cameraFor(navFamily) : null), [navFamily]);
+  // vehicle's family is enough here; the route picks the exact model below),
+  // higher and wider for a passenger.
+  const navFamily = navigating ? vehicleFor(navState?.currentSegmentMode ?? "WALK") : null;
+  const navCamera = useMemo(
+    () => (navFamily ? cameraFor(navFamily, passengerOnStreet) : null),
+    [navFamily, passengerOnStreet]
+  );
 
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const layers          = useMapLayersStore((s) => s.layers);
@@ -1213,9 +1232,19 @@ export default function MapScreen() {
     if (b) fetchReportsForBounds(b.north, b.south, b.east, b.west);
   }, [layers.reports, layers.traffic, fetchReportsForBounds]);
 
-  const nextStep    = steps[navState?.stepIndex ?? 0];
+  // Engine steps are one per leg; the overlay's steps are two per ride (board,
+  // alight). Index them by leg, or after the first ride the banner ran a step
+  // behind ("Board Line 45K" while on board, "Alight at…" on the last walk).
+  const legIdx = navState?.stepIndex ?? 0;
+  const nextStep = useMemo(() => {
+    const ofLeg = steps.filter((s) => s.segIndex === legIdx);
+    return ofLeg.length ? ofLeg[ofLeg.length - 1] : steps[legIdx];
+  }, [steps, legIdx]);
   const nextPreview = prefs.navHints === "off" || !nextStep ? null : humanizeStep(nextStep);
-  const nextNextStep = steps[(navState?.stepIndex ?? 0) + 1];
+  const nextNextStep = useMemo(
+    () => steps.find((s) => (s.segIndex ?? -1) > legIdx) ?? null,
+    [steps, legIdx]
+  );
 
   const nextNextPreview = useMemo(() => {
     if (prefs.navHints === "off" || !nextNextStep) return null;
@@ -1244,37 +1273,16 @@ export default function MapScreen() {
 
   const stepEta = (navState?.stepETAs?.[navState?.stepIndex ?? 0]) ?? null;
 
-  const walkInstruction = useMemo(() => {
-    if (!isNavigationMode || navState?.currentSegmentMode !== "WALK") return null;
-    const step = steps[navState.stepIndex ?? 0];
-    if (!step?.subSteps?.length) return null;
-    if (meLat == null || meLng == null) return step.subSteps[0].instruction;
-    
-    let nearestIdx = 0, nearestDist = Infinity;
-    for (let i = 0; i < step.subSteps.length; i++) {
-      const d = Math.hypot(meLat - step.subSteps[i].lat, meLng - step.subSteps[i].lng);
-      if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
-    }
-    
-    const isStandingAtStart = nearestIdx === 0 && nearestDist < (30 / 111_320);
-    const isPassingWaypoint = !isStandingAtStart && nearestDist < (20 / 111_320);
-    const idx = isPassingWaypoint ? Math.min(nearestIdx + 1, step.subSteps.length - 1) : nearestIdx;
-      
-    return step.subSteps[idx].instruction;
-  }, [isNavigationMode, navState, steps, meLat, meLng]);
+  // Street legs: the next turn, from the progress along the road (useNavigation).
+  const navTurn = isNavigationMode && legProf?.turns ? turn : null;
 
+  // Walking to a stage: where the walk ends ("· To Kencom").
   const walkDestination = useMemo(() => {
     if (!isNavigationMode || navState?.currentSegmentMode !== "WALK") return null;
-    const si = navState.stepIndex ?? 0;
-    for (let i = si + 1; i < steps.length; i++) {
-      if (steps[i].type === "depart") {
-        const m = steps[i].instruction?.match(/at (.+)$/);
-        return m?.[1] ?? null;
-      }
-      if (steps[i].type === "arrive") break;
-    }
-    return null;
-  }, [isNavigationMode, navState, steps]);
+    const segs = activeJourney?.route?.segments as any[] | undefined;
+    const nextSeg = segs?.[legIdx + 1];
+    return nextSeg && nextSeg.mode !== "WALK" ? (nextSeg.from?.name ?? null) : null;
+  }, [isNavigationMode, navState?.currentSegmentMode, activeJourney?.route, legIdx]);
 
   // AR guidance is a walk-leg tool: auto-dismiss when boarding or ending.
   useEffect(() => {
@@ -1282,7 +1290,7 @@ export default function MapScreen() {
   }, [arOpen, isVehicleMode, isNavigationMode]);
 
   // AR arrow target: the current step's endpoint (stage / boarding stop).
-  const arTarget = steps[navState?.stepIndex ?? 0]?.location ?? null; // [lng, lat]
+  const arTarget = nextStep?.location ?? null; // [lng, lat]
 
   const boardingNodeId = (tripStatus === "WAITING_FOR_BUS" && navStarted)
     ? (() => {
@@ -1337,7 +1345,7 @@ export default function MapScreen() {
     [transitLegs, activeSegIdx]
   );
   const navMode = isNavigationMode
-    ? (navLeg?.mode ?? navState?.currentSegmentMode ?? (isVehicleMode ? "BUS" : "WALK"))
+    ? (navLeg?.mode ?? navState?.currentSegmentMode ?? "WALK")
     : null;
   const navModel = navMode ? vehicleFor(navMode, navLeg?.routeId, navLeg?.routeName) : null;
   // Every model the journey can need, registered while navigating only.
@@ -1686,7 +1694,12 @@ export default function MapScreen() {
         onResetNorth={handleCompassPress}
         headingUp={headingUp}
         stepEta={stepEta}
-        walkInstruction={walkInstruction}
+        turn={navTurn}
+        legKind={legProf?.kind ?? null}
+        legRole={legProf?.role ?? null}
+        onSwitchRole={legProf && roleSwitchable(legProf.kind) ? switchRole : undefined}
+        headingAway={headingAway && isNavigationMode}
+        destinationName={activeJourney?.toLoc?.name ?? null}
         walkDestination={walkDestination}
         canBoardTransit={canBoardTransit && (isNavigationMode || tripStatus === "WAITING_FOR_BUS")}
         onBoardTransit={boardTransit}
@@ -1727,8 +1740,8 @@ export default function MapScreen() {
         targetLat={arTarget ? arTarget[1] : null}
         targetLng={arTarget ? arTarget[0] : null}
         targetName={walkDestination ?? activeJourney?.toLoc?.name ?? null}
-        instruction={walkInstruction ?? nextPreview}
-        distanceM={navState?.distanceToNextStepM ?? null}
+        instruction={navTurn?.instruction ?? nextPreview}
+        distanceM={navTurn?.distanceM ?? navState?.distanceToNextStepM ?? null}
       />
 
       <PostJourneySheet
