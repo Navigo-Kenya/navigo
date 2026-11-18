@@ -202,11 +202,12 @@ export default function MapScreen() {
   const activeStyleURL = useMemo(() => {
     if (layers.mapType === "satellite") return "mapbox://styles/mapbox/satellite-streets-v12";
     if (layers.mapType === "hybrid")    return "mapbox://styles/mapbox/outdoors-v12";
-    if (layers.traffic) return dark ? "mapbox://styles/mapbox/traffic-night-v2" : "mapbox://styles/mapbox/traffic-day-v2";
-    return dark 
-      ? "mapbox://styles/mapbox/dark-v11" 
+    // Traffic is our own TomTom layer drawn on top (TrafficIncidentLayer), not
+    // a separate Mapbox style: same data as the route times, no style reload.
+    return dark
+      ? "mapbox://styles/mapbox/dark-v11"
       : (process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL ?? "mapbox://styles/mapbox/streets-v12");
-  }, [layers.mapType, layers.traffic, dark]);
+  }, [layers.mapType, dark]);
 
   const activeStyleRef = useRef(activeStyleURL);
   activeStyleRef.current = activeStyleURL;
@@ -1056,13 +1057,15 @@ export default function MapScreen() {
 
   const fetchReportsForBounds = useCallback(
     (north: number, south: number, east: number, west: number) => {
-      if (!useMapLayersStore.getState().layers.reports) return; 
+      // One request serves both layers: reports + TomTom pins (Live reports)
+      // and TomTom jam lines (Traffic).
+      const { reports: showReports, traffic: showTraffic } = useMapLayersStore.getState().layers;
+      if (!showReports && !showTraffic) return;
       if (![north, south, east, west].every(Number.isFinite)) return;
       const reqId = ++reportReqId.current;
       ReportService.getViewport(north, south, east, west)
         .then(({ reports, incidents }) => {
           if (reqId !== reportReqId.current) return;
-          // Live TomTom incidents: pins join the reports, jams become lines.
           const { pins, jams } = splitIncidents(incidents);
           setActiveReports([...reports, ...pins]);
           setTrafficJams(jams);
@@ -1179,10 +1182,10 @@ export default function MapScreen() {
   );
 
   useEffect(() => {
-    if (!layers.reports) return;
+    if (!layers.reports && !layers.traffic) return;
     const b = lastBoundsRef.current;
     if (b) fetchReportsForBounds(b.north, b.south, b.east, b.west);
-  }, [layers.reports, fetchReportsForBounds]);
+  }, [layers.reports, layers.traffic, fetchReportsForBounds]);
 
   const nextStep    = steps[navState?.stepIndex ?? 0];
   const nextPreview = prefs.navHints === "off" || !nextStep ? null : humanizeStep(nextStep);
@@ -1523,9 +1526,9 @@ export default function MapScreen() {
               />
             )}
             
-          {/* Live jams under the report pins; hidden while a journey is on
-              screen (its route carries its own traffic colours). */}
-          <TrafficIncidentLayer jams={trafficJams} visible={layers.reports && !activeJourney} />
+          {/* Traffic layer: live TomTom jams, under the report pins; hidden
+              while a journey is on screen (its route has its own colours). */}
+          <TrafficIncidentLayer jams={trafficJams} visible={layers.traffic && !activeJourney} />
 
           {layers.reports && (
             <ReportLayer

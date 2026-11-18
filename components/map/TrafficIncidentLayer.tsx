@@ -1,7 +1,9 @@
 // components/map/TrafficIncidentLayer.tsx
 //
 // Live TomTom jams as coloured road lines (amber = queuing / slow, red =
-// stationary), drawn under the report pins. Part of the "Live reports" layer.
+// stationary), drawn under the report pins. This is the map's "Traffic" layer:
+// the same TomTom data that times car, boda and matatu routes. Closures,
+// accidents and roadworks are pins in "Live reports" instead.
 //
 // The source is always mounted (empty when there's nothing to show) so the
 // layer is never added and removed while the style changes, which is what
