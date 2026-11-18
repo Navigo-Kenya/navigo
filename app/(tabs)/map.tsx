@@ -73,7 +73,23 @@ import {
   Models,
   ModelLayer,
   CustomLocationProvider,
+  RasterDemSource,
+  Terrain,
 } from "@rnmapbox/maps";
+import {
+  EMISSIVE,
+  cameraFor,
+  isRailMode,
+  lightPresetAt,
+  modelScaleExpr,
+  modelYaw,
+  modelsFor,
+  trainCars,
+  trainConsist,
+  vehicleFor,
+  type LightPreset,
+} from "@/components/map/nav3d";
+import { MODEL_ASSETS } from "@/components/map/navModelAssets";
 
 import MapSearchContextSheet from "@/components/app/MapSearchContextSheet";
 import {
@@ -88,8 +104,10 @@ const NativeCircleLayer   = CircleLayer   as unknown as React.ComponentType<any>
 const NativeLineLayer     = LineLayer     as unknown as React.ComponentType<any>;
 const NativeFillLayer     = FillLayer     as unknown as React.ComponentType<any>;
 const NativeShapeSource   = ShapeSource   as unknown as React.ComponentType<any>;
-const NativeModels        = Models        as unknown as React.ComponentType<any>; 
-const NativeModelLayer    = ModelLayer    as unknown as React.ComponentType<any>; 
+const NativeModels        = Models        as unknown as React.ComponentType<any>;
+const NativeModelLayer    = ModelLayer    as unknown as React.ComponentType<any>;
+const NativeRasterDemSource = RasterDemSource as unknown as React.ComponentType<any>;
+const NativeTerrain       = Terrain       as unknown as React.ComponentType<any>;
 
 function headingArcGeoJson(
   lat: number,
@@ -186,6 +204,13 @@ export default function MapScreen() {
     (navState?.currentSegmentMode != null && navState.currentSegmentMode !== "WALK")
     || (me?.speed ?? 0) > 4.0
   );
+
+  // Immersive navigation: the camera frames each mode its own way (the
+  // vehicle's family is enough here; the route picks the exact model below).
+  const navFamily = navigating
+    ? vehicleFor(navState?.currentSegmentMode ?? (isVehicleMode ? "BUS" : "WALK"))
+    : null;
+  const navCamera = useMemo(() => (navFamily ? cameraFor(navFamily) : null), [navFamily]);
 
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const layers          = useMapLayersStore((s) => s.layers);
@@ -326,16 +351,17 @@ export default function MapScreen() {
 
   // Flat overview pulls back to zoom 15.5 automatically
   const followZoom = useMemo(() => {
-    if (!headingUp) return 15.5; 
+    if (!headingUp) return 15.5;
     const kph = (me?.speed ?? 0) * 3.6;
+    if (navCamera) return navCamera.zoom(kph);
     if (isVehicleMode) {
       return kph < 5 ? 17.2 : kph < 30 ? 17.2 - ((kph - 5) / 25) * 0.8 : kph < 80 ? 16.4 - ((kph - 30) / 50) * 0.9 : 15.5;
     }
     return kph < 5 ? 19.2 : kph < 30 ? 19.2 - ((kph - 5) / 25) * 1.2 : 18.0;
-  }, [headingUp, me?.speed, isVehicleMode]);
+  }, [headingUp, me?.speed, isVehicleMode, navCamera]);
 
   // Flat overview drops pitch to 0 automatically
-  const followPitch = headingUp ? (isVehicleMode ? 65 : 55) : 0;
+  const followPitch = headingUp ? (navCamera?.pitch ?? (isVehicleMode ? 65 : 55)) : 0;
 
   // Keep the screen on for the whole navigation session.
   useEffect(() => {
@@ -1279,8 +1305,9 @@ export default function MapScreen() {
 
 
   // ── 2D User Location (Beam + Pulse + Dot) ──
+  // In navigation the 3D model (vehicle, or the walking marker) takes its place.
   const unifiedUserLocationGeoJson = useMemo(() => {
-    if (meLat == null || meLng == null) return null;
+    if (meLat == null || meLng == null || isNavigationMode) return null;
 
     const showBeam = !isVehicleMode;
     // The beam visual must ALWAYS use the device compass (beamHeading),
@@ -1304,27 +1331,75 @@ export default function MapScreen() {
     };
   }, [meLat, meLng, beamHeading, viewZoom, isVehicleMode, isNavigationMode]); // Ensure dependencies are accurate
 
+  // ── Immersive navigation: the leg's vehicle, the models, the light ──
+  const navLeg = useMemo(
+    () => (activeSegIdx < 0 ? null : transitLegs.find((l) => Number(l.id.split("-")[1]) === activeSegIdx) ?? null),
+    [transitLegs, activeSegIdx]
+  );
+  const navMode = isNavigationMode
+    ? (navLeg?.mode ?? navState?.currentSegmentMode ?? (isVehicleMode ? "BUS" : "WALK"))
+    : null;
+  const navModel = navMode ? vehicleFor(navMode, navLeg?.routeId, navLeg?.routeName) : null;
+  // Every model the journey can need, registered while navigating only.
+  const journeyModels = useMemo(() => (isNavigationMode ? modelsFor(transitLegs) : []), [isNavigationMode, transitLegs]);
+  const journeyModelAssets = useMemo(
+    () => Object.fromEntries(journeyModels.map((m) => [m, MODEL_ASSETS[m]])),
+    [journeyModels]
+  );
+
+  // Mapbox Standard's light follows the sun where the user is (dawn, day,
+  // dusk, night), re-checked every minute; outside navigation it stays "day".
+  const [lightPreset, setLightPreset] = useState<LightPreset>("day");
+  const hasFix = meLat != null && meLng != null;
+  const sunLatRef = useRef<number | null>(null);
+  const sunLngRef = useRef<number | null>(null);
+  useEffect(() => { sunLatRef.current = meLat; sunLngRef.current = meLng; }, [meLat, meLng]);
+  useEffect(() => {
+    if (!isNavigationMode || !hasFix) {
+      setLightPreset("day");
+      return;
+    }
+    const update = () => {
+      if (sunLatRef.current != null && sunLngRef.current != null) {
+        setLightPreset(lightPresetAt(sunLatRef.current, sunLngRef.current));
+      }
+    };
+    update();
+    const id = setInterval(update, 60_000);
+    return () => clearInterval(id);
+  }, [isNavigationMode, hasFix]);
+  const emissive = isNavigationMode ? EMISSIVE[lightPreset] : EMISSIVE.day;
+
   const navModelsGeoJson = useMemo(() => {
-    if (!isNavigationMode || meLat == null || meLng == null) return null;
+    if (!isNavigationMode || meLat == null || meLng == null || !navModel) return null;
 
-    // Heading: the puck's course-over-ground (route bearing when snapped) —
-    // NOT the compass, which is useless inside a vehicle. Same axis offset as
-    // BusLayer: bearings become model rotation via (bearing + 180) - 90.
-    const busHeading = ((me?.heading ?? 0) + 180) % 360 - 90;
+    // A train is drawn car by car along its line, so it bends through curves.
+    if (isRailMode(navMode) && navLeg) {
+      const cars = trainCars(navLeg.coords, { latitude: meLat, longitude: meLng }, trainConsist(navLeg.routeId), followZoom);
+      return {
+        type: "FeatureCollection",
+        features: cars.map((c) => ({
+          type: "Feature",
+          geometry: { type: "Point", coordinates: c.coord },
+          properties: { model: c.model, modelRot: [0, 0, modelYaw(c.bearing + (c.flip ? 180 : 0))] },
+        })),
+      } as GeoJSON.FeatureCollection;
+    }
 
+    // Vehicles face their course over ground (the route bearing when snapped);
+    // the walking marker points where the phone points (the compass).
+    const heading = navModel === "puck" ? beamHeading : (me?.heading ?? 0);
     return {
       type: "FeatureCollection",
       features: [
         {
           type: "Feature",
           geometry: { type: "Point", coordinates: [meLng, meLat] },
-          properties: {
-            modelRot: [MODEL_TILT_X, 0, busHeading],
-          },
+          properties: { model: navModel, modelRot: [MODEL_TILT_X, 0, modelYaw(heading)] },
         },
       ],
     } as GeoJSON.FeatureCollection;
-  }, [meLat, meLng, me?.heading, isNavigationMode]);
+  }, [meLat, meLng, me?.heading, beamHeading, isNavigationMode, navModel, navMode, navLeg, followZoom]);
 
 
   return (
@@ -1357,7 +1432,7 @@ export default function MapScreen() {
                 followUserMode: (headingUp ? (isVehicleMode ? "course" : "compass") : "normal") as any,
                 followZoomLevel: followZoom,
                 followPitch,
-                followPadding: { paddingBottom: 200 },
+                followPadding: { paddingBottom: navCamera?.paddingBottom ?? 200 },
               }
             : {})}
           onUserTrackingModeChange={(e: any) => {
@@ -1375,10 +1450,15 @@ export default function MapScreen() {
           <CustomLocationProvider coordinate={[meLng, meLat]} heading={puckHeading} />
         )}
 
-        {styleLoaded && (
-          <NativeModels models={{ 
-            navBus:   "https://files.navigo.co.ke/bus.glb"
-          }} />
+        {/* Navigo's own models (tools: navigo-models), bundled; only the
+            journey's are registered, and only while navigating. */}
+        {styleLoaded && journeyModels.length > 0 && <NativeModels models={journeyModelAssets} />}
+
+        {/* Terrain while navigating: hills, the Rift Valley, the SGR line in relief. */}
+        {styleLoaded && isNavigationMode && (
+          <NativeRasterDemSource id="navigo-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={514} maxZoomLevel={14}>
+            <NativeTerrain style={{ exaggeration: 1.2 }} />
+          </NativeRasterDemSource>
         )}
 
         {/* Offline tiles: native vector packs + ambient cache are served by
@@ -1413,26 +1493,24 @@ export default function MapScreen() {
 
             {navModelsGeoJson && (
                <NativeShapeSource id="nav-models-src" shape={navModelsGeoJson}>
-                  {isVehicleMode && (
+                  {/* One layer per model: each keeps its own on-screen size at every zoom. */}
+                  {journeyModels.map((m) => (
                     <NativeModelLayer
-                      id="nav-model-bus"
+                      key={m}
+                      id={`nav-model-${m}`}
+                      filter={["==", ["get", "model"], m]}
                       style={{
-                        modelId: "navBus",
-                        // Same zoom-scaled sizing as BusLayer: big enough to
-                        // spot from city view, physically lane-sized up close.
-                        modelScale: [
-                          "interpolate", ["linear"], ["zoom"],
-                          10, ["literal", [0.5, 0.5, 0.5]],
-                          15, ["literal", [0.15, 0.15, 0.15]],
-                          20, ["literal", [0.01, 0.01, 0.01]],
-                        ],
+                        modelId: m,
+                        modelScale: modelScaleExpr(m),
                         modelRotation: ["get", "modelRot"],
-                        // Sit on the road, not 25 m in the sky.
-                        modelTranslation: ["literal", [0, 0, 0.2]],
                         modelOpacity: 1,
+                        modelCastShadows: true,
+                        modelReceiveShadows: true,
+                        // Head and tail lights, neon and lit signs glow after dark.
+                        modelEmissiveStrength: emissive,
                       }}
                     />
-                  )}
+                  ))}
                </NativeShapeSource>
             )}
 
@@ -1443,6 +1521,7 @@ export default function MapScreen() {
               focusCategory={categoryActive && !activeJourney ? poiCategory : null}
               excludeIds={isNavigationMode || activeJourney ? journeyPoiIds : resultPoiIds}
               standardStyle={activeStyleURL === process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL}
+              lightPreset={isNavigationMode ? lightPreset : "day"}
               dark={dark}
               onPress={handlePoiPress}
             />
@@ -1475,6 +1554,7 @@ export default function MapScreen() {
               activeSegIdx={activeSegIdx}
               userLat={overlayUserLat}
               userLng={overlayUserLng}
+              immersive={isNavigationMode}
             />
 
             {corridorData && !activeJourney && (

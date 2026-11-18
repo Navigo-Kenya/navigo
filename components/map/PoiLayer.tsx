@@ -77,6 +77,8 @@ interface Props {
   excludeIds?: string[];
   /** The active map style is Mapbox Standard (POIs hidden via its config). */
   standardStyle: boolean;
+  /** Mapbox Standard's light; the only import of "basemap" lives here, so it carries this too. */
+  lightPreset?: "dawn" | "day" | "dusk" | "night";
   dark: boolean;
   onPress: (poi: TappedPoi) => void;
 }
@@ -89,6 +91,7 @@ export const PoiLayer = memo(function PoiLayer({
   focusCategory = null,
   excludeIds,
   standardStyle,
+  lightPreset = "day",
   dark,
   onPress,
 }: Props) {
@@ -129,7 +132,7 @@ export const PoiLayer = memo(function PoiLayer({
         <NativeStyleImport
           id="basemap"
           existing
-          config={{ showPointOfInterestLabels: !visible }}
+          config={{ showPointOfInterestLabels: !visible, lightPreset }}
         />
       ) : (
         visible && (

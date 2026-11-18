@@ -123,7 +123,7 @@ export function useRouteOverlay(
             if (seg.mode === "WALK") {
               newWalkLegs.push({ id: `walk-${i}`, coords });
             } else {
-              newTransitLegs.push({ id: `street-${i}`, coords, color: sanitizeHex(seg.route_color, seg.mode) });
+              newTransitLegs.push({ id: `street-${i}`, coords, color: sanitizeHex(seg.route_color, seg.mode), mode: seg.mode });
             }
             const verb = streetVerb(seg.mode);
             const target = seg.to.name === "Destination" ? toLoc.name : seg.to.name;
@@ -156,7 +156,7 @@ export function useRouteOverlay(
               console.log(`[RouteOverlay] seg ${i}: route_color="${seg.route_color}" → "${color}"`);
             }
 
-            newTransitLegs.push({ id: `transit-${i}`, coords, color });
+            newTransitLegs.push({ id: `transit-${i}`, coords, color, mode: seg.mode, routeId: seg.route_id ?? null, routeName: seg.route_name ?? null });
             newNodeMarkers.push(
               { id: `node-from-${i}`, coord: { latitude: seg.from.lat, longitude: seg.from.lng }, name: fromName, color },
               { id: `node-to-${i}`,   coord: { latitude: seg.to.lat,   longitude: seg.to.lng   }, name: toName,   color },
