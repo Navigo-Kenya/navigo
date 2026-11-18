@@ -4,7 +4,15 @@ import { getRouteColor } from "@/utils/mapHelpers";
 // ── Overlay types ─────────────────────────────────────────────────────────────
 
 export interface WalkLeg          { id: string; coords: LatLng[] }
-export interface TransitLeg       { id: string; coords: LatLng[]; color: string }
+export interface TransitLeg {
+  id: string;
+  coords: LatLng[];
+  color: string;
+  /** Segment mode (BUS, RAIL, CAR, MOTORBIKE…) and route, for the 3D vehicle in navigation. */
+  mode?: string;
+  routeId?: string | null;
+  routeName?: string | null;
+}
 export interface NodeMarker       { id: string; coord: LatLng; name: string; color: string }
 export interface LocMarker        { id: string; coord: LatLng; name: string; isStart: boolean }
 export interface IntermediateStop { id: string; coord: LatLng; color: string; name: string; routeName: string }

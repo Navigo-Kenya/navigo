@@ -84,6 +84,8 @@ interface RouteOverlayProps {
   activeSegIdx?:      number;
   userLat?:           number;
   userLng?:           number;
+  /** Navigation: the route ahead glows, and stays bright under the night light. */
+  immersive?:         boolean;
 }
 
 /** Legs are created with ids `walk-<segIdx>` / `transit-<segIdx>`. */
@@ -94,8 +96,9 @@ function segIdxOf(id: string): number {
 
 function _RouteOverlay({
   walkLegs, transitLegs, nodeMarkers, locMarkers, intermediateStops, onIntermStopPress,
-  boardingNodeId, activeSegIdx = -1, userLat, userLng,
+  boardingNodeId, activeSegIdx = -1, userLat, userLng, immersive = false,
 }: RouteOverlayProps) {
+  const lit = immersive ? 1 : 0;
   const intermGeoJson = useMemo<GeoJSON.FeatureCollection>(() => ({
     type: "FeatureCollection",
     features: intermediateStops.map((s) => ({
@@ -146,6 +149,7 @@ function _RouteOverlay({
                 lineCap:   "round",
                 lineJoin:  "round",
                 lineDasharray: [0, 1.5],
+                lineEmissiveStrength: lit,
               }}
             />
           </NativeShapeSource>
@@ -193,6 +197,15 @@ function _RouteOverlay({
         return (
           <React.Fragment key={`${leg.id}-${leg.color}`}>
             <NativeShapeSource id={`transit-src-${leg.id}`} shape={geojson}>
+              {immersive && !traveled && !(isActive && aheadGeojson) && (
+                <NativeLineLayer
+                  id={`transit-glow-${leg.id}`}
+                  style={{
+                    lineColor: leg.color, lineWidth: 22, lineBlur: 12, lineOpacity: 0.4,
+                    lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1,
+                  }}
+                />
+              )}
               <NativeLineLayer
                 id={`transit-line-${leg.id}`}
                 style={{
@@ -200,11 +213,21 @@ function _RouteOverlay({
                   lineWidth:  traveled ? 4 : 8,
                   lineCap:    "round",
                   lineJoin:   "round",
+                  lineEmissiveStrength: lit,
                 }}
               />
             </NativeShapeSource>
             {aheadGeojson && (
               <NativeShapeSource id={`transit-ahead-src-${leg.id}`} shape={aheadGeojson}>
+                {immersive && (
+                  <NativeLineLayer
+                    id={`transit-ahead-glow-${leg.id}`}
+                    style={{
+                      lineColor: leg.color, lineWidth: 26, lineBlur: 14, lineOpacity: 0.5,
+                      lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1,
+                    }}
+                  />
+                )}
                 <NativeLineLayer
                   id={`transit-ahead-line-${leg.id}`}
                   style={{
@@ -212,6 +235,7 @@ function _RouteOverlay({
                     lineWidth: 8,
                     lineCap:   "round",
                     lineJoin:  "round",
+                    lineEmissiveStrength: lit,
                   }}
                 />
               </NativeShapeSource>

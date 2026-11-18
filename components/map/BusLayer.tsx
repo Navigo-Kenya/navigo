@@ -1,5 +1,7 @@
 // components/map/BusLayer.tsx
 import { Models, ModelLayer, ShapeSource, CircleLayer } from "@rnmapbox/maps";
+import { modelScaleExpr, modelYaw } from "@/components/map/nav3d";
+import { MODEL_ASSETS } from "@/components/map/navModelAssets";
 import React, { useEffect, useRef, useState } from "react";
 import { routes as allRoutes } from "@/data/routes";
 import { stops as allStops } from "@/data/stops";
@@ -319,9 +321,8 @@ export function BusLayer({ selectedBusId, onBusPress, followBusId, onFollowPosit
           bearing,
           pulseR: pulseRadius,
           pulseO: pulseOpacity,
-          // FIX: Add a 90-degree offset to the Z-axis (bearing)
-          // If the bus drives backwards after this, change it to: bearing - 90
-          rotation: [0, 0, bearing + -90]
+          // `bearing` here is the course + 180; the model faces the course (nav3d.modelYaw).
+          rotation: [0, 0, modelYaw(bearing - 180)]
         };
       }).filter(Boolean) as BusState[];
 
@@ -354,7 +355,7 @@ export function BusLayer({ selectedBusId, onBusPress, followBusId, onFollowPosit
 
 return (
     <>
-      <Models models={{ "bus-model": "https://files.navigo.co.ke/bus.glb" }} />
+      <Models models={{ "bus-model": MODEL_ASSETS.matatu }} />
       
       <ShapeSource
         id="buses"
@@ -402,19 +403,9 @@ return (
             
             // GROUND ALIGNMENT
             // Lift the bus so the tires touch the road. 
-            // Since the model is now much smaller, this value needs to be smaller too.
-            // Tweak this (e.g., 0.2, 0.5) if it's floating or sinking.
-            modelTranslation: [0, 0, 0.2],
+            // Navigo matatu (metres, origin on the ground): the same size on screen at every zoom.
+            modelScale: modelScaleExpr("matatu"),
 
-            // DYNAMIC ZOOM SCALE
-            // 0.4 was too huge, so we dial the street-level zoom way down to 0.05.
-            modelScale: [
-              "interpolate", ["linear"], ["zoom"],
-              10, ["literal", [0.5, 0.5, 0.5]],    // Zoomed out (City view): Artificially large so you can see it
-              15, ["literal", [0.15, 0.15, 0.15]], // Mid zoom (Neighborhood)
-              20, ["literal", [0.01, 0.01, 0.01]]  // Zoomed in (Street view): Physically fits in the lane
-            ],
-            
             modelRotation: ["get", "rotation"], 
             modelOpacity: 1,
           } as any} 

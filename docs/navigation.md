@@ -1,6 +1,6 @@
 # Navigation: how it works today, and the plan for every mode
 
-Status: the first half describes the app as of November 2026 (after app #26–#28). The second half is a proposal, not built yet.
+Status: the first half describes the app as of November 2026 (after app #26–#28). The second half is the plan; the 3D models, per-mode camera, time-of-day light, terrain and route glow are built (see "Do we build a 3D model per mode?").
 
 Navigation was designed for one case: a passenger walking to a matatu stage, riding, and walking from the last stop. The route planner now also offers car, boda, bicycle, walking-only and (soon) train trips, but navigation still treats all of them as "walk or matatu". This doc records what exists, where it breaks for the new modes, and how to rebuild it as an immersive 3D experience adapted to each mode.
 
@@ -97,7 +97,19 @@ Turn this off automatically on low-end Android phones (a "Simple map" setting, d
 
 ### Do we build a 3D model per mode?
 
-**Yes, but as one small family, not one-offs.** Recommendation:
+**Built (November 2026).** Navigo's own models, generated from code in the
+`navigo-models` repo (Blender, headless) and bundled in `assets/models/`. That
+covers a matatu, a nganya 33-seater, a car, a boda with rider and passenger, a
+bicycle with rider, SGR and commuter trains (drawn car by car along the line), the
+Likoni ferry, a plane and the walking marker. They replace the Tokyo `bus.glb`, whose
+licence (CC-BY-NC) didn't allow a commercial app.
+
+In the app, `components/map/nav3d.ts` picks the model per leg, keeps it the same
+size on screen at every zoom, frames the camera per mode, and sets Mapbox
+Standard's light from the sun's position (dawn, day, dusk, night). While
+navigating, `map.tsx` adds terrain and `RouteOverlay` makes the route ahead glow.
+
+The original recommendation, kept for reference:
 
 - **Six low-poly models in one style** (the same flat, friendly look as our mode icons): matatu, bus/coach, train, car, boda with rider, bicycle with rider (+ ferry later). Walking keeps the flat dot.
 - **Small and bundled**: 50–150 KB `.glb` each (Draco-compressed), shipped in the app (`assets/models/`), not downloaded. Today's `bus.glb` alone is 1.4 MB and remote.
