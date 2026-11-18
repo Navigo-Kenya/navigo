@@ -10,6 +10,7 @@ import {
   formatEta,
 } from "@/utils/mapHelpers";
 import { departureMeta } from "@/utils/departures";
+import { TRAFFIC_TONE, legTrafficLine } from "@/utils/traffic";
 import { MaterialIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef, useState } from "react";
@@ -389,6 +390,8 @@ function TransitSection({
   const platformCode = (depart as any).platformCode;
   const stopCode = (depart as any).stopCode;
   const nextDep = (depart as any).nextDeparture;
+  // Today's traffic on this leg (already in the times below), if any.
+  const traffic = legTrafficLine((depart as any).traffic);
 
   const stops = depart.stops ?? [];
   const stopCount = stops.length > 1 ? stops.length - 1 : 1;
@@ -462,6 +465,15 @@ function TransitSection({
               {!!departureMeta(nextDep) && (
                 <Text style={ts.liveNextMeta}>{departureMeta(nextDep)}</Text>
               )}
+            </View>
+          )}
+
+          {traffic && (
+            <View style={ts.trafficRow} accessibilityLabel={`Traffic: ${traffic.text}`}>
+              <View style={[ts.trafficDot, { backgroundColor: TRAFFIC_TONE[traffic.tone] }]} />
+              <Text style={[ts.trafficText, { color: TRAFFIC_TONE[traffic.tone] }]}>
+                {traffic.text}
+              </Text>
             </View>
           )}
 
@@ -585,6 +597,9 @@ const ts = StyleSheet.create({
   },
   liveNextRed: { color: "#DC2626", fontSize: 12.5, fontWeight: "700" },
   liveNextMeta: { color: GREY, fontSize: 12 },
+  trafficRow: { flexDirection: "row", alignItems: "flex-start", gap: 6, marginBottom: 8 },
+  trafficDot: { width: 7, height: 7, borderRadius: 3.5, marginTop: 5 },
+  trafficText: { flex: 1, fontSize: 12.5, fontWeight: "600", lineHeight: 17 },
   rideSummary: {
     flexDirection: "row",
     alignItems: "center",

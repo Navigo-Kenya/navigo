@@ -39,6 +39,7 @@ import { departureMeta } from "@/utils/departures";
 import { Icon } from "@/components/icons/Icon";
 import { StopTypeBadge, modeIconName } from "@/components/app/StopTypeBadge";
 import { isStreetMode } from "@/utils/streetModes";
+import { TRAFFIC_TONE, legTrafficLine, trafficSummary } from "@/utils/traffic";
 
 const NativeShapeSource = ShapeSource as unknown as React.ComponentType<any>;
 const NativeLineLayer = LineLayer as unknown as React.ComponentType<any>;
@@ -937,6 +938,18 @@ export default function MultiModalRoutePlannerScreen() {
                         </Text>
                       </View>
                     )}
+                    {(() => {
+                      // Today's traffic on this leg (already in the times above).
+                      const t = legTrafficLine(leg.traffic);
+                      return t ? (
+                        <View style={s.legTrafficRow} accessibilityLabel={`Traffic: ${t.text}`}>
+                          <View style={[s.trafficDot, { backgroundColor: TRAFFIC_TONE[t.tone] }]} />
+                          <Text style={[s.legTrafficText, { color: TRAFFIC_TONE[t.tone] }]} numberOfLines={2}>
+                            {t.text}
+                          </Text>
+                        </View>
+                      ) : null;
+                    })()}
                   </View>
 
                   {lIdx === transitLegs.length - 1 && (
@@ -1566,7 +1579,7 @@ export default function MultiModalRoutePlannerScreen() {
               const primaryLineColor = STREET_MODE_UI[topMode].color;
 
               const trafficFeatures: GeoJSON.Feature<GeoJSON.LineString>[] =
-                topMode === "car" && trafficSegs.length > 0
+                (topMode === "car" || topMode === "motorbike") && trafficSegs.length > 0
                   ? trafficSegs
                       .filter((ts) => ts.coordinates.length >= 2)
                       .map((ts) => ({
@@ -1737,6 +1750,8 @@ export default function MultiModalRoutePlannerScreen() {
                   const reportsOnRoute = (rt.segments?.[0]?.traffic_segments ?? []).some(
                     (ts) => ts.congestion !== "low"
                   );
+                  // Live traffic lines (car / boda, when TomTom timed the route).
+                  const traffic = trafficSummary(rt.traffic);
 
                   return (
                     <Pressable
@@ -1761,7 +1776,7 @@ export default function MultiModalRoutePlannerScreen() {
                         <Text style={[s.mapCardBadgeText, { flexShrink: 1 }]} numberOfLines={1}>
                           {badgeTitle}
                         </Text>
-                        {topMode === "car" && reportsOnRoute && (
+                        {(topMode === "car" || topMode === "motorbike") && (rt.traffic?.live || reportsOnRoute) && (
                           <View
                             style={{
                               backgroundColor: dark
@@ -1779,7 +1794,7 @@ export default function MultiModalRoutePlannerScreen() {
                                 fontWeight: "700",
                               }}
                             >
-                              Traffic reports
+                              {rt.traffic?.live ? "Live traffic" : "Traffic reports"}
                             </Text>
                           </View>
                         )}
@@ -1804,9 +1819,38 @@ export default function MultiModalRoutePlannerScreen() {
                         ) : null}
                       </Text>
 
-                      <Text style={[s.mapCardSub, { color: textMuted }]} numberOfLines={1}>
+                      <Text
+                        style={[s.mapCardSub, { color: textMuted }, traffic && { marginBottom: 8 }]}
+                        numberOfLines={1}
+                      >
                         {streetCardFacts(rt, topMode)}
                       </Text>
+
+                      {traffic && (
+                        <View style={s.trafficBox}>
+                          <View style={s.trafficRow}>
+                            <View style={[s.trafficDot, { backgroundColor: TRAFFIC_TONE[traffic.tone] }]} />
+                            <Text style={[s.trafficHeadline, { color: TRAFFIC_TONE[traffic.tone] }]} numberOfLines={1}>
+                              {traffic.headline}
+                            </Text>
+                            {traffic.vsUsual && (
+                              <Text style={[s.trafficVs, { color: textMuted }]} numberOfLines={1}>
+                                · {traffic.vsUsual}
+                              </Text>
+                            )}
+                          </View>
+                          <View style={s.trafficRow}>
+                            <Icon
+                              name={traffic.hasIncident ? "warning" : "checkmark-circle"}
+                              size={13}
+                              color={traffic.hasIncident ? TRAFFIC_TONE.moderate : textMuted}
+                            />
+                            <Text style={[s.trafficIncident, { color: textMuted }]} numberOfLines={1}>
+                              {traffic.incident}
+                            </Text>
+                          </View>
+                        </View>
+                      )}
 
                       <Pressable
                         onPress={() => handleStartJourney(rt)}
@@ -2181,6 +2225,14 @@ const s = StyleSheet.create({
     marginTop: 2,
     marginBottom: 14,
   },
+  trafficBox: { gap: 4, marginBottom: 14 },
+  trafficRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  trafficDot: { width: 8, height: 8, borderRadius: 4 },
+  legTrafficRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 },
+  legTrafficText: { flex: 1, fontSize: 12, fontWeight: "600" },
+  trafficHeadline: { fontSize: 13, fontWeight: "700", flexShrink: 0 },
+  trafficVs: { fontSize: 12.5, fontWeight: "500", flexShrink: 1 },
+  trafficIncident: { fontSize: 12.5, fontWeight: "500", flex: 1 },
   mapCardStartBtn: {
     backgroundColor: HEADER_BLUE,
     height: 46,

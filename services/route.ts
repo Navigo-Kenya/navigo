@@ -71,6 +71,8 @@ export interface RouteSegment {
   stop_count?: number;
   next_departures?: NextDepartureItem[];
   traffic_segments?: TrafficSegment[];
+  /** Matatu / BRT leg timed with live traffic (only when the API checked it). */
+  traffic?: LegTraffic | null;
   from: {
     stop_id?: string | null;
     stop_code?: string | null;
@@ -115,10 +117,54 @@ export interface Route {
   route_options?: string[];
   /** Cars on the Nairobi Expressway: estimated toll for the distance on it. */
   toll?: { estimate_kes: number; distance_m: number | null } | null;
+  /**
+   * Car / boda: live traffic (TomTom) and incidents on this route. Transit:
+   * only { source, live, delay_s }, the total of its legs' `traffic`.
+   */
+  traffic?: RouteTraffic | null;
   /** Boda boda: typical street fare range (negotiated, so an estimate). */
   fare?: { currency: "KES"; min: number; max: number; typical: number; estimate: true } | null;
   segments: RouteSegment[];
   safety?: { score: number; safer: boolean };
+}
+
+export interface TrafficIncident {
+  source: "tomtom";
+  type: "jam" | "accident" | "road_closed" | "lane_closed" | "roadworks" | "flooding" | "broken_down_vehicle" | "incident";
+  description: string;
+  from: string | null;
+  to: string | null;
+  road: string | null;
+  length_m: number | null;
+  delay_s: number | null;
+}
+
+export interface RouteTraffic {
+  /** "tomtom" when timed live; "reports" when only community reports colour it. */
+  source: "tomtom" | "reports" | null;
+  live: boolean;
+  level: "low" | "moderate" | "heavy" | null;
+  /** Extra time compared with empty roads. */
+  delay_s: number | null;
+  /** Compared with a usual day at this hour (negative = quicker than usual). */
+  vs_typical_s: number | null;
+  free_flow_s: number | null;
+  /** Up to 5, biggest delay first. */
+  incidents: TrafficIncident[];
+}
+
+/**
+ * A transit leg compared with a usual day at this hour. `delay_s` is the extra
+ * time already added to the leg's times (0 = usual traffic); `note` is set
+ * only when there is a delay: "~7 min slower than usual: stationary traffic
+ * on Thika Road".
+ */
+export interface LegTraffic {
+  source: "tomtom";
+  delay_s: number;
+  level: "low" | "moderate" | "heavy" | null;
+  note: string | null;
+  incident?: Omit<TrafficIncident, "source"> | null;
 }
 
 export type JourneyMode = "transit" | "bus" | "rail" | "walk" | "bicycle" | "car" | "motorbike";

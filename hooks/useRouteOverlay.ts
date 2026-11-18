@@ -192,6 +192,7 @@ export function useRouteOverlay(
                 platformCode: seg.from.platform_code ?? null,
                 landmark: asLandmark(seg.from.landmark)?.text ?? null,
                 nextDeparture: seg.next_departures?.[0] ?? null,
+                traffic: seg.traffic ?? null,
                 routeName: seg.route_name ?? undefined,
                 routeColor: color,
                 stops: seg.stops,
