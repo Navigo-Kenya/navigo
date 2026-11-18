@@ -92,7 +92,19 @@ export type PlaceCategoryKey =
   | "parking"
   | "store"
   | "pharmacy"
-  | "atm";
+  | "atm"
+  // Same glyphs as the map's POI badges, so a chip matches its pins.
+  | "hotel"
+  | "mall"
+  | "shopping"
+  | "attraction"
+  | "park"
+  | "entertainment"
+  | "nightlife"
+  | "sport"
+  | "school"
+  | "worship"
+  | "government";
 
 function RestaurantGlyph({ color }: { color: string }) {
   return (
@@ -199,6 +211,17 @@ const PLACE_GLYPHS: Record<PlaceCategoryKey, React.FC<{ color: string }>> = {
   store: StoreGlyph,
   pharmacy: PharmacyGlyph,
   atm: AtmGlyph,
+  hotel: LodgingGlyph,
+  mall: MallGlyph,
+  shopping: StoreGlyph,
+  attraction: AttractionGlyph,
+  park: ParkGlyph,
+  entertainment: EntertainmentGlyph,
+  nightlife: NightlifeGlyph,
+  sport: SportGlyph,
+  school: EducationGlyph,
+  worship: WorshipGlyph,
+  government: GovernmentGlyph,
 };
 
 /** Duotone icon for a quick-search place category. */
