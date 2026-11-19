@@ -1,162 +1,285 @@
+// app/(tabs)/favorite.tsx
+//
+// The Saved tab: KakaoMap's look (Home and Work up top, coloured lists),
+// Google Maps' ways (a list is a tap away, every place has its actions:
+// directions, change lists, remove; lists can be edited and deleted).
 import { useAuthStore } from "@/store/authStore";
 import { sToMin } from "@/utils/mapHelpers";
 import { useSavedStore } from "@/store/savedStore";
 import { useJourneyStore, UnifiedLocation } from "@/store/journeyStore";
+import { useExploreSearchStore } from "@/store/exploreSearchStore";
+import { useMapIntentStore } from "@/store/mapIntentStore";
+import {
+  allLists,
+  listMeta,
+  useSavedListsStore,
+  type SavedListMeta,
+} from "@/store/savedListsStore";
 import { SavedJourney, SavedPlace } from "@/services/user";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import * as Haptics from "expo-haptics";
+import { useEffect, useMemo, useState } from "react";
 import {
+  ActionSheetIOS,
   Alert,
+  KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
   useColorScheme,
 } from "react-native";
 import { Icon } from "@/components/icons/Icon";
-const ORANGE = "#FF6F00";
-const BLACK  = "#1C1C1E";
-const GREY   = "#8E8E93";
+import { PressableScale } from "@/components/ui/PressableScale";
+import { ListTile } from "@/components/saved/ListTile";
+import { NewListForm, type ListDraft } from "@/components/saved/NewListForm";
+import { SaveToListSheet } from "@/components/saved/SaveToListSheet";
+import type { SaveTarget } from "@/store/savedStore";
 
-const DEFAULT_LISTS = [
-  { key: "favorites",    label: "Favorites",    icon: "heart-outline"     as const, color: "#EF4444" },
-  { key: "want_to_go",   label: "Want to go",   icon: "flag-outline"      as const, color: "#10B981" },
-  { key: "travel_plans", label: "Travel plans", icon: "briefcase-outline" as const, color: "#3B82F6" },
-  { key: "labeled",      label: "Labeled",      icon: "pricetag-outline"  as const, color: GREY },
-] as const;
+const ORANGE = "#FF6F00";
+const RECENT_COUNT = 5;
 
 function makeC(dark: boolean) {
   return {
-    bg:       dark ? "#0F0F0F" : "#FFFFFF",
-    card:     dark ? "#1C1C1E" : "#FFFFFF",
-    text:     dark ? "#FFFFFF" : BLACK,
-    sub:      dark ? GREY      : "#6B7280",
-    hairline: dark ? "#2C2C2E" : "#E5E7EB",
-    iconBg:   dark ? "#2C2C2E" : "#F2F2F7",
-    pill:     dark ? "rgba(255,111,0,0.18)" : "#FFF3E0",
-    pressed:  dark ? "#2C2C2E" : "#F2F2F7",
-    input:    dark ? "#2C2C2E" : "#F2F2F7",
+    bg:       dark ? "#18181B" : "#FFFFFF",
+    card:     dark ? "#1F1F23" : "#FFFFFF",
+    text:     dark ? "#F4F4F5" : "#111827",
+    sub:      dark ? "#A1A1AA" : "#6B7280",
+    hairline: dark ? "#2A2A2F" : "#EEF0F3",
+    chip:     dark ? "#27272A" : "#F3F4F6",
+    pressed:  dark ? "#27272A" : "#F3F4F6",
   };
 }
+type Palette = ReturnType<typeof makeC>;
 
-function mapboxThumb(lng: number, lat: number): string {
+function mapboxJourneyThumb(fromLng: number, fromLat: number, toLng: number, toLat: number, dark: boolean): string {
   const token = process.env.EXPO_PUBLIC_MAPBOX_TOKEN ?? "";
-  return `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/${lng},${lat},15/300x160@2x?access_token=${token}`;
-}
-
-function mapboxJourneyThumb(fromLng: number, fromLat: number, toLng: number, toLat: number): string {
-  const token = process.env.EXPO_PUBLIC_MAPBOX_TOKEN ?? "";
+  const style = dark ? "dark-v11" : "streets-v12";
   return (
-    `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/` +
+    `https://api.mapbox.com/styles/v1/mapbox/${style}/static/` +
     `pin-s+FF6F00(${fromLng},${fromLat}),pin-s+10B981(${toLng},${toLat})` +
     `/auto/320x130@2x?padding=35&access_token=${token}`
   );
 }
 
-function formatDuration(secs: number): string {
-  return sToMin(secs);
+function timeAgo(iso: string): string {
+  const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  if (d <= 0) return "Today";
+  if (d === 1) return "Yesterday";
+  if (d < 7) return `${d} days ago`;
+  if (d < 30) return `${Math.floor(d / 7)} wk ago`;
+  return new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-// ── PlaceCard ─────────────────────────────────────────────────────────────────
+/** One choice list, as an action sheet on iOS and an alert elsewhere. */
+function choose(title: string, options: { label: string; destructive?: boolean; run: () => void }[]) {
+  if (Platform.OS === "ios") {
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title,
+        options: [...options.map((o) => o.label), "Cancel"],
+        cancelButtonIndex: options.length,
+        destructiveButtonIndex: options.findIndex((o) => o.destructive),
+      },
+      (i) => { if (i < options.length) options[i].run(); }
+    );
+    return;
+  }
+  Alert.alert(title, undefined, [
+    ...options.map((o) => ({ text: o.label, style: o.destructive ? ("destructive" as const) : undefined, onPress: o.run })),
+    { text: "Cancel", style: "cancel" as const },
+  ]);
+}
 
-function PlaceCard({ place, C, onLongPress }: { place: SavedPlace; C: ReturnType<typeof makeC>; onLongPress: () => void }) {
-  const def = DEFAULT_LISTS.find((l) => l.key === place.list);
-  const meta = def ?? { icon: "pricetag-outline" as const, color: "#8B5CF6", label: place.list ?? "Saved" };
+// ── Home / Work ───────────────────────────────────────────────────────────────
+
+function PinCard({ pin, place, C, onPress, onLongPress }: {
+  pin: "home" | "work";
+  place?: SavedPlace;
+  C: Palette;
+  onPress: () => void;
+  onLongPress?: () => void;
+}) {
+  return (
+    <PressableScale
+      onPress={onPress}
+      onLongPress={onLongPress}
+      containerStyle={{ flex: 1 }}
+      style={[s.pinCard, { backgroundColor: C.chip }]}
+      accessibilityRole="button"
+      accessibilityLabel={place ? `Directions to ${pin === "home" ? "Home" : "Work"}, ${place.name}` : `Set ${pin === "home" ? "Home" : "Work"}`}
+    >
+      <View style={[s.pinIcon, { backgroundColor: place ? ORANGE : C.card }]}>
+        <Icon name={pin === "home" ? "home" : "business"} size={17} color={place ? "#FFFFFF" : ORANGE} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[s.pinTitle, { color: C.text }]}>{pin === "home" ? "Home" : "Work"}</Text>
+        <Text style={[s.pinSub, { color: place ? C.sub : ORANGE }]} numberOfLines={1}>
+          {place ? place.name : "Set location"}
+        </Text>
+      </View>
+    </PressableScale>
+  );
+}
+
+// ── A list row ────────────────────────────────────────────────────────────────
+
+function ListRow({ list, count, C, onPress, onMore }: {
+  list: SavedListMeta;
+  count: number;
+  C: Palette;
+  onPress: () => void;
+  onMore: () => void;
+}) {
   return (
     <Pressable
-      style={[s.placeCard, { backgroundColor: C.card }]}
-      onLongPress={onLongPress}
-      delayLongPress={500}
+      onPress={onPress}
+      style={({ pressed }) => [s.listRow, { backgroundColor: pressed ? C.pressed : "transparent" }]}
+      accessibilityRole="button"
+      accessibilityLabel={`${list.name}, ${count} place${count === 1 ? "" : "s"}`}
     >
-      <Image
-        source={{ uri: mapboxThumb(place.lng, place.lat) }}
-        style={s.placeThumb}
-        contentFit="cover"
-      />
-      <View style={s.placeBody}>
-        <Text style={[s.placeTitle, { color: C.text }]} numberOfLines={1}>{place.name}</Text>
-        {place.category ? (
-          <Text style={[s.placeSub, { color: C.sub }]} numberOfLines={1}>{place.category}</Text>
-        ) : null}
-        <View style={[s.placeBadge, { backgroundColor: meta.color + "18" }]}>
-          <Icon name={meta.icon} size={11} color={meta.color} />
-          <Text style={[s.placeBadgeText, { color: meta.color }]}>
-            {def?.label ?? (place.list ?? "Saved")}
-          </Text>
-        </View>
+      <ListTile icon={list.icon} color={list.color} size={42} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[s.listTitle, { color: C.text }]} numberOfLines={1}>{list.name}</Text>
+        <Text style={[s.listSub, { color: C.sub }]}>
+          {count === 0 ? "Empty" : `${count} place${count === 1 ? "" : "s"}`} · Private
+        </Text>
       </View>
+      <Pressable onPress={onMore} hitSlop={10} style={s.more} accessibilityLabel={`${list.name} options`}>
+        <Icon name="ellipsis-horizontal" size={18} color={C.sub} />
+      </Pressable>
     </Pressable>
   );
 }
 
-// ── JourneyCard ───────────────────────────────────────────────────────────────
+// ── A saved place ─────────────────────────────────────────────────────────────
 
-function JourneyCard({ journey, C, onPress, onLongPress }: { journey: SavedJourney; C: ReturnType<typeof makeC>; onPress: () => void; onLongPress: () => void }) {
-  const segs     = journey.route?.segments ?? [];
-  const date     = new Date(journey.created_at).toLocaleDateString([], { month: "short", day: "numeric" });
-  const thumbUri = mapboxJourneyThumb(journey.from_lng, journey.from_lat, journey.to_lng, journey.to_lat);
-
+function PlaceRow({ place, lists, C, onPress, onMore }: {
+  place: SavedPlace;
+  /** The lists it's in (a place can be in several). */
+  lists: SavedListMeta[];
+  C: Palette;
+  onPress: () => void;
+  onMore: () => void;
+}) {
+  const first = lists[0];
   return (
     <Pressable
-      style={({ pressed }) => [s.journeyCard, { backgroundColor: C.card, opacity: pressed ? 0.9 : 1 }]}
       onPress={onPress}
-      onLongPress={onLongPress}
-      delayLongPress={500}
+      onLongPress={onMore}
+      delayLongPress={350}
+      style={({ pressed }) => [s.placeRow, { backgroundColor: pressed ? C.pressed : "transparent" }]}
+      accessibilityRole="button"
+      accessibilityLabel={`${place.name}, open on the map`}
     >
-      {/* Map thumbnail with from/to pins */}
-      <Image source={{ uri: thumbUri }} style={s.journeyThumb} contentFit="cover" />
-
-      <View style={s.journeyBody}>
-        {journey.label ? (
-          <Text style={[s.journeyLabel, { color: ORANGE }]} numberOfLines={1}>{journey.label}</Text>
-        ) : null}
-
-        {/* From / To */}
-        <View style={s.journeyRoute}>
-          <View style={s.routeDots}>
-            <View style={s.dotFrom} />
-            <View style={[s.dotLine, { backgroundColor: C.hairline }]} />
-            <View style={[s.dotTo, { borderColor: C.sub }]} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[s.journeyLeg, { color: C.text }]} numberOfLines={1}>{journey.from_name}</Text>
-            <View style={{ height: 10 }} />
-            <Text style={[s.journeyLeg, { color: C.sub }]} numberOfLines={1}>{journey.to_name}</Text>
-          </View>
+      {place.type === "stop" ? (
+        <View style={[s.stopTile, { backgroundColor: "#2563EB1F" }]}>
+          <Icon name="bus" size={18} color="#2563EB" />
         </View>
-
-        {/* Segment chips + duration + date */}
-        <View style={s.journeyFooter}>
-          <View style={s.journeyChips}>
-            {segs.slice(0, 4).map((seg: any, i: number) => (
-              <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
-                {i > 0 && <Icon name="chevron-forward" size={9} color={C.sub} />}
-                {seg.mode === "WALK" ? (
-                  <View style={[s.walkChip, { backgroundColor: C.pressed }]}>
-                    <Icon name="walk" size={10} color={C.sub} />
-                    <Text style={[s.chipText, { color: C.sub }]}>
-                      {Math.max(1, Math.round((seg.duration ?? 0) / 60))}m
-                    </Text>
-                  </View>
-                ) : (
-                  <View style={[s.busChip, { backgroundColor: ORANGE + "15" }]}>
-                    <Text style={[s.chipText, { color: ORANGE }]}>{seg.route_name ?? "Bus"}</Text>
-                  </View>
-                )}
-              </View>
-            ))}
-          </View>
-          <View style={{ alignItems: "flex-end" }}>
-            <Text style={s.journeyDuration}>{formatDuration(journey.duration)}</Text>
-            <Text style={[s.journeyDate, { color: C.sub }]}>{date}</Text>
-          </View>
+      ) : (
+        <ListTile icon={first?.icon ?? "bookmark"} color={first?.color ?? ORANGE} size={40} />
+      )}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[s.placeTitle, { color: C.text }]} numberOfLines={1}>{place.name}</Text>
+        <View style={s.placeMeta}>
+          {lists.slice(0, 3).map((l) => (
+            <View key={l.key} style={[s.dot, { backgroundColor: l.color }]} />
+          ))}
+          <Text style={[s.placeSub, { color: C.sub }]} numberOfLines={1}>
+            {[place.category, lists.map((l) => l.name).join(", "), timeAgo(place.created_at)].filter(Boolean).join(" · ")}
+          </Text>
         </View>
       </View>
+      <Pressable onPress={onMore} hitSlop={10} style={s.more} accessibilityLabel={`${place.name} options`}>
+        <Icon name="ellipsis-horizontal" size={18} color={C.sub} />
+      </Pressable>
     </Pressable>
+  );
+}
+
+// ── A saved route ─────────────────────────────────────────────────────────────
+
+function JourneyCard({ journey, C, dark, onPress, onLongPress }: {
+  journey: SavedJourney;
+  C: Palette;
+  dark: boolean;
+  onPress: () => void;
+  onLongPress: () => void;
+}) {
+  const segs = journey.route?.segments ?? [];
+  return (
+    <PressableScale
+      pressedScale={0.97}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      style={[s.journeyCard, { backgroundColor: C.card, borderColor: C.hairline }]}
+    >
+      <Image
+        source={{ uri: mapboxJourneyThumb(journey.from_lng, journey.from_lat, journey.to_lng, journey.to_lat, dark) }}
+        style={s.journeyThumb}
+        contentFit="cover"
+      />
+      <View style={s.journeyBody}>
+        {journey.label ? <Text style={s.journeyLabel} numberOfLines={1}>{journey.label}</Text> : null}
+        <Text style={[s.journeyLeg, { color: C.text }]} numberOfLines={1}>{journey.from_name}</Text>
+        <Text style={[s.journeyTo, { color: C.sub }]} numberOfLines={1}>→ {journey.to_name}</Text>
+        <View style={s.journeyFooter}>
+          <View style={s.journeyChips}>
+            {segs.slice(0, 4).map((seg: any, i: number) =>
+              seg.mode === "WALK" ? (
+                <View key={i} style={[s.walkChip, { backgroundColor: C.chip }]}>
+                  <Icon name="walk" size={10} color={C.sub} />
+                  <Text style={[s.chipText, { color: C.sub }]}>{Math.max(1, Math.round((seg.duration ?? 0) / 60))}m</Text>
+                </View>
+              ) : (
+                <View key={i} style={[s.busChip, { backgroundColor: ORANGE + "18" }]}>
+                  <Text style={[s.chipText, { color: ORANGE }]}>{seg.route_name ?? "Bus"}</Text>
+                </View>
+              )
+            )}
+          </View>
+          <Text style={s.journeyDuration}>{sToMin(journey.duration)}</Text>
+        </View>
+      </View>
+    </PressableScale>
+  );
+}
+
+// ── Edit a list ───────────────────────────────────────────────────────────────
+
+function EditListModal({ list, dark, onClose, onSave }: {
+  list: SavedListMeta | null;
+  dark: boolean;
+  onClose: () => void;
+  onSave: (draft: ListDraft) => Promise<string | null>;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => setError(null), [list]);
+  return (
+    <Modal visible={!!list} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={s.modalWrap}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        {list ? (
+          <View style={[s.modalCard, { backgroundColor: dark ? "#18181B" : "#FFFFFF" }]}>
+            <Text style={[s.modalTitle, { color: dark ? "#F4F4F5" : "#111827" }]}>
+              {list.builtIn ? `Style "${list.name}"` : "Edit list"}
+            </Text>
+            <NewListForm
+              dark={dark}
+              initial={{ name: list.name, color: list.color, icon: list.icon }}
+              submitLabel="Save"
+              error={error}
+              onCancel={onClose}
+              onSubmit={async (d) => setError(await onSave(d))}
+            />
+          </View>
+        ) : null}
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
@@ -166,363 +289,293 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
   const router = useRouter();
   const dark = useColorScheme() === "dark";
   const C = makeC(dark);
-  const { user, avatarTs } = useAuthStore();
-  const { places, journeys, customLists, fetch: fetchSaved, removePlace, removeJourney, addCustomList, removeCustomList } = useSavedStore();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const {
+    places, journeys, customLists, fetch: fetchSaved, removePlace, removeJourney,
+    renameList, deleteListPlaces,
+  } = useSavedStore();
+  const { custom, create, update, remove, migrate } = useSavedListsStore();
   const setJourney = useJourneyStore((s) => s.setJourney);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<SavedListMeta | null>(null);
+  const [changing, setChanging] = useState<SaveTarget | null>(null);
 
-  // Custom list input (Android/fallback)
-  const [showNewListInput, setShowNewListInput] = useState(false);
-  const [newListName, setNewListName]           = useState("");
+  useEffect(() => { if (isAuthenticated) fetchSaved().catch(() => {}); }, [isAuthenticated, fetchSaved]);
+  useEffect(() => { migrate(customLists); }, [customLists, migrate]);
 
-  useEffect(() => { fetchSaved().catch(() => {}); }, [fetchSaved]);
+  const listPlaces = useMemo(() => places.filter((p) => p.list !== null && p.pin === null), [places]);
+  const lists = useMemo(() => allLists(custom, listPlaces.map((p) => p.list as string)), [custom, listPlaces]);
+  const home = places.find((p) => p.pin === "home");
+  const work = places.find((p) => p.pin === "work");
 
-  const initials = user?.name
-    ? user.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()
-    : "?";
+  // One row per place (a place in three lists is three rows on the API), newest first.
+  const recent = useMemo(() => {
+    const byPlace = new Map<string, { place: SavedPlace; lists: SavedListMeta[] }>();
+    for (const p of [...listPlaces].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))) {
+      const key = p.place_id ?? `${p.lat},${p.lng}`;
+      const hit = byPlace.get(key);
+      const meta = listMeta(p.list as string, custom);
+      if (hit) { if (!hit.lists.some((l) => l.key === meta.key)) hit.lists.push(meta); }
+      else byPlace.set(key, { place: p, lists: [meta] });
+    }
+    return [...byPlace.values()];
+  }, [listPlaces, custom]);
 
-  // Only list-type places (not home/work pins)
-  const listPlaces = places.filter((p) => p.list !== null && p.pin === null);
-  const isEmpty    = listPlaces.length === 0 && journeys.length === 0;
+  const countOf = (key: string) => listPlaces.filter((p) => p.list === key).length;
 
-  const confirmRemovePlace = (place: SavedPlace) => {
-    Alert.alert(
-      "Remove from saved",
-      `Remove "${place.name}"?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Remove", style: "destructive", onPress: () => removePlace(place.id) },
-      ]
-    );
+  const openOnMap = (p: SavedPlace) => {
+    Haptics.selectionAsync();
+    onClose?.();
+    if (p.type === "stop" && p.place_id) {
+      useMapIntentStore.getState().show({ kind: "stop", stop: { id: p.place_id, name: p.name, lat: p.lat, lng: p.lng } as any });
+      return;
+    }
+    const place = { id: p.place_id ?? `saved:${p.id}`, name: p.name, address: "", category: p.category ?? "", lat: p.lat, lng: p.lng };
+    useExploreSearchStore.getState().startSearch({ query: p.name, activeTab: "place", places: [place], selectedPlace: place });
   };
 
-  const confirmRemoveJourney = (journey: SavedJourney) => {
-    const label = journey.label ?? `${journey.from_name} → ${journey.to_name}`;
-    Alert.alert(
-      "Remove journey",
-      `Remove "${label}"?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Remove", style: "destructive", onPress: () => removeJourney(journey.id) },
-      ]
-    );
+  const directionsTo = (p: { name: string; lat: number; lng: number }) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    onClose?.();
+    router.push({ pathname: "/route" as any, params: { tLat: String(p.lat), tLng: String(p.lng), tName: p.name } });
   };
+
+  const pinPress = (pin: "home" | "work", place?: SavedPlace) => {
+    if (place) directionsTo(place);
+    else router.push({ pathname: "/(account)/pick-place", params: { pin } } as any);
+  };
+  const pinMore = (pin: "home" | "work", place?: SavedPlace) => {
+    if (!place) return;
+    choose(pin === "home" ? "Home" : "Work", [
+      { label: "Change location", run: () => router.push({ pathname: "/(account)/pick-place", params: { pin } } as any) },
+      { label: `Remove ${pin === "home" ? "Home" : "Work"}`, destructive: true, run: () => removePlace(place.id).catch(() => {}) },
+    ]);
+  };
+
+  const placeMore = (p: SavedPlace, inLists: SavedListMeta[]) => {
+    const rows = listPlaces.filter((r) => (r.place_id ?? `${r.lat},${r.lng}`) === (p.place_id ?? `${p.lat},${p.lng}`));
+    choose(p.name, [
+      { label: "Directions", run: () => directionsTo(p) },
+      { label: "Show on map", run: () => openOnMap(p) },
+      ...(p.place_id
+        ? [{ label: "Change lists", run: () => setChanging({ name: p.name, lat: p.lat, lng: p.lng, type: p.type, place_id: p.place_id!, category: p.category }) }]
+        : []),
+      {
+        label: inLists.length > 1 ? `Remove from ${inLists.length} lists` : "Remove",
+        destructive: true,
+        run: () => { Promise.all(rows.map((r) => removePlace(r.id))).catch(() => {}); },
+      },
+    ]);
+  };
+
+  const listMore = (l: SavedListMeta) => {
+    const n = countOf(l.key);
+    choose(l.name, [
+      { label: n ? `View ${n} place${n === 1 ? "" : "s"}` : "Open list", run: () => viewList(l.key) },
+      { label: l.builtIn ? "Change colour and icon" : "Edit list", run: () => setEditing(l) },
+      ...(!l.builtIn
+        ? [{
+            label: "Delete list",
+            destructive: true,
+            run: () => Alert.alert(
+              `Delete "${l.name}"?`,
+              n ? `Its ${n} saved place${n === 1 ? "" : "s"} will be removed from this list. Places in other lists stay there.` : undefined,
+              [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Delete",
+                  style: "destructive",
+                  onPress: () => { deleteListPlaces(l.key).catch(() => {}); remove(l.key); },
+                },
+              ]
+            ),
+          }]
+        : []),
+    ]);
+  };
+
+  const saveEdit = async (d: ListDraft): Promise<string | null> => {
+    if (!editing) return null;
+    const name = d.name.replace(/\s+/g, " ").trim();
+    const renamed = !editing.builtIn && name && name !== editing.name;
+    if (renamed && lists.some((l) => l.key !== editing.key && (l.name.toLowerCase() === name.toLowerCase() || l.key.toLowerCase() === name.toLowerCase()))) {
+      return "You already have a list with this name.";
+    }
+    if (renamed) {
+      try {
+        await renameList(editing.key, name);
+      } catch {
+        return "Couldn't rename the list. Check your connection.";
+      }
+      remove(editing.key);
+      update(name, { name, color: d.color, icon: d.icon });
+    } else {
+      update(editing.key, { color: d.color, icon: d.icon });
+    }
+    setEditing(null);
+    return null;
+  };
+
+  const submitNew = (d: ListDraft) => {
+    if (!create(d.name, d.color, d.icon)) { setCreateError("You already have a list with this name."); return; }
+    setCreating(false);
+    setCreateError(null);
+  };
+
+  const viewList = (key: string) => router.push({ pathname: "/(account)/saved-places", params: { filter: key } } as any);
 
   const loadJourneyOnMap = (journey: SavedJourney) => {
-    const fromLoc: UnifiedLocation = {
-      _type: journey.from_type,
-      id:    journey.from_id ?? journey.from_name,
-      name:  journey.from_name,
-      lat:   journey.from_lat,
-      lng:   journey.from_lng,
-    };
-    
-    const toLoc: UnifiedLocation = {
-      _type: journey.to_type,
-      id:    journey.to_id ?? journey.to_name,
-      name:  journey.to_name,
-      lat:   journey.to_lat,
-      lng:   journey.to_lng,
-    };
-
+    const fromLoc: UnifiedLocation = { _type: journey.from_type, id: journey.from_id ?? journey.from_name, name: journey.from_name, lat: journey.from_lat, lng: journey.from_lng };
+    const toLoc: UnifiedLocation = { _type: journey.to_type, id: journey.to_id ?? journey.to_name, name: journey.to_name, lat: journey.to_lat, lng: journey.to_lng };
     setJourney(fromLoc, toLoc, journey.route);
     onClose?.();
   };
 
-  // Navigate to saved-places screen filtered by list
-  const viewList = (listKey: string) => {
-    router.push({ pathname: "/(account)/saved-places", params: { filter: listKey } } as any);
+  const journeyMore = (journey: SavedJourney) => {
+    const label = journey.label ?? `${journey.from_name} → ${journey.to_name}`;
+    choose(label, [
+      { label: "Show on map", run: () => loadJourneyOnMap(journey) },
+      { label: "Remove", destructive: true, run: () => removeJourney(journey.id).catch(() => {}) },
+    ]);
   };
 
-  const showListOptions = (listKey: string, label: string, count: number, isCustom = false) => {
-    const buttons: any[] = [
-      { text: `View ${count} place${count !== 1 ? "s" : ""}`, onPress: () => viewList(listKey) },
-    ];
-    if (isCustom) {
-      buttons.push({
-        text: "Delete list",
-        style: "destructive" as const,
-        onPress: () => {
-          Alert.alert(`Delete "${label}"?`, "Places in this list won't be deleted, just untagged.", [
-            { text: "Cancel", style: "cancel" },
-            { text: "Delete", style: "destructive", onPress: () => removeCustomList(label) },
-          ]);
-        },
-      });
-    }
-    buttons.push({ text: "Cancel", style: "cancel" as const });
-    Alert.alert(label, `${count} place${count !== 1 ? "s" : ""} saved`, buttons);
-  };
-
-  const handleNewList = () => {
-    if (Platform.OS === "ios") {
-      Alert.prompt(
-        "New List",
-        "Give your list a name",
-        (name) => { if (name?.trim()) addCustomList(name.trim()); },
-        "plain-text",
-        "",
-      );
-    } else {
-      setShowNewListInput(true);
-      setNewListName("");
-    }
-  };
-
-  const submitNewList = () => {
-    if (newListName.trim()) addCustomList(newListName.trim());
-    setShowNewListInput(false);
-    setNewListName("");
-  };
-
-  // Combine default + custom list metadata
-  const allListMeta = [
-    ...DEFAULT_LISTS,
-    ...customLists.map((l) => ({
-      key:   l,
-      label: l,
-      icon:  "list-outline" as const,
-      color: "#8B5CF6",
-    })),
-  ];
+  const isEmpty = listPlaces.length === 0 && journeys.length === 0 && !home && !work;
 
   return (
     <View style={[s.root, { backgroundColor: C.bg }]}>
-      {/* Header */}
       <View style={s.header}>
-        <Text style={[s.headerTitle, { color: C.text }]}>You</Text>
-        <Pressable
-          style={[s.iconBtn, { backgroundColor: C.iconBg }]}
-          onPress={() => router.push("/(account)/notification-inbox" as any)}
-          hitSlop={8}
+        <Text style={[s.headerTitle, { color: C.text }]}>Saved</Text>
+        <PressableScale
+          onPress={() => { Haptics.selectionAsync(); setCreating((c) => !c); setCreateError(null); }}
+          style={[s.newBtn, { backgroundColor: ORANGE + "1A" }]}
+          accessibilityRole="button"
         >
-          <Icon name="notifications-outline" size={20} color={C.text} />
-        </Pressable>
+          <Icon name={creating ? "close" : "add"} size={16} color={ORANGE} />
+          <Text style={s.newBtnText}>{creating ? "Cancel" : "New list"}</Text>
+        </PressableScale>
       </View>
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={s.scrollContent}
-      >
-        {/* Mini profile card */}
-        <Pressable
-          style={[s.profileCard, { backgroundColor: C.card }]}
-          onPress={() => router.push("/(account)/profile-details" as any)}
-        >
-          {user?.avatar ? (
-            <Image source={{ uri: `${user.avatar}?_v=${avatarTs}` }} style={s.profileAvatar} contentFit="cover" />
-          ) : (
-            <View style={[s.profileAvatar, s.profileAvatarFallback]}>
-              <Text style={s.profileInitials}>{initials}</Text>
-            </View>
-          )}
-          <View style={{ flex: 1 }}>
-            <Text style={[s.profileName, { color: C.text }]} numberOfLines={1}>{user?.name ?? "—"}</Text>
-            <Text style={[s.profileEmail, { color: C.sub }]} numberOfLines={1}>{user?.email ?? ""}</Text>
+      <View style={s.body}>
+        {creating ? (
+          <View style={[s.card, { backgroundColor: C.card, borderColor: C.hairline, padding: 14 }]}>
+            <NewListForm dark={dark} error={createError} onSubmit={submitNew} onCancel={() => { setCreating(false); setCreateError(null); }} />
           </View>
-          <Icon name="chevron-forward" size={18} color={C.sub} />
-        </Pressable>
+        ) : null}
 
-        {/* New list button */}
-        <Pressable
-          style={[s.newListBtn, { backgroundColor: C.pill }]}
-          onPress={handleNewList}
-        >
-          <Icon name="add" size={18} color={ORANGE} />
-          <Text style={s.newListText}>New list</Text>
-        </Pressable>
-
-        {/* Android inline new-list input */}
-        {showNewListInput && (
-          <View style={[s.newListInputRow, { backgroundColor: C.card, borderColor: C.hairline }]}>
-            <TextInput
-              style={[s.newListInput, { color: C.text }]}
-              placeholder="List name…"
-              placeholderTextColor={C.sub}
-              value={newListName}
-              onChangeText={setNewListName}
-              autoFocus
-              returnKeyType="done"
-              onSubmitEditing={submitNewList}
-            />
-            <Pressable onPress={submitNewList} style={[s.newListInputAdd, { backgroundColor: ORANGE }]}>
-              <Text style={s.newListInputAddText}>Add</Text>
-            </Pressable>
-            <Pressable onPress={() => setShowNewListInput(false)} hitSlop={8}>
-              <Icon name="close" size={18} color={C.sub} />
-            </Pressable>
-          </View>
-        )}
-
-        {/* Lists card, default + custom */}
-        <View style={[s.listsCard, { backgroundColor: C.card }]}>
-          {allListMeta.map((item, idx) => {
-            const count    = listPlaces.filter((p) => p.list === item.key).length;
-            const isCustom = customLists.includes(item.key);
-            return (
-              <View key={item.key}>
-                {idx > 0 && <View style={[s.sep, { backgroundColor: C.hairline }]} />}
-                <Pressable
-                  style={({ pressed }) => [s.listRow, { backgroundColor: pressed ? C.pressed : "transparent" }]}
-                  onPress={() => viewList(item.key)}
-                >
-                  <View style={[s.listIconWrap, { backgroundColor: item.color + "22" }]}>
-                    <Icon name={item.icon} size={18} color={item.color} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[s.listTitle, { color: C.text }]}>{item.label}</Text>
-                    <Text style={[s.listSub, { color: C.sub }]}>{count} place{count !== 1 ? "s" : ""}</Text>
-                  </View>
-                  <Pressable
-                    hitSlop={8}
-                    onPress={() => showListOptions(item.key, item.label, count, isCustom)}
-                  >
-                    <Icon name="ellipsis-horizontal" size={18} color={C.sub} />
-                  </Pressable>
-                </Pressable>
-              </View>
-            );
-          })}
+        <View style={s.pins}>
+          <PinCard pin="home" place={home} C={C} onPress={() => pinPress("home", home)} onLongPress={() => pinMore("home", home)} />
+          <PinCard pin="work" place={work} C={C} onPress={() => pinPress("work", work)} onLongPress={() => pinMore("work", work)} />
         </View>
 
-        {/* Saved places, horizontal scroll + "See all" */}
-        {listPlaces.length > 0 && (
+        <Text style={[s.section, { color: C.sub }]}>YOUR LISTS</Text>
+        <View style={[s.card, { backgroundColor: C.card, borderColor: C.hairline }]}>
+          {lists.map((l, i) => (
+            <View key={l.key}>
+              {i > 0 ? <View style={[s.sep, { backgroundColor: C.hairline }]} /> : null}
+              <ListRow list={l} count={countOf(l.key)} C={C} onPress={() => viewList(l.key)} onMore={() => listMore(l)} />
+            </View>
+          ))}
+        </View>
+
+        {recent.length > 0 ? (
           <>
-            <View style={s.sectionHeader}>
-              <Text style={[s.sectionTitle, { color: C.text }]}>Saved places</Text>
+            <View style={s.sectionRow}>
+              <Text style={[s.section, { color: C.sub }]}>RECENTLY SAVED</Text>
               <Pressable onPress={() => router.push("/(account)/saved-places" as any)} hitSlop={8}>
                 <Text style={s.seeAll}>See all</Text>
               </Pressable>
             </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={s.hScrollContent}
-            >
-              {listPlaces.slice(0, 12).map((place) => (
-                <PlaceCard
-                  key={place.id}
-                  place={place}
-                  C={C}
-                  onLongPress={() => confirmRemovePlace(place)}
-                />
+            <View style={[s.card, { backgroundColor: C.card, borderColor: C.hairline }]}>
+              {recent.slice(0, RECENT_COUNT).map(({ place, lists: inLists }, i) => (
+                <View key={place.id}>
+                  {i > 0 ? <View style={[s.sep, { backgroundColor: C.hairline }]} /> : null}
+                  <PlaceRow place={place} lists={inLists} C={C} onPress={() => openOnMap(place)} onMore={() => placeMore(place, inLists)} />
+                </View>
               ))}
-            </ScrollView>
+            </View>
           </>
-        )}
+        ) : null}
 
-        {/* Saved journeys */}
-        {journeys.length > 0 && (
+        {journeys.length > 0 ? (
           <>
-            <Text style={[s.sectionTitle, { color: C.text }]}>Saved journeys</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={s.hScrollContent}
-            >
-              {journeys.map((journey) => (
-                <JourneyCard
-                  key={journey.id}
-                  journey={journey}
-                  C={C}
-                  onPress={() => loadJourneyOnMap(journey)}
-                  onLongPress={() => confirmRemoveJourney(journey)}
-                />
+            <Text style={[s.section, { color: C.sub }]}>SAVED ROUTES</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.hScroll}>
+              {journeys.map((j) => (
+                <JourneyCard key={j.id} journey={j} C={C} dark={dark} onPress={() => loadJourneyOnMap(j)} onLongPress={() => journeyMore(j)} />
               ))}
             </ScrollView>
           </>
-        )}
+        ) : null}
 
-        {/* Empty state */}
-        {isEmpty && (
-          <View style={s.emptyState}>
-            <Icon name="bookmark-outline" size={56} color={C.sub} />
-            <Text style={[s.emptyTitle, { color: C.text }]}>Save places you love</Text>
+        {isEmpty ? (
+          <View style={s.empty}>
+            <ListTile icon="bookmark" color={ORANGE} size={56} />
+            <Text style={[s.emptyTitle, { color: C.text }]}>Save the places you love</Text>
             <Text style={[s.emptySub, { color: C.sub }]}>
-              Tap the bookmark on any stop to save it here.
+              Tap Save on a place or the star on a stage, and pick a list. Set Home and Work for one-tap trips.
             </Text>
           </View>
-        )}
-      </ScrollView>
+        ) : null}
+      </View>
+
+      <EditListModal list={editing} dark={dark} onClose={() => setEditing(null)} onSave={saveEdit} />
+      <SaveToListSheet target={changing} onClose={() => setChanging(null)} />
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  root:          { flex: 1 },
-  // header:        { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingTop: 4, paddingBottom: 12 },
-  
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-  },
-  headerTitle:   { fontSize: 22, fontWeight: "700", letterSpacing: -0.5 },
-  iconBtn:       { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
-  scrollContent: { paddingHorizontal: 13, gap: 16, paddingBottom: 180 },
+  root: { flex: 1 },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12 },
+  headerTitle: { fontSize: 24, fontWeight: "800", letterSpacing: -0.5 },
+  newBtn: { flexDirection: "row", alignItems: "center", gap: 5, height: 36, paddingHorizontal: 14, borderRadius: 18 },
+  newBtnText: { color: ORANGE, fontSize: 14, fontWeight: "700" },
+  body: { paddingHorizontal: 14, gap: 12 },
 
-  // Profile card
-  profileCard:           { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 16, padding: 5 },
-  profileAvatar:         { width: 48, height: 48, borderRadius: 24 },
-  profileAvatarFallback: { backgroundColor: ORANGE, justifyContent: "center", alignItems: "center" },
-  profileInitials:       { color: "#FFF", fontSize: 17, fontWeight: "700" },
-  profileName:           { fontSize: 15, fontWeight: "600" },
-  profileEmail:          { fontSize: 13, marginTop: 1 },
+  pins: { flexDirection: "row", gap: 10 },
+  pinCard: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 18 },
+  pinIcon: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  pinTitle: { fontSize: 15, fontWeight: "700" },
+  pinSub: { fontSize: 12.5, marginTop: 1 },
 
-  // New list
-  newListBtn:  { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 13, borderRadius: 99 },
-  newListText: { fontSize: 15, fontWeight: "600", color: ORANGE },
+  section: { fontSize: 11, fontWeight: "700", letterSpacing: 0.6, marginTop: 4 },
+  sectionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4 },
+  seeAll: { fontSize: 13.5, fontWeight: "700", color: ORANGE },
+  card: { borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },
+  sep: { height: StyleSheet.hairlineWidth, marginLeft: 70 },
 
-  // New list input (Android)
-  newListInputRow: { flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 12, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
-  newListInput:    { flex: 1, fontSize: 15, paddingVertical: 4 },
-  newListInputAdd: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 99 },
-  newListInputAddText: { color: "#FFF", fontSize: 13, fontWeight: "700" },
+  listRow: { flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 14, paddingVertical: 11 },
+  listTitle: { fontSize: 16, fontWeight: "600" },
+  listSub: { fontSize: 12.5, marginTop: 1 },
+  more: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
 
-  // Lists card
-  listsCard: { borderRadius: 16, overflow: "hidden" },
-  listRow:   { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 14 },
-  listIconWrap: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  listTitle: { fontSize: 15, fontWeight: "600" },
-  listSub:   { fontSize: 12, marginTop: 1 },
-  sep:       { height: StyleSheet.hairlineWidth, marginHorizontal: 14 },
+  placeRow: { flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 14, paddingVertical: 11 },
+  stopTile: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  placeTitle: { fontSize: 15.5, fontWeight: "600" },
+  placeMeta: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
+  dot: { width: 7, height: 7, borderRadius: 4 },
+  placeSub: { fontSize: 12.5, flexShrink: 1, marginLeft: 2 },
 
-  sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  sectionTitle:  { fontSize: 18, fontWeight: "700", letterSpacing: -0.3 },
-  seeAll:        { fontSize: 14, fontWeight: "600", color: ORANGE },
-  hScrollContent: { gap: 12, paddingRight: 4 },
+  hScroll: { gap: 12, paddingRight: 4 },
+  journeyCard: { width: 240, borderRadius: 18, overflow: "hidden", borderWidth: StyleSheet.hairlineWidth },
+  journeyThumb: { width: "100%", height: 104 },
+  journeyBody: { padding: 12, gap: 3 },
+  journeyLabel: { fontSize: 11, fontWeight: "800", letterSpacing: 0.4, color: ORANGE, textTransform: "uppercase" },
+  journeyLeg: { fontSize: 13.5, fontWeight: "600" },
+  journeyTo: { fontSize: 13 },
+  journeyFooter: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 6 },
+  journeyChips: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 4, flex: 1 },
+  journeyDuration: { fontSize: 15, fontWeight: "800", color: ORANGE, letterSpacing: -0.3 },
+  walkChip: { flexDirection: "row", alignItems: "center", gap: 2, borderRadius: 99, paddingHorizontal: 6, paddingVertical: 2 },
+  busChip: { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  chipText: { fontSize: 10.5, fontWeight: "700" },
 
-  // Place card
-  placeCard:      { width: 160, borderRadius: 14, overflow: "hidden", shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
-  placeThumb:     { width: "100%", height: 95 },
-  placeBody:      { padding: 10, gap: 4 },
-  placeTitle:     { fontSize: 13, fontWeight: "600" },
-  placeSub:       { fontSize: 11 },
-  placeBadge:     { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 99, alignSelf: "flex-start", marginTop: 2 },
-  placeBadgeText: { fontSize: 11, fontWeight: "600" },
+  empty: { alignItems: "center", paddingTop: 24, paddingBottom: 12, gap: 10 },
+  emptyTitle: { fontSize: 18, fontWeight: "800" },
+  emptySub: { fontSize: 14, textAlign: "center", maxWidth: 290, lineHeight: 20 },
 
-  // Journey card
-  journeyCard:    { width: 250, borderRadius: 16, overflow: "hidden", shadowColor: "#000", shadowOpacity: 0.07, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 4 },
-  journeyThumb:   { width: "100%", height: 120 },
-  journeyBody:    { padding: 12, gap: 8 },
-  journeyLabel:   { fontSize: 11, fontWeight: "700", letterSpacing: 0.3, textTransform: "uppercase" },
-  journeyRoute:   { flexDirection: "row", alignItems: "flex-start", gap: 10 },
-  routeDots:      { alignItems: "center", gap: 0, paddingTop: 3 },
-  dotFrom:        { width: 8, height: 8, borderRadius: 4, backgroundColor: ORANGE },
-  dotLine:        { width: 1.5, height: 18, marginLeft: 3 },
-  dotTo:          { width: 8, height: 8, borderRadius: 2, borderWidth: 2, backgroundColor: "transparent" },
-  journeyLeg:     { fontSize: 12, fontWeight: "500", lineHeight: 16 },
-  journeyFooter:  { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: 8 },
-  journeyChips:   { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 3, flex: 1 },
-  journeyDuration:{ fontSize: 15, fontWeight: "700", color: ORANGE, letterSpacing: -0.3 },
-  journeyDate:    { fontSize: 10, marginTop: 1 },
-  walkChip:       { flexDirection: "row", alignItems: "center", gap: 2, borderRadius: 99, paddingHorizontal: 5, paddingVertical: 2 },
-  busChip:        { borderRadius: 5, paddingHorizontal: 5, paddingVertical: 2 },
-  chipText:       { fontSize: 10, fontWeight: "600" },
-
-  // Empty state
-  emptyState: { alignItems: "center", paddingTop: 60, gap: 12 },
-  emptyTitle: { fontSize: 19, fontWeight: "700" },
-  emptySub:   { fontSize: 14, textAlign: "center", maxWidth: 260 },
+  modalWrap: { flex: 1, justifyContent: "center", padding: 18, backgroundColor: "rgba(0,0,0,0.4)" },
+  modalCard: { borderRadius: 22, padding: 18, gap: 6 },
+  modalTitle: { fontSize: 18, fontWeight: "800", marginBottom: 4 },
 });

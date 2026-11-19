@@ -1,7 +1,11 @@
 // app/(account)/saved-places.tsx
 import { ScreenHeader } from "@/components/app/ScreenHeader";
 import { SavedPlace } from "@/services/user";
-import { useSavedStore } from "@/store/savedStore";
+import { useSavedStore, type SaveTarget } from "@/store/savedStore";
+import { allLists, listMeta, useSavedListsStore } from "@/store/savedListsStore";
+import { useExploreSearchStore } from "@/store/exploreSearchStore";
+import { useMapIntentStore } from "@/store/mapIntentStore";
+import { SaveToListSheet } from "@/components/saved/SaveToListSheet";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -23,12 +27,6 @@ import { Icon } from "@/components/icons/Icon";
 const ORANGE = "#FF6F00";
 const GREY   = "#8E8E93";
 
-const DEFAULT_LISTS = [
-  { key: "favorites",    label: "Favorites",    icon: "heart"      as const, color: "#EF4444" },
-  { key: "want_to_go",   label: "Want to go",   icon: "flag"       as const, color: "#10B981" },
-  { key: "travel_plans", label: "Travel plans", icon: "briefcase"  as const, color: "#3B82F6" },
-  { key: "labeled",      label: "Labeled",      icon: "pricetag"   as const, color: GREY },
-];
 
 function makeC(dark: boolean) {
   return {
@@ -67,6 +65,7 @@ function PlaceRow({
   listColor,
   listIcon,
   listLabel,
+  onPress,
   onLongPress,
 }: {
   place: SavedPlace;
@@ -74,13 +73,17 @@ function PlaceRow({
   listColor: string;
   listIcon: keyof typeof Ionicons.glyphMap;
   listLabel: string;
+  onPress: () => void;
   onLongPress: () => void;
 }) {
   return (
     <Pressable
       style={({ pressed }) => [s.placeRow, { backgroundColor: pressed ? C.pressed : C.card }]}
+      onPress={onPress}
       onLongPress={onLongPress}
       delayLongPress={400}
+      accessibilityRole="button"
+      accessibilityLabel={`${place.name}, open on the map`}
     >
       {/* Mapbox thumbnail */}
       <Image
@@ -104,7 +107,9 @@ function PlaceRow({
         </View>
       </View>
 
-      <Icon name="ellipsis-vertical" size={16} color={C.sub} style={{ marginLeft: 4 }} />
+      <Pressable onPress={onLongPress} hitSlop={10} accessibilityLabel={`${place.name} options`}>
+        <Icon name="ellipsis-vertical" size={16} color={C.sub} style={{ marginLeft: 4 }} />
+      </Pressable>
     </Pressable>
   );
 }
@@ -154,10 +159,13 @@ export default function SavedPlacesScreen() {
   const { filter: initialFilter } = useLocalSearchParams<{ filter?: string }>();
 
   const { places, removePlace, customLists, fetch: fetchSaved } = useSavedStore();
+  const { custom, migrate } = useSavedListsStore();
   const [activeFilter, setActiveFilter] = useState(initialFilter ?? "all");
   const [query, setQuery]               = useState("");
+  const [changing, setChanging]         = useState<SaveTarget | null>(null);
 
   useEffect(() => { fetchSaved().catch(() => {}); }, [fetchSaved]);
+  useEffect(() => { migrate(customLists); }, [customLists, migrate]);
 
   // Only list-type places (not home/work pins)
   const listPlaces = useMemo(
@@ -178,38 +186,48 @@ export default function SavedPlacesScreen() {
   const allCount = listPlaces.length;
   const filterTabs = [
     { key: "all", label: "All", count: allCount, color: ORANGE, icon: "bookmark" as const },
-    ...DEFAULT_LISTS.map((l) => ({
+    ...allLists(custom, listPlaces.map((p) => p.list as string)).map((l) => ({
       key:   l.key,
-      label: l.label,
+      label: l.name,
       count: listPlaces.filter((p) => p.list === l.key).length,
       color: l.color,
       icon:  l.icon,
-    })),
-    ...customLists.map((l) => ({
-      key:   l,
-      label: l,
-      count: listPlaces.filter((p) => p.list === l).length,
-      color: "#8B5CF6",
-      icon:  "list-outline" as const,
     })),
   ];
 
   const getListMeta = (list: string | null) => {
     if (!list) return { color: GREY, icon: "bookmark-outline" as const, label: "Saved" };
-    const def = DEFAULT_LISTS.find((l) => l.key === list);
-    if (def) return { color: def.color, icon: def.icon, label: def.label };
-    return { color: "#8B5CF6", icon: "list-outline" as const, label: list };
+    const m = listMeta(list, custom);
+    return { color: m.color, icon: m.icon, label: m.name };
   };
 
-  const confirmRemove = (place: SavedPlace) => {
-    Alert.alert(
-      "Remove from saved",
-      `Remove "${place.name}"?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Remove", style: "destructive", onPress: () => removePlace(place.id) },
-      ],
-    );
+  // Shown on the map: the tab sheets close when the map is asked to show something.
+  const openOnMap = (p: SavedPlace) => {
+    if (p.type === "stop" && p.place_id) {
+      useMapIntentStore.getState().show({ kind: "stop", stop: { id: p.place_id, name: p.name, lat: p.lat, lng: p.lng } as any });
+    } else {
+      const place = { id: p.place_id ?? `saved:${p.id}`, name: p.name, address: "", category: p.category ?? "", lat: p.lat, lng: p.lng };
+      useExploreSearchStore.getState().startSearch({ query: p.name, activeTab: "place", places: [place], selectedPlace: place });
+    }
+    router.dismissTo("/(tabs)/map" as any);
+  };
+
+  const placeActions = (place: SavedPlace) => {
+    const label = getListMeta(place.list).label;
+    Alert.alert(place.name, undefined, [
+      {
+        text: "Directions",
+        onPress: () => router.push({ pathname: "/route" as any, params: { tLat: String(place.lat), tLng: String(place.lng), tName: place.name } }),
+      },
+      ...(place.place_id
+        ? [{
+            text: "Change lists",
+            onPress: () => setChanging({ name: place.name, lat: place.lat, lng: place.lng, type: place.type, place_id: place.place_id!, category: place.category }),
+          }]
+        : []),
+      { text: `Remove from ${label}`, style: "destructive" as const, onPress: () => { removePlace(place.id).catch(() => {}); } },
+      { text: "Cancel", style: "cancel" as const },
+    ]);
   };
 
   const headerC = { bg: C.card, text: C.text, hairline: C.hairline };
@@ -288,12 +306,14 @@ export default function SavedPlacesScreen() {
                 listColor={meta.color}
                 listIcon={meta.icon}
                 listLabel={meta.label}
-                onLongPress={() => confirmRemove(item)}
+                onPress={() => openOnMap(item)}
+                onLongPress={() => placeActions(item)}
               />
             );
           }}
         />
       )}
+      <SaveToListSheet target={changing} onClose={() => setChanging(null)} />
     </View>
   );
 }

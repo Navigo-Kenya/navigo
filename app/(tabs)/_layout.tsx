@@ -20,10 +20,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNotificationStore } from "@/store/notificationStore";
 import { useAuthStore } from "@/store/authStore";
 import { useJourneyStore } from "@/store/journeyStore";
+import { useMapIntentStore } from "@/store/mapIntentStore";
+import { useExploreSearchStore } from "@/store/exploreSearchStore";
 import GuestWall from "@/components/app/GuestWall";
 import Profile from "./profile";
 import FavoriteScreen from "./favorite";
 import ContributeScreen from "./contribution";
+import TransitSheet from "@/components/transit/TransitSheet";
 import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
@@ -311,11 +314,9 @@ export default function TabsLayout() {
       setOpenSheet(null);
       setActiveTab("explore");
       router.push("/(tabs)/map" as any);
-    } else if (id === "transit") {
-      setOpenSheet(null);
-      setActiveTab("explore");
-      router.push("/(tabs)/search?tab=transit" as any);
     } else {
+      // Transit, Saved, Contribute and Profile open as sheets over the map.
+      // (Transit used to push "/(tabs)/search", a screen that doesn't exist.)
       setActiveTab(id);
       setOpenSheet(id);
     }
@@ -325,6 +326,16 @@ export default function TabsLayout() {
     setOpenSheet(null);
     setActiveTab("explore");
   };
+
+  // The map was asked to show a stop, a line or a place (from the Transit
+  // tab, a saved place): the tab sheet makes way for it.
+  const intentAt = useMapIntentStore((s) => s.intent?.at ?? null);
+  const selectedPlaceId = useExploreSearchStore((s) => s.selectedPlace?.id ?? null);
+  useEffect(() => {
+    if (intentAt == null && selectedPlaceId == null) return;
+    setOpenSheet(null);
+    setActiveTab("explore");
+  }, [intentAt, selectedPlaceId]);
 
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const dark = useColorScheme() === "dark";
@@ -340,9 +351,17 @@ export default function TabsLayout() {
       >
         <Tabs.Screen name="map" />
         <Tabs.Screen name="contribution" options={{ href: null }} />
-        <Tabs.Screen name="search" />
         <Tabs.Screen name="profile" options={{ href: null }} />
       </Tabs>
+
+      <DraggableSheet
+        visible={openSheet === "transit"}
+        onClose={closeSheet}
+        snapFraction={0.72}
+        minHeightOffset={230}
+      >
+        <TransitSheet onClose={closeSheet} />
+      </DraggableSheet>
 
       <DraggableSheet
         visible={openSheet === "you"}
