@@ -13,6 +13,8 @@ export interface UnifiedLocation {
   lng: number;
   route_ids?: string; 
   route_nams?: string;
+  /** A place's category label ("Restaurant"), kept with recents so its badge survives. */
+  category?: string;
 }
 
 interface JourneyState {

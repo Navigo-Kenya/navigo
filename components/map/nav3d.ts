@@ -249,21 +249,5 @@ export function lightPresetAt(lat: number, lng: number, date = new Date()): Ligh
   return "night";
 }
 
-/**
- * The navigation light for the user's setting: like the phone (light mode:
- * day, dark mode: night), the sun's time of day, or always day.
- */
-export function navLightPreset(
-  setting: "phone" | "time" | "day",
-  phoneDark: boolean,
-  lat: number,
-  lng: number,
-  date = new Date(),
-): LightPreset {
-  if (setting === "day") return "day";
-  if (setting === "phone") return phoneDark ? "night" : "day";
-  return lightPresetAt(lat, lng, date);
-}
-
 /** How much the models' lamps, neon and lit signs glow. */
 export const EMISSIVE: Record<LightPreset, number> = { day: 0.15, dawn: 0.6, dusk: 0.8, night: 1.0 };

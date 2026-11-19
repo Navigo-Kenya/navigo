@@ -254,14 +254,21 @@ function CustomFloatingTabBar({
       >
         {TABS.map((tab) => {
           const isActive = tab.id === activeTab;
+          // The active tab takes the width its label needs and the others
+          // share the rest: with five equal slots, "Contribute" didn't fit
+          // its pill and was cut off.
           return (
-            <Pressable
+            <Reanimated.View
               key={tab.id}
+              layout={LinearTransition.springify().damping(18).stiffness(220)}
+              style={isActive ? styles.tabItemActive : styles.tabItem}
+            >
+            <Pressable
               onPress={() => {
                 Haptics.selectionAsync();
                 onTabPress(tab.id);
               }}
-              style={styles.tabItem}
+              style={styles.tabPress}
               accessibilityRole="tab"
               accessibilityLabel={tab.label}
               accessibilityState={{ selected: isActive }}
@@ -291,9 +298,19 @@ function CustomFloatingTabBar({
                     />
                   )}
                 </View>
-                {isActive && <Text style={styles.tabLabel}>{tab.label}</Text>}
+                {isActive && (
+                  <Text
+                    style={styles.tabLabel}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.85}
+                  >
+                    {tab.label}
+                  </Text>
+                )}
               </Reanimated.View>
             </Pressable>
+            </Reanimated.View>
           );
         })}
       </View>
@@ -452,19 +469,29 @@ const styles = StyleSheet.create({
   },
   tabItem: {
     flex: 1,
+    minWidth: 44,
+    height: "100%",
+  },
+  tabItemActive: {
+    flexGrow: 0,
+    flexShrink: 0,
+    height: "100%",
+    paddingHorizontal: 2,
+  },
+  tabPress: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    height: "100%",
   },
   tabPill: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 8,
-    paddingHorizontal: 13,
+    paddingHorizontal: 12,
     borderRadius: 24,
     overflow: "hidden",
-    gap: 6,
+    gap: 5,
   },
   tabPillActive: {
     backgroundColor: ORANGE,

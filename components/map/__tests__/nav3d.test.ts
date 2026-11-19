@@ -2,7 +2,6 @@ import {
   cameraFor,
   lightPresetAt,
   modelScaleArr,
-  navLightPreset,
   modelScaleAt,
   modelYaw,
   modelsFor,
@@ -26,12 +25,11 @@ describe("light for the time of day", () => {
     expect(lightPresetAt(NAIROBI.lat, NAIROBI.lng, eat("2026-11-18T06:40:00"))).toBe("day");
   });
 
-  it("follows the setting: like the phone by default, the sun on request", () => {
-    const night = eat("2026-11-18T00:30:00");
-    expect(navLightPreset("phone", false, NAIROBI.lat, NAIROBI.lng, night)).toBe("day");
-    expect(navLightPreset("phone", true, NAIROBI.lat, NAIROBI.lng, eat("2026-11-18T12:30:00"))).toBe("night");
-    expect(navLightPreset("day", true, NAIROBI.lat, NAIROBI.lng, night)).toBe("day");
-    expect(navLightPreset("time", false, NAIROBI.lat, NAIROBI.lng, night)).toBe("night");
+  it("is the light where the camera looks, not where the phone is", () => {
+    // 12:30 in Nairobi is 18:30 in Tokyo's sky: past sunset there.
+    const noonNairobi = eat("2026-11-18T12:30:00");
+    expect(lightPresetAt(NAIROBI.lat, NAIROBI.lng, noonNairobi)).toBe("day");
+    expect(lightPresetAt(35.68, 139.69, noonNairobi)).not.toBe("day");
   });
 
   it("puts the noon sun high over the equator", () => {

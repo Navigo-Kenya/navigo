@@ -14,6 +14,7 @@ import * as Haptics              from "expo-haptics";
 import { OfflineNotice }         from "@/components/map/OfflineNotice";
 import { ReportLayer }           from "@/components/map/ReportLayer";
 import type { ReportLayerHandle } from "@/components/map/ReportLayer";
+import { mergeViewportReports } from "@/utils/reportsMerge";
 import { TrafficIncidentLayer }  from "@/components/map/TrafficIncidentLayer";
 import { splitIncidents, type JamLine } from "@/utils/incidents";
 import { BusLayer }              from "@/components/map/BusLayer";
@@ -81,15 +82,16 @@ import {
   EMISSIVE,
   cameraFor,
   isRailMode,
-  navLightPreset,
   modelScaleArr,
   modelYaw,
   modelsFor,
   trainCars,
   trainConsist,
   vehicleFor,
-  type LightPreset,
 } from "@/components/map/nav3d";
+import { useMapAmbience } from "@/hooks/useMapAmbience";
+import { WeatherEffect } from "@/components/map/WeatherEffect";
+import { PRECIP_MIN_ZOOM } from "@/services/mapAmbience";
 import { useModelUris } from "@/components/map/navModelAssets";
 
 import MapSearchContextSheet from "@/components/app/MapSearchContextSheet";
@@ -1119,7 +1121,11 @@ export default function MapScreen() {
         .then(({ reports, incidents }) => {
           if (reqId !== reportReqId.current) return;
           const { pins, jams } = splitIncidents(incidents);
-          setActiveReports([...reports, ...pins]);
+          // Merged, not replaced: outside these bounds the pins we had stay
+          // (until they expire), and an unchanged answer keeps the same list.
+          setActiveReports((prev) =>
+            mergeViewportReports(prev, [...reports, ...pins], { north, south, east, west })
+          );
           setTrafficJams(jams);
           CacheService.set(CACHE_KEYS.REPORTS_VIEWPORT, reports);
         })
@@ -1417,31 +1423,25 @@ export default function MapScreen() {
   // Copied to local files first (see useModelUris): Mapbox gets file:// URLs.
   const journeyModelUris = useModelUris(journeyModels);
 
-  // Mapbox Standard's light while navigating, by the user's setting: like the
-  // phone (the default), the sun where they are (re-checked every minute), or
-  // always day. Outside navigation it stays "day".
-  const navLight = usePrefsStore((s) => s.prefs.navLight);
-  const [lightPreset, setLightPreset] = useState<LightPreset>("day");
-  const hasFix = meLat != null && meLng != null;
-  const sunLatRef = useRef<number | null>(null);
-  const sunLngRef = useRef<number | null>(null);
-  useEffect(() => { sunLatRef.current = meLat; sunLngRef.current = meLng; }, [meLat, meLng]);
-  useEffect(() => {
-    if (!isNavigationMode || !hasFix) {
-      setLightPreset("day");
-      return;
-    }
-    const update = () => {
-      if (sunLatRef.current != null && sunLngRef.current != null) {
-        setLightPreset(navLightPreset(navLight ?? "phone", dark, sunLatRef.current, sunLngRef.current));
-      }
-    };
-    update();
-    if (navLight !== "time") return;
-    const id = setInterval(update, 60_000);
-    return () => clearInterval(id);
-  }, [isNavigationMode, hasFix, navLight, dark]);
-  const emissive = isNavigationMode ? EMISSIVE[lightPreset] : EMISSIVE.day;
+  // The light and the weather of the place the camera is looking at
+  // (hooks/useMapAmbience), on the map and in navigation alike: dawn, day,
+  // dusk or night from the sun there, and rain or snow when it falls there.
+  // While following the user in navigation, that's where they are (the
+  // camera's own moves don't update viewCenter).
+  const mapLight   = usePrefsStore((s) => s.prefs.mapLight);
+  const mapWeather = usePrefsStore((s) => s.prefs.mapWeather);
+  const lookingAtUser = isNavigationMode && followMe;
+  const { lightPreset, precip } = useMapAmbience({
+    lat: lookingAtUser ? meLat : (viewCenter?.lat ?? meLat),
+    lng: lookingAtUser ? meLng : (viewCenter?.lng ?? meLng),
+    timeOfDay: mapLight !== "day",
+    weather: mapWeather !== false,
+  });
+  // Standard's light applies to the Standard style only; the phone's dark
+  // mode and satellite have styles of their own, dark already.
+  const standardStyle = activeStyleURL === process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL;
+  const mapIsDark = !standardStyle || lightPreset === "night";
+  const emissive = EMISSIVE[standardStyle ? lightPreset : "night"];
 
   const navModelsGeoJson = useMemo(() => {
     if (!isNavigationMode || meLat == null || meLng == null || !navModel) return null;
@@ -1594,8 +1594,8 @@ export default function MapScreen() {
               navigating={isNavigationMode}
               focusCategory={categoryActive && !activeJourney ? poiCategory : null}
               excludeIds={isNavigationMode || activeJourney ? journeyPoiIds : resultPoiIds}
-              standardStyle={activeStyleURL === process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL}
-              lightPreset={isNavigationMode ? lightPreset : "day"}
+              standardStyle={standardStyle}
+              lightPreset={lightPreset}
               dark={dark}
               onPress={handlePoiPress}
             />
@@ -1685,18 +1685,27 @@ export default function MapScreen() {
               while a journey is on screen (its route has its own colours). */}
           <TrafficIncidentLayer jams={trafficJams} visible={layers.traffic && !activeJourney} />
 
-          {layers.reports && (
-            <ReportLayer
-              ref={reportLayerRef}
-              reports={activeReports}
-              mapRef={mapRef}
-              viewZoom={viewZoom}
-              onPress={handleReportPress}
-            />
-          )}
+          {/* Always mounted: switching the layer off hides it (no source churn). */}
+          <ReportLayer
+            ref={reportLayerRef}
+            reports={activeReports}
+            mapRef={mapRef}
+            visible={layers.reports}
+            onPress={handleReportPress}
+          />
           </>
         )}
 
+        {/* Rain or snow where the camera is looking, from street zoom (and
+            all through navigation, whose camera zoom viewZoom doesn't track). */}
+        {styleLoaded && precip && (isNavigationMode || viewZoom >= PRECIP_MIN_ZOOM) && (
+          <WeatherEffect
+            kind={precip.kind}
+            level={precip.level}
+            dark={mapIsDark}
+            navigating={isNavigationMode}
+          />
+        )}
       </MapboxMapView>
 
       {!me && (

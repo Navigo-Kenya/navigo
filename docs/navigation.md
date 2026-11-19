@@ -142,9 +142,12 @@ Likoni ferry, a plane and the walking marker. They replace the Tokyo `bus.glb`, 
 licence (CC-BY-NC) didn't allow a commercial app.
 
 In the app, `components/map/nav3d.ts` picks the model per leg, keeps it the same
-size on screen at every zoom, frames the camera per mode, and sets Mapbox
-Standard's light: like the phone by default (light mode: day, dark mode: night),
-or from the sun's position (Settings → Map light when navigating: Time of day).
+size on screen at every zoom, and frames the camera per mode.
+`hooks/useMapAmbience` sets Mapbox Standard's light from the sun where the
+camera is looking (dawn, day, dusk, night), on the map and in navigation, and
+draws rain or snow when it's falling there (Open-Meteo, the weather pill's own
+cached request). Settings → Map light (Time of day or Always day) and Weather
+on the map turn them off. The phone's dark mode keeps its dark map.
 While navigating, `map.tsx` adds terrain and `RouteOverlay` makes the route ahead glow.
 
 Two things learned on the first phone test:

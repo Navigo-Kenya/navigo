@@ -26,6 +26,11 @@ export interface LiveWeatherData {
   deltaYesterday: string | null;
   conditionLabel: string;
   iconName: keyof typeof Ionicons.glyphMap;
+  /** The current WMO weather code (the map draws rain or snow from it). */
+  weatherCode: number;
+  isDay: boolean;
+  /** Precipitation over the last 15 minutes, in mm (null when not reported). */
+  precipMm: number | null;
   pm10: number | null;
   pm25: number | null;
   pm10Label: "Good" | "Normal" | "Bad" | "N/A";
@@ -128,7 +133,7 @@ async function fetchLiveMeteoUncached(
   const [w, aqi] = await Promise.all([
     getJson(
       `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}` +
-        `&current=temperature_2m,weather_code,is_day` +
+        `&current=temperature_2m,weather_code,is_day,precipitation` +
         `&hourly=temperature_2m,precipitation_probability,weather_code,is_day` +
         `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max` +
         `&timezone=auto&forecast_days=7&past_days=1`
@@ -222,6 +227,9 @@ async function fetchLiveMeteoUncached(
     deltaYesterday,
     conditionLabel: wmo.label,
     iconName: wmo.icon,
+    weatherCode: nowCode,
+    isDay,
+    precipMm: num(w?.current?.precipitation),
     pm10,
     pm25,
     pm10Label: p10.label,

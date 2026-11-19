@@ -203,7 +203,7 @@ export default function PlaceAndTransitSearchScreen() {
     const details = await MapService.getPlaceDetails(pred.place_id);
     setResolvingId(null);
     if (!details) return;
-    pushRecent({ _type: "location", id: pred.place_id, name: pred.main_text, lat: details.lat, lng: details.lng });
+    pushRecent({ _type: "location", id: pred.place_id, name: pred.main_text, lat: details.lat, lng: details.lng, category: details.category });
     openPlace({
       id: pred.place_id,
       name: pred.main_text,
@@ -214,6 +214,8 @@ export default function PlaceAndTransitSearchScreen() {
       reviewCount: details.reviewCount,
       openNow: details.openNow,
       photos: details.photos,
+      // Without it the place's pin fell back to the "Services" briefcase.
+      category: details.category,
     });
   };
 
@@ -365,7 +367,7 @@ export default function PlaceAndTransitSearchScreen() {
       <Reanimated.View entering={enter}>
         <PressableScale
           pressedScale={0.98}
-          onPress={() => openPlace({ id: rec.id, name: rec.name, lat: rec.lat, lng: rec.lng })}
+          onPress={() => openPlace({ id: rec.id, name: rec.name, lat: rec.lat, lng: rec.lng, category: rec.category })}
           style={[s.row, { borderBottomColor: C.line }]}
         >
           <View style={[s.iconDisc, { backgroundColor: C.chip }]}>
