@@ -81,8 +81,8 @@ import {
   EMISSIVE,
   cameraFor,
   isRailMode,
-  lightPresetAt,
-  modelScaleExpr,
+  navLightPreset,
+  modelScaleArr,
   modelYaw,
   modelsFor,
   trainCars,
@@ -90,7 +90,7 @@ import {
   vehicleFor,
   type LightPreset,
 } from "@/components/map/nav3d";
-import { MODEL_ASSETS } from "@/components/map/navModelAssets";
+import { useModelUris } from "@/components/map/navModelAssets";
 
 import MapSearchContextSheet from "@/components/app/MapSearchContextSheet";
 import {
@@ -1387,6 +1387,11 @@ export default function MapScreen() {
     : null;
   const navModel = navMode ? vehicleFor(navMode, rideLeg?.routeId, rideLeg?.routeName) : null;
 
+  // The zoom the models are sized for: the follow camera's while following,
+  // else the map's (updated when a pinch ends). Rounded, so tiny camera
+  // changes don't restyle the layers.
+  const modelZoom = Math.round((isNavigationMode && followMe ? followZoom : viewZoom) * 4) / 4;
+
   // The models drawn now: the vehicle, or a whole train (locomotive + coaches).
   const liveModels = useMemo(
     () => new Set<string>(
@@ -1409,13 +1414,13 @@ export default function MapScreen() {
   }, [navModel]);
   // Every model the journey can need, registered while navigating only.
   const journeyModels = useMemo(() => (isNavigationMode ? modelsFor(transitLegs) : []), [isNavigationMode, transitLegs]);
-  const journeyModelAssets = useMemo(
-    () => Object.fromEntries(journeyModels.map((m) => [m, MODEL_ASSETS[m]])),
-    [journeyModels]
-  );
+  // Copied to local files first (see useModelUris): Mapbox gets file:// URLs.
+  const journeyModelUris = useModelUris(journeyModels);
 
-  // Mapbox Standard's light follows the sun where the user is (dawn, day,
-  // dusk, night), re-checked every minute; outside navigation it stays "day".
+  // Mapbox Standard's light while navigating, by the user's setting: like the
+  // phone (the default), the sun where they are (re-checked every minute), or
+  // always day. Outside navigation it stays "day".
+  const navLight = usePrefsStore((s) => s.prefs.navLight);
   const [lightPreset, setLightPreset] = useState<LightPreset>("day");
   const hasFix = meLat != null && meLng != null;
   const sunLatRef = useRef<number | null>(null);
@@ -1428,13 +1433,14 @@ export default function MapScreen() {
     }
     const update = () => {
       if (sunLatRef.current != null && sunLngRef.current != null) {
-        setLightPreset(lightPresetAt(sunLatRef.current, sunLngRef.current));
+        setLightPreset(navLightPreset(navLight ?? "phone", dark, sunLatRef.current, sunLngRef.current));
       }
     };
     update();
+    if (navLight !== "time") return;
     const id = setInterval(update, 60_000);
     return () => clearInterval(id);
-  }, [isNavigationMode, hasFix]);
+  }, [isNavigationMode, hasFix, navLight, dark]);
   const emissive = isNavigationMode ? EMISSIVE[lightPreset] : EMISSIVE.day;
 
   const navModelsGeoJson = useMemo(() => {
@@ -1517,7 +1523,7 @@ export default function MapScreen() {
 
         {/* Navigo's own models (tools: navigo-models), bundled; only the
             journey's are registered, and only while navigating. */}
-        {styleLoaded && journeyModels.length > 0 && <NativeModels models={journeyModelAssets} />}
+        {styleLoaded && Object.keys(journeyModelUris).length > 0 && <NativeModels models={journeyModelUris} />}
 
         {/* Terrain while navigating: hills, the Rift Valley, the SGR line in relief. */}
         {styleLoaded && isNavigationMode && (
@@ -1566,7 +1572,8 @@ export default function MapScreen() {
                       filter={["==", ["get", "model"], m]}
                       style={{
                         modelId: m,
-                        modelScale: modelScaleExpr(m),
+                        // The same size on screen at every zoom (a plain value: see modelScaleArr).
+                        modelScale: modelScaleArr(m, modelZoom),
                         modelRotation: ["get", "modelRot"],
                         // The current model shows; the others fade out (boarding, getting off).
                         modelOpacity: liveModels.has(m) ? 1 : 0,
@@ -1652,6 +1659,7 @@ export default function MapScreen() {
 
             {!activeJourney && layers.bus && (
               <BusLayer
+                zoom={viewZoom}
                 selectedBusId={selectedBus?.id}
                 onBusPress={(info) => { 
                   setSelectedBus(info); 

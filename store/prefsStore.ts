@@ -31,6 +31,11 @@ export interface TravelPrefs {
    */
   carRole:       "driver" | "passenger";
   bodaRole:      "driver" | "passenger";
+  /**
+   * The map's light while navigating: like the phone (light or dark mode),
+   * the time of day (dawn, day, dusk, night from the sun), or always day.
+   */
+  navLight:      "phone" | "time" | "day";
 }
 
 const DEFAULTS: TravelPrefs = {
@@ -47,6 +52,7 @@ const DEFAULTS: TravelPrefs = {
   nativeFollow:  true,
   carRole:       "driver",
   bodaRole:      "passenger",
+  navLight:      "phone",
 };
 
 interface PrefsStore {
