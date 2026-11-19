@@ -92,6 +92,8 @@ export interface CommunityStats {
     report_total: number;
     report_by_type: Record<string, number>;
   };
+  /** The streak as newer APIs count it: any useful act, weekends excused, freezes. */
+  streak?: { days: number; best: number; freezes: number; weekends: boolean; active_today: boolean };
   /** Leaderboard positions (newer APIs); null where the user has no points yet. */
   rank?: {
     all: number | null;
@@ -120,6 +122,8 @@ export interface CreateContributionResult {
   new_badges: string[];
   new_level: number | null;
   streak_days: number;
+  /** Daily quests it completed (newer APIs). */
+  quests_done?: { key: string; title: string; points: number }[];
 }
 
 export interface LeaderboardEntry {

@@ -3,7 +3,9 @@
 // The evening nudge that a streak is about to end: one local notification
 // at 19:00, and only when it's worth it:
 //   - the streak is 2 days or more (a 1-day streak isn't worth a buzz);
-//   - nothing was done today (a contribution or a road report);
+//   - nothing was done today (a trip, a vote, a report, a contribution);
+//   - it's a day that counts: Saturday and Sunday never break a streak
+//     unless the person asked for weekends to count;
 //   - the person allows "Points and contributions" notifications (the
 //     setting says so: Notifications screen), with their sound choice.
 // It's cancelled the moment they contribute, so it never nags someone who
@@ -21,8 +23,12 @@ export function streakReminderAt(opts: {
   contributedToday: boolean;
   allowed: boolean;
   now: Date;
+  /** Weekends count (off by default: a weekend never breaks the streak). */
+  weekends?: boolean;
 }): Date | null {
   if (!opts.allowed || opts.contributedToday || opts.streakDays < 2) return null;
+  const day = opts.now.getDay(); // 0 Sunday, 6 Saturday
+  if (!opts.weekends && (day === 0 || day === 6)) return null;
   const at = new Date(opts.now);
   at.setHours(STREAK_REMINDER_HOUR, 0, 0, 0);
   return at > opts.now ? at : null;
@@ -38,7 +44,7 @@ export function streakLine(days: number, today: boolean): string {
 export function streakReminderText(days: number): { title: string; body: string } {
   return {
     title: `Keep your ${days}-day streak`,
-    body: "One report, review or photo today keeps it going.",
+    body: "A trip with Navigo, a vote or a report today keeps it going.",
   };
 }
 
@@ -58,13 +64,21 @@ export async function cancelStreakReminder(): Promise<void> {
 }
 
 /** Schedules tonight's reminder, or cancels it, from the latest stats. */
-export async function syncStreakReminder(stats: { streak_days: number; contributed_today: boolean } | null): Promise<void> {
+export async function syncStreakReminder(
+  stats: { streak_days: number; contributed_today: boolean; streak?: { weekends: boolean } } | null
+): Promise<void> {
   try {
     await cancelStreakReminder();
     if (!stats || stats.contributed_today || stats.streak_days < 2) return;
     const p = await prefs();
     const allowed = (p?.master ?? true) && (p?.points_earned ?? true);
-    const at = streakReminderAt({ streakDays: stats.streak_days, contributedToday: stats.contributed_today, allowed, now: new Date() });
+    const at = streakReminderAt({
+      streakDays: stats.streak_days,
+      contributedToday: stats.contributed_today,
+      allowed,
+      now: new Date(),
+      weekends: stats.streak?.weekends ?? false,
+    });
     if (!at) return;
     const perm = await Notifications.getPermissionsAsync();
     if (perm.status !== "granted") return;

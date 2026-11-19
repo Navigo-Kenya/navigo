@@ -10,6 +10,7 @@ import {
 } from "@/services/contribution";
 import { syncWidgetData } from "@/services/widgetBridge";
 import { cancelStreakReminder } from "@/services/streakReminder";
+import type { QuestDone, StreakSummary } from "@/services/activity";
 
 const STALE_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -22,7 +23,9 @@ interface ContributionStore {
   fetch:          () => Promise<void>;
   refresh:        () => Promise<void>;
   reset:          () => void;
-  submit:         (payload: CreateContributionPayload) => Promise<{ points_awarded: number; new_badges: string[]; streak_days: number }>;
+  submit:         (payload: CreateContributionPayload) => Promise<{ points_awarded: number; new_badges: string[]; streak_days: number; quests_done: QuestDone[] }>;
+  /** A trip or a vote counted: the streak as the API now says. */
+  noteActivity:   (streak: StreakSummary) => void;
   /** A road report sent from the map: its points and streak count here too. */
   noteReport:     (r: { points_awarded: number; new_badges: string[]; streak_days: number | null }) => void;
   removeContribution: (id: number) => Promise<void>;
@@ -90,7 +93,16 @@ export const useContributionStore = create<ContributionStore>()(
         }
         // Sync streak to widget bridge so home-screen widget reflects current streak.
         syncWidgetData({ streakDays: result.streak_days }).catch(() => {});
-        return { points_awarded: result.points_awarded, new_badges: result.new_badges, streak_days: result.streak_days };
+        return { points_awarded: result.points_awarded, new_badges: result.new_badges, streak_days: result.streak_days, quests_done: result.quests_done ?? [] };
+      },
+
+      noteActivity(streak) {
+        set((s) => ({
+          stats: s.stats
+            ? { ...s.stats, streak_days: streak.days, contributed_today: streak.active_today, streak }
+            : null,
+        }));
+        if (streak.active_today) cancelStreakReminder().catch(() => {});
       },
 
       noteReport(r) {

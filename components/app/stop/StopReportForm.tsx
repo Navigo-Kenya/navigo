@@ -63,7 +63,7 @@ export function StopReportForm({
         } as any,
       });
       onClose();
-      showReward({ points: res.points_awarded, badges: res.new_badges, streak: res.streak_days, title: "Thanks for the heads-up" });
+      showReward({ points: res.points_awarded, badges: res.new_badges, streak: res.streak_days, title: "Thanks for the heads-up", quests: res.quests_done });
     } catch {
       Alert.alert("Couldn't send your report", "Please try again.");
     } finally {

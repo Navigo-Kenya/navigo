@@ -14,6 +14,7 @@ import { armAlightGeofence, disarmAlightGeofence, type AlightRegion } from "@/se
 import { requestBackgroundPermission, startBackgroundTracking, stopBackgroundTracking } from "@/services/backgroundLocation";
 import { navSession } from "@/store/navSessionStore";
 import { clearTripAlert, setTripActive, showTripAlert } from "@/services/notifications";
+import { ActivityService } from "@/services/activity";
 import { HapticGate, P, alightCue, alightText, arrivalText, sideOfWay, type AlightCue } from "@/services/navAlerts";
 import {
   cumulative,
@@ -282,6 +283,8 @@ export function useNavigation() {
   /** The whole route as one line ([lat, lng]) and its length, to place road reports on. */
   const routeCoordsRef = useRef<[number, number][]>([]);
   const routeLengthRef = useRef(0);
+  /** This trip already counted for the streak and quests (once per trip, reroutes included). */
+  const tripCountedRef = useRef(false);
   /** Road reports near the route, and where along it they lie. */
   const hazardReportsRef = useRef<HazardReport[]>([]);
   const hazardsRef = useRef<PlacedHazard[]>([]);
@@ -860,6 +863,11 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
           NavVoice.say({ key: `g${routeGenRef.current}:arrived`, text: arrivalText(to?.name ?? "your destination", side), priority: P.critical });
         }
         clearTripAlert().catch(() => {});
+        // A trip with Navigo keeps the streak and moves the day's quests.
+        if (!tripCountedRef.current) {
+          tripCountedRef.current = true;
+          ActivityService.tripDone(routeLengthRef.current).catch(() => {});
+        }
       }
 
       // Step cues (boarding, transfers) on legs without turn-by-turn. Street
@@ -1375,6 +1383,7 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
       setHazard(null);
       setToast(null);
       NavVoice.resetKeys();
+      tripCountedRef.current = false;
       setTripActive(true);
       lastRerouteAtRef.current      = 0;
       phaseRef.current.reset();

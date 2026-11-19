@@ -51,7 +51,7 @@ export function NewStopForm({
     if (!ready) return;
     setLoading(true);
     try {
-      await submit({
+      const res = await submit({
         type: "new_stop",
         title: `New stop: ${name.trim()}`,
         data: {
@@ -64,7 +64,7 @@ export function NewStopForm({
         },
       });
       onClose();
-      showReward({ points: 0, title: "New stage sent for review", pendingPoints: CONTRIBUTION_POINTS.new_stop });
+      showReward({ points: 0, title: "New stage sent for review", pendingPoints: CONTRIBUTION_POINTS.new_stop, quests: res.quests_done, streak: res.streak_days });
     } catch {
       Alert.alert("Couldn't send it", "Please try again.");
     } finally {

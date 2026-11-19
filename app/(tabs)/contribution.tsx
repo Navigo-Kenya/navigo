@@ -35,6 +35,7 @@ import { REPORT_TYPES, type ReportType } from "@/components/icons/reportIcons";
 import { ReportTypeIcon } from "@/components/icons/ReportTypeIcon";
 import { StopTypeBadge } from "@/components/app/StopTypeBadge";
 import { StopPickerSheet, type PickedStop } from "@/components/contribution/StopPickerSheet";
+import { TodayQuests } from "@/components/contribution/TodayQuests";
 import { StopReviewForm } from "@/components/app/stop/StopReviewForm";
 import { StopEditForm } from "@/components/app/stop/StopEditForm";
 import { StopReportForm, type ReportLine } from "@/components/app/stop/StopReportForm";
@@ -105,8 +106,8 @@ export default function ContributeScreen() {
   }, [near]);
   // Tonight's streak reminder follows the latest stats (and the settings).
   useEffect(() => {
-    syncStreakReminder(stats ? { streak_days: stats.streak_days, contributed_today: stats.contributed_today } : null);
-  }, [stats?.streak_days, stats?.contributed_today]); // eslint-disable-line react-hooks/exhaustive-deps
+    syncStreakReminder(stats ? { streak_days: stats.streak_days, contributed_today: stats.contributed_today, streak: stats.streak } : null);
+  }, [stats?.streak_days, stats?.contributed_today, stats?.streak?.weekends]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pending = useMemo(() => contributions.filter((c) => c.status === "pending").length, [contributions]);
 
@@ -216,6 +217,9 @@ export default function ContributeScreen() {
         </View>
       )}
 
+      {/* Today: three quests, and the streak as it works */}
+      {stats ? <TodayQuests C={C} /> : null}
+
       {/* On the road */}
       <Section title="On the road" sub="Live for everyone nearby, gone when it clears" C={C} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.roadRow}>
@@ -315,7 +319,7 @@ export default function ContributeScreen() {
           <PointsRow C={C} what="Missing stage" pts={`+${P.new_stop}`} when="if approved" />
           <PointsRow C={C} what="5 people confirm your report" pts="+5" when="once per report" />
           <Text style={[s.pointsFoot, { color: C.sub }]}>
-            A streak adds +1 a day to reviews and late-matatu reports, up to +7. A report, review or photo each day keeps it going.
+            A streak adds +1 a day to reviews and late-matatu reports, up to +7. Any trip with Navigo, vote, report, review or photo keeps it going, and weekends never break it. Daily quests pay on top.
           </Text>
         </View>
       ) : null}

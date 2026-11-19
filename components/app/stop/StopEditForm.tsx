@@ -81,8 +81,9 @@ export function StopEditForm({
     if (!changes.length) return;
     setLoading(true);
     try {
+      const quests: { key: string; title: string; points: number }[] = [];
       for (const c of changes) {
-        await submit({
+        const res = await submit({
           type: "stop_edit",
           stop_id: stop.id,
           title: `Edit ${c.field}: ${stop.name}`,
@@ -93,12 +94,14 @@ export function StopEditForm({
             note: note.trim() || undefined,
           },
         });
+        quests.push(...res.quests_done);
       }
       onClose();
       showReward({
         points: 0,
         title: changes.length === 1 ? "Edit sent for review" : `${changes.length} edits sent for review`,
         pendingPoints: CONTRIBUTION_POINTS.stop_edit * changes.length,
+        quests,
       });
     } catch {
       Alert.alert("Couldn't send your edit", "Please try again.");
