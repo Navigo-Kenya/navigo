@@ -270,3 +270,34 @@ export class AwayTracker {
     return ref ? last.d < ref.d - CLOSING_M : false;
   }
 }
+
+/**
+ * The banner's words for an instruction, Google Maps' way: the street
+ * large, the verb small above it, the landmark under it.
+ *   "Turn left onto Kimathi St, after Java House"
+ *     → { verb: "Turn left onto", street: "Kimathi St", landmark: "after Java House" }
+ *   "Turn left" → { verb: "Turn left", street: null, landmark: null }
+ */
+export function splitInstruction(
+  instruction: string,
+  landmarkText?: string | null,
+): { verb: string; street: string | null; landmark: string | null } {
+  let text = String(instruction ?? "").trim().replace(/\.$/, "");
+  let landmark: string | null = null;
+  if (landmarkText && text.endsWith(`, ${landmarkText}`)) {
+    text = text.slice(0, -(landmarkText.length + 2)).trim();
+    landmark = landmarkText;
+  } else {
+    const lm = text.match(/,\s*((?:after|before|past|opposite|near|by)\s+.+)$/i);
+    if (lm && lm.index != null) {
+      landmark = lm[1].trim();
+      text = text.slice(0, lm.index).trim();
+    }
+  }
+  // The strongest preposition wins: "Turn right to stay on Moi Ave" is about Moi Ave.
+  for (const rx of [/^(.*\b(?:onto|into))\s+(.+)$/i, /^(.*?\bon)\s+(.+)$/i, /^(.*?\btowards?)\s+(.+)$/i, /^(.*?\bto)\s+(.+)$/i, /^(Arrive at)\s+(.+)$/i]) {
+    const m = text.match(rx);
+    if (m && m[2].trim().length > 1) return { verb: m[1].trim(), street: m[2].trim(), landmark };
+  }
+  return { verb: text, street: null, landmark };
+}

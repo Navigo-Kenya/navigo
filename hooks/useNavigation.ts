@@ -1,7 +1,7 @@
 // hooks/useNavigation.ts
 import { NavigationEngine, EngineResult } from "@/services/navigationEngine";
 import { RouteService } from "@/services/route";
-import { VoiceGuide } from "@/services/voiceGuide";
+import { NavVoice, VoiceGuide } from "@/services/voiceGuide";
 import { useJourneyStore } from "@/store/journeyStore";
 import { usePrefsStore } from "@/store/prefsStore";
 import { Coords } from "@/utils/mapHelpers";
@@ -13,12 +13,19 @@ import { NavMetrics } from "@/services/navMetrics";
 import { armAlightGeofence, disarmAlightGeofence, type AlightRegion } from "@/services/alightGeofence";
 import { requestBackgroundPermission, startBackgroundTracking, stopBackgroundTracking } from "@/services/backgroundLocation";
 import { navSession } from "@/store/navSessionStore";
+import { clearTripAlert, setTripActive, showTripAlert } from "@/services/notifications";
+import { HapticGate, P, alightCue, alightText, arrivalText, sideOfWay, type AlightCue } from "@/services/navAlerts";
 import {
-  scheduleAlightWarning,
-  scheduleArrivalNotification,
-  scheduleWrongDirectionAlert,
-  cancelNotification,
-} from "@/services/notifications";
+  cumulative,
+  hazardText,
+  hazardsNear,
+  placeHazards,
+  speaksHazard,
+  type HazardReport,
+  type PlacedHazard,
+} from "@/services/hazardsAhead";
+import { ReportService } from "@/services/report";
+import { splitIncidents } from "@/utils/incidents";
 import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
 import * as Linking from "expo-linking";
@@ -77,8 +84,15 @@ const BOARD_PROXIMITY_M  = 120;
 /** At most one reroute per this long: each one is a routing call (and TomTom for cars). */
 const REROUTE_MIN_INTERVAL_MS = 12_000;
 /** Heading samples against the route before "wrong way". More in a vehicle: its route bends at junctions. */
-const WRONG_WAY_STRIKES_ON_FOOT = 4;
-const WRONG_WAY_STRIKES_VEHICLE = 6;
+/**
+ * Wrong way = this far travelled against the route (GPS course, metres),
+ * not a compass wobble: a step back at a crossing isn't turning round.
+ */
+const BACKWARDS_M_ON_FOOT = 25;
+const BACKWARDS_M_BIKE = 40;
+const BACKWARDS_M_VEHICLE = 80;
+/** Road reports are re-read along the route this often while navigating. */
+const HAZARD_REFRESH_MS = 180_000;
 /** Dead reckoning: only when moving at least this fast (m/s) when the fixes stopped… */
 const DEAD_RECKON_MIN_MPS = 2;
 /** …and for at most this long (s): a tunnel, not a phone that lost its fix for good. */
@@ -96,7 +110,29 @@ export interface NavTurn {
   distanceM: number;
   /** The turn after this one, when it follows within 300 m. */
   then: string | null;
+  /** Its arrow, for the banner's "Then" tab. */
+  thenManeuver: Maneuver | null;
+  /** "after Java House", when the turn has a landmark. */
+  landmark: string | null;
   rider: { word: string; detail: string | null };
+}
+
+/** A road report on the way (Waze-like): ahead of you, or just passed ("Still there?"). */
+export interface NavHazard {
+  id: string;
+  type: string;
+  /** Metres ahead along the route; null once passed. */
+  aheadM: number | null;
+  passed: boolean;
+  source: "community" | "tomtom";
+  upvotes: number;
+  createdAt: string | null;
+}
+
+/** A short note on screen: "New route", "Thanks". */
+export interface NavToast {
+  text: string;
+  at: number;
 }
 
 /** A phase change to show (and undo): "On board the 45K · Undo". */
@@ -182,7 +218,8 @@ export function useNavigation() {
   const stepIndexRef         = useRef<number>(0);
   const lastAnnouncedRef     = useRef<string>("");
   const prevStepIndexRef     = useRef<number>(0);
-  const lastAlightAlertRef   = useRef<number>(-1);
+  /** The last "get off" cue on this leg and when: two warnings, not three (navAlerts). */
+  const alightCueRef         = useRef<{ cue: AlightCue | null; at: number; leg: number }>({ cue: null, at: 0, leg: -1 });
   const lastAnnouncedStopRef  = useRef<string | null>(null);
   /** Landmarks already announced on this journey ("Passing Naivas"). */
   const announcedLandmarksRef = useRef<Set<number>>(new Set());
@@ -194,7 +231,6 @@ export function useNavigation() {
   const lastSpeedRef         = useRef<number>(0);
   const lastDeadReckonTimeRef = useRef<number>(Date.now());
 
-  const wrongDirStrikesRef   = useRef<number>(0);
   const wrongDirAnnouncedRef = useRef<boolean>(false);
   const mountedRef           = useRef<boolean>(true);
   const lastSaveTimeRef      = useRef<number>(0);
@@ -202,9 +238,6 @@ export function useNavigation() {
   const restoredRef          = useRef<boolean>(false);
 
   const appStateRef            = useRef<AppStateStatus>(AppState.currentState);
-  const alightNotifIdRef       = useRef<string | null>(null);
-  const wrongDirNotifIdRef     = useRef<string | null>(null);
-  const alightWarningFiredRef  = useRef<boolean>(false);
 
   const [navState, setNavState]                 = useState<EngineResult | null>(null);
   const [location, setLocation]                 = useState<Coords | null>(null);
@@ -237,6 +270,24 @@ export function useNavigation() {
   const [phase, setPhase] = useState<NavPhase>("walk");
   const [phaseNotice, setPhaseNotice] = useState<PhaseNotice | null>(null);
   const [canAlight, setCanAlight] = useState(false);
+  /** One buzz per alert, never two within 1.5 s (services/navAlerts). */
+  const hapticGateRef = useRef(new HapticGate());
+  /** The route's generation, in every cue's key: a new route says its own cues. */
+  const routeGenRef = useRef(0);
+  /** Metres travelled against the route's direction, for "wrong way". */
+  const backwardsMRef = useRef(0);
+  const lastFixRef = useRef<{ lat: number; lng: number } | null>(null);
+  /** Driving the wrong way: a new route from here, not a nag (Google's way). */
+  const forceRerouteRef = useRef(false);
+  /** The whole route as one line ([lat, lng]) and its length, to place road reports on. */
+  const routeCoordsRef = useRef<[number, number][]>([]);
+  const routeLengthRef = useRef(0);
+  /** Road reports near the route, and where along it they lie. */
+  const hazardReportsRef = useRef<HazardReport[]>([]);
+  const hazardsRef = useRef<PlacedHazard[]>([]);
+  const votedHazardsRef = useRef<Set<string>>(new Set());
+  const [hazard, setHazard] = useState<NavHazard | null>(null);
+  const [toast, setToast] = useState<NavToast | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -246,6 +297,7 @@ export function useNavigation() {
   useEffect(() => {
     const sub = AppState.addEventListener("change", (next) => {
       appStateRef.current = next;
+      if (next === "active") clearTripAlert().catch(() => {});
     });
     return () => sub.remove();
   }, []);
@@ -253,6 +305,53 @@ export function useNavigation() {
   useEffect(() => {
     stepIndexRef.current = navState?.stepIndex ?? 0;
   }, [navState?.stepIndex]);
+
+  // Road reports along the route (Waze's habit): read for the next 15 km of
+  // it when the trip starts, then every 3 minutes, and placed along the line.
+  useEffect(() => {
+    if (!isNavigating) {
+      hazardsRef.current = [];
+      hazardReportsRef.current = [];
+      setHazard(null);
+      return;
+    }
+    let alive = true;
+    const load = () => {
+      const pts = routeCoordsRef.current;
+      const engine = engineRef.current;
+      if (pts.length < 2 || !engine) return;
+      const cum = cumulative(pts);
+      const total = engine.totalDistM || 1;
+      const done = ((engine.totalDistM - (lastRemainingMRef.current ?? engine.totalDistM)) / total) * (cum[cum.length - 1] || total);
+      let n = -90, s = 90, e = -180, w = 180;
+      pts.forEach(([lat, lng], i) => {
+        if (cum[i] < done - 200 || cum[i] > done + 15_000) return;
+        if (lat > n) n = lat;
+        if (lat < s) s = lat;
+        if (lng > e) e = lng;
+        if (lng < w) w = lng;
+      });
+      if (n < s) return;
+      const pad = 0.004; // ~400 m around the way
+      ReportService.getViewport(n + pad, s - pad, e + pad, w - pad)
+        .then(({ reports, incidents }) => {
+          if (!alive) return;
+          const now = Date.now();
+          const all: HazardReport[] = [...reports, ...splitIncidents(incidents).pins]
+            .filter((r) => !r.expires_at || Date.parse(r.expires_at) > now)
+            .map((r) => ({
+              id: r.id, type: r.type, lat: r.lat, lng: r.lng,
+              source: r.source ?? "community", upvotes: r.upvotes, created_at: r.created_at,
+            }));
+          hazardReportsRef.current = all;
+          hazardsRef.current = placeHazards(routeCoordsRef.current, all).filter((h) => !votedHazardsRef.current.has(h.id) || h.source === "tomtom");
+        })
+        .catch(() => {});
+    };
+    load();
+    const id = setInterval(load, HAZARD_REFRESH_MS);
+    return () => { alive = false; clearInterval(id); };
+  }, [isNavigating]);
 
   useEffect(() => {
     if (restoredRef.current) return;
@@ -333,6 +432,14 @@ export function useNavigation() {
     spokenCuesRef.current = new Map();
     setTurn(null);
     phaseLegRef.current = -1;
+    routeGenRef.current += 1;
+    routeCoordsRef.current = segments.flatMap((seg: any) => (seg.coordinates ?? []) as [number, number][]);
+    {
+      const cum = cumulative(routeCoordsRef.current);
+      routeLengthRef.current = cum[cum.length - 1] ?? 0;
+    }
+    hazardsRef.current = placeHazards(routeCoordsRef.current, hazardReportsRef.current);
+    setHazard(null);
 
     // Progress saved with a session belongs to that session's route: apply it
     // once, when resuming. (Applied to every new route, a reroute inherited the
@@ -411,7 +518,7 @@ export function useNavigation() {
           prevStepIndexRef.current = rideIdx;
           phaseLegRef.current = rideIdx;
           lastAnnouncedRef.current = "";
-          lastAlightAlertRef.current = -1;
+          alightCueRef.current = { cue: null, at: 0, leg: -1 };
         }
         if (ride) armGeofenceForLeg(rideIdx);
         notice(`On board ${line}`);
@@ -664,6 +771,11 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
         setCanAlight((prev) => (prev === alightable ? prev : alightable));
       }
       const profile: LegProfile = phaseProfile(legProf, tracker.phase, tracker.inVehicleMotion);
+      // Driving the wrong way: replan from here (Google's way), no nagging.
+      if (forceRerouteRef.current) {
+        forceRerouteRef.current = false;
+        if (profile.reroute) result.status = "off_route";
+      }
       if (result.status === "off_route" && !profile.reroute) {
         result.status = "active";
       }
@@ -696,9 +808,10 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
                 const next = pickReroute(routes, journey.route);
                 if (next && mountedRef.current) {
                   useJourneyStore.getState().updateRoute(next);
-                  const hints = usePrefsStore.getState().prefs.navHints;
-                  // A passenger didn't choose the way: follow the driver quietly.
-                  if (hints !== "off" && !silent) VoiceGuide.announce("Route recalculated.");
+                  // No "Route recalculated": the new route's next cue says
+                  // what to do, and a note on screen says what happened. A
+                  // passenger didn't choose the way: followed quietly.
+                  if (!silent) setToast({ text: "New route", at: Date.now() });
                   stepIndexRef.current     = 0;
                   prevStepIndexRef.current = 0;
                   lastAnnouncedRef.current = "";
@@ -719,10 +832,10 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
         lastAnnouncedRef.current    = "";
         lastAnnouncedStopRef.current = null;
         prevApproachPhaseRef.current = null;
-        wrongDirStrikesRef.current   = 0;
+        backwardsMRef.current        = 0;
         wrongDirAnnouncedRef.current = false;
         stepJustChanged = true;
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+        if (hapticGateRef.current.allow(P.normal)) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
 
         // Geofence backup follows the leg type: armed for transit, off for walks.
         const newStepType = engineRef.current.steps[result.stepIndex]?.type ?? "WALK";
@@ -731,16 +844,28 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
       }
 
       if (result.status === "arrived") {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-        if (navHints !== "off") VoiceGuide.announce("You have arrived at your destination.");
-        if (appStateRef.current !== "active") {
-          const toLoc = useJourneyStore.getState().activeJourney?.toLoc.name ?? "your destination";
-          scheduleArrivalNotification(toLoc).catch(() => {});
+        if (hapticGateRef.current.allow(P.critical)) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        if (navHints !== "off") {
+          // Google's touch: which side of the street it's on, from the last
+          // stretch of the route (at least 10 m of it) and the place itself.
+          const to = useJourneyStore.getState().activeJourney?.toLoc;
+          const pts = routeCoordsRef.current;
+          let side: "left" | "right" | null = null;
+          if (to && pts.length >= 2) {
+            const end = pts[pts.length - 1];
+            let i = pts.length - 2;
+            while (i > 0 && distM(pts[i][0], pts[i][1], end[0], end[1]) < 10) i--;
+            side = sideOfWay({ lat: pts[i][0], lng: pts[i][1] }, { lat: end[0], lng: end[1] }, { lat: to.lat, lng: to.lng });
+          }
+          NavVoice.say({ key: `g${routeGenRef.current}:arrived`, text: arrivalText(to?.name ?? "your destination", side), priority: P.critical });
         }
+        clearTripAlert().catch(() => {});
       }
 
+      // Step cues (boarding, transfers) on legs without turn-by-turn. Street
+      // legs are guided by their turns below: the same turn isn't said twice.
       const phaseKey = VoiceGuide.phaseKey(result.stepIndex, result.approachPhase);
-      if (phaseKey !== lastAnnouncedRef.current) {
+      if (!profile.turns && phaseKey !== lastAnnouncedRef.current) {
         const upcomingStep = engineRef.current.steps[result.stepIndex];
         const text = VoiceGuide.buildAnnouncement(
           result.approachPhase,
@@ -750,29 +875,16 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
         );
         if (text) {
           lastAnnouncedRef.current = phaseKey;
-          if (stepJustChanged) VoiceGuide.urgentAnnounce(text);
-          else VoiceGuide.announce(text);
+          NavVoice.say({ key: `g${routeGenRef.current}:step:${phaseKey}`, text, priority: stepJustChanged ? P.high : P.normal });
         }
       }
 
       if (result.approachPhase !== prevApproachPhaseRef.current) {
         prevApproachPhaseRef.current = result.approachPhase;
-        if (result.approachPhase === "near") {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-        } else if (result.approachPhase === "imminent") {
-          const upcomingStep = engineRef.current.steps[result.stepIndex];
-          const maneuverText = upcomingStep?.subSteps?.[0]?.instruction || upcomingStep?.instruction || "";
-          const lText = maneuverText.toLowerCase();
-
-          if (lText.includes("left")) {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-              .then(() => setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium), 150))
-              .catch(() => {});
-          } else if (lText.includes("right")) {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-          } else {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-          }
+        // Street legs buzz from their turn cues (turnHaptic, with the real
+        // manoeuvre); other legs once, as the step comes up.
+        if (!profile.turns && result.approachPhase === "imminent" && hapticGateRef.current.allow(P.normal)) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
         }
       }
 
@@ -810,13 +922,25 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
               spokenCuesRef.current.set(k2, Math.max(spokenCuesRef.current.get(k2) ?? 0, CUE_RANK.near));
             }
             if (profile.voiceTurns && navHints !== "off" && allowCue(cue)) {
-              VoiceGuide.announce(turnSpeech(cue, t, dist, cue === "now" ? chained : null));
+              NavVoice.say({
+                key: `g${routeGenRef.current}:turn:${leg}:${ti}:${cue}`,
+                text: turnSpeech(cue, t, dist, cue === "now" ? chained : null),
+                priority: cue === "now" ? P.high : P.normal,
+                // A heads-up that waited until the turn is close is no use.
+                ttlMs: cue === "now" ? 4_000 : 7_000,
+              });
             }
-            if (profile.hapticTurns) turnHaptic(cue, t.maneuver, profile.showTheRider);
+            if (profile.hapticTurns && hapticGateRef.current.allow(cue === "now" ? P.high : P.normal)) {
+              turnHaptic(cue, t.maneuver, profile.showTheRider);
+            }
           }
+          // Cues still waiting for turns already behind are dropped.
+          if (ti > 0) NavVoice.forget(`g${routeGenRef.current}:turn:${leg}:${ti - 1}:`);
           const next: NavTurn = {
             leg, index: ti, instruction: t.instruction, maneuver: t.maneuver, distanceM: dist,
             then: following && gap <= 300 ? following.instruction : null,
+            thenManeuver: following && gap <= 300 ? following.maneuver : null,
+            landmark: t.landmarkText,
             rider: riderCue(t),
           };
           setTurn((prev) => (sameTurn(prev, next) ? prev : next));
@@ -831,12 +955,12 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
           if (isLastLeg && profile.voiceTurns && navHints !== "off" && dist <= cues.near && dist > ARRIVAL_CUE_MIN_M
               && !spokenCuesRef.current.has(key)) {
             spokenCuesRef.current.set(key, CUE_RANK.near);
-            VoiceGuide.announce(`${endName} is ${spokenDistance(dist)} ahead.`);
+            NavVoice.say({ key: `g${routeGenRef.current}:end:${leg}`, text: `${endName} is ${spokenDistance(dist)} ahead.`, priority: P.normal });
           }
           const next: NavTurn = {
             leg, index: -1,
             instruction: isLastLeg ? `Arrive at ${endName}` : (engine.steps[leg]?.instruction ?? `Continue to ${endName}`),
-            maneuver: "straight", distanceM: dist, then: null,
+            maneuver: "straight", distanceM: dist, then: null, thenManeuver: null, landmark: null,
             rider: { word: "Straight on", detail: `to ${endName}` },
           };
           setTurn((prev) => (sameTurn(prev, next) ? prev : next));
@@ -876,7 +1000,7 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
       if (navHints === "detailed" && result.currentStopName &&
           result.currentStopName !== lastAnnouncedStopRef.current) {
         lastAnnouncedStopRef.current = result.currentStopName;
-        VoiceGuide.announce(`Now passing ${result.currentStopName}.`);
+        NavVoice.say({ key: `g${routeGenRef.current}:pass:${result.currentStopName}`, text: `Now passing ${result.currentStopName}.`, priority: P.info });
       }
 
       // Landmarks passed on the ride, once each: "Passing Naivas, on your left."
@@ -886,95 +1010,92 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
         for (const lm of rideSeg.landmarks_along) {
           if (Math.abs(lm.progress_m - prog) <= PASSING_WINDOW_M && !announcedLandmarksRef.current.has(lm.id)) {
             announcedLandmarksRef.current.add(lm.id);
-            VoiceGuide.announce(`Passing ${lm.name}, on your ${lm.side}.`);
+            NavVoice.say({ key: `lm:${lm.id}`, text: `Passing ${lm.name}, on your ${lm.side}.`, priority: P.info });
             break;
           }
         }
       }
       const alightLm = asLandmark(rideSeg?.to?.landmark);
 
+      // Getting off, Google Maps' way: "in 2 stops", then "at the next
+      // stop", and "get off here" only after a long stretch (navAlerts).
+      // In the background, one notification for the trip, replaced as it goes.
       const stopsRem = result.stopsRemaining;
       if (stopsRem != null) {
-        const last = lastAlightAlertRef.current;
-        if (stopsRem > 2 && last !== -1) {
-          lastAlightAlertRef.current = -1;
-        } else if (stopsRem === 2 && last !== 2) {
-          lastAlightAlertRef.current = 2;
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-          const alightStop2 = engineRef.current?.steps[result.stepIndex]?.stops?.at(-1)?.name;
-          if (navHints !== "off") VoiceGuide.announce(
-            alightStop2
-              ? `${withLandmark(`Prepare to alight at ${alightStop2} in 2 stops`, alightLm)}.`
-              : "Prepare to alight in 2 stops.",
-          );
-          if (appStateRef.current !== "active" && !alightWarningFiredRef.current) {
-            alightWarningFiredRef.current = true;
-            const step = engineRef.current?.steps[result.stepIndex];
-            scheduleAlightWarning(
-              Math.ceil((result.remainingDurationS ?? 120) / 60),
-              step?.stops?.at(-1)?.name ?? "your stop",
-            ).then((id) => { alightNotifIdRef.current = id; })
-              .catch(() => {});
+        if (alightCueRef.current.leg !== result.stepIndex) {
+          alightCueRef.current = { cue: null, at: 0, leg: result.stepIndex };
+        }
+        const nowMs = Date.now();
+        const cue = alightCue(stopsRem, alightCueRef.current.cue, alightCueRef.current.at, nowMs);
+        if (cue) {
+          alightCueRef.current = { cue, at: nowMs, leg: result.stepIndex };
+          const stopName = engineRef.current?.steps[result.stepIndex]?.stops?.at(-1)?.name ?? null;
+          const priority = cue === "soon" ? P.normal : P.critical;
+          if (hapticGateRef.current.allow(priority)) {
+            if (cue === "soon") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+            else Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
           }
-        } else if (stopsRem === 1 && last !== 1) {
-          lastAlightAlertRef.current = 1;
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-          const alightStop1 = engineRef.current?.steps[result.stepIndex]?.stops?.at(-1)?.name;
-          if (navHints !== "off") VoiceGuide.announce(
-            alightStop1
-              ? `${withLandmark(`Prepare to alight at ${alightStop1}`, alightLm)}.`
-              : "Prepare to alight at the next stop.",
-          );
-        } else if (stopsRem === 0 && last !== 0) {
-          lastAlightAlertRef.current = 0;
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-          const alightStop0 = engineRef.current?.steps[result.stepIndex]?.stops?.at(-1)?.name;
-          if (navHints !== "off") VoiceGuide.announce(
-            alightStop0 ? `Alight now at ${alightStop0}.` : "Alight now.",
-          );
+          if (navHints !== "off") {
+            NavVoice.say({
+              key: `g${routeGenRef.current}:alight:${result.stepIndex}:${cue}`,
+              text: alightText(cue, stopName, cue === "next" ? alightLm?.text ?? null : null),
+              priority,
+              ttlMs: 20_000,
+            });
+          }
+          if (appStateRef.current !== "active") {
+            showTripAlert(
+              cue === "soon" ? "Get off in 2 stops" : cue === "next" ? "Get off at the next stop" : "Get off here",
+              stopName ?? "Your stop",
+              cue !== "soon",
+            ).catch(() => {});
+          }
         }
       }
 
+      // Wrong way, from distance actually travelled against the route (a
+      // compass wobble or a step back at a crossing isn't turning round).
+      // On foot or a bike: a quiet note and one buzz, "Turn around" said only
+      // if it goes on. At the wheel: a new route from here, Google's way (its
+      // first instruction is the U-turn), never a "wrong way" nag.
       const smoothedHeading = rawSmoothed.heading ?? -1;
       // Whoever is in control can turn round: on foot, on a bike, at the wheel.
       const canTurnRound = profile.wrongWay === "turn-around" || profile.wrongWay === "u-turn";
       // Below the profile's speed a heading is GPS wobble, not a direction.
       const moving     = (rawSmoothed.speed ?? 0) > profile.wrongWayMinSpeed;
-      const strikesNeeded = profile.kind === "walk" ? WRONG_WAY_STRIKES_ON_FOOT : WRONG_WAY_STRIKES_VEHICLE;
+      const backLimit  = profile.kind === "walk" ? BACKWARDS_M_ON_FOOT
+        : profile.kind === "bicycle" ? BACKWARDS_M_BIKE : BACKWARDS_M_VEHICLE;
+      const prevFix = lastFixRef.current;
+      lastFixRef.current = { lat: finalLocation.latitude, lng: finalLocation.longitude };
 
-      if (canTurnRound && moving && smoothedHeading >= 0) {
+      if (canTurnRound && moving && smoothedHeading >= 0 && prevFix) {
         const delta = Math.abs(((smoothedHeading - result.routeBearing + 180) % 360) - 180);
-        if (delta > 120) {
-          wrongDirStrikesRef.current++;
-          if (wrongDirStrikesRef.current >= strikesNeeded && !wrongDirAnnouncedRef.current) {
-            wrongDirAnnouncedRef.current = true;
-            NavMetrics.event("wrong_direction", null, { mode: profile.kind });
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-            if (navHints !== "off") VoiceGuide.announce(
-              profile.wrongWay === "u-turn"
-                ? "You're going the wrong way. Make a U-turn when it's safe."
-                : "You're heading the wrong way. Turn around.",
-            );
-            if (appStateRef.current !== "active" && !wrongDirNotifIdRef.current) {
-              scheduleWrongDirectionAlert()
-                .then((id) => { wrongDirNotifIdRef.current = id; })
-                .catch(() => {});
-            }
-          }
-        } else {
-          wrongDirStrikesRef.current = Math.max(0, wrongDirStrikesRef.current - 1);
-          if (delta < 60) {
-            wrongDirAnnouncedRef.current = false;
-            if (wrongDirNotifIdRef.current) {
-              cancelNotification(wrongDirNotifIdRef.current).catch(() => {});
-              wrongDirNotifIdRef.current = null;
-            }
-          }
-        }
-      } else {
-        wrongDirStrikesRef.current = 0;
+        const stepM = distM(prevFix.lat, prevFix.lng, finalLocation.latitude, finalLocation.longitude);
+        if (delta > 120) backwardsMRef.current += Math.min(stepM, 60);
+        else if (delta < 60) backwardsMRef.current = 0;
+      } else if (!canTurnRound) {
+        backwardsMRef.current = 0;
       }
-      setWrongDirection(wrongDirStrikesRef.current >= strikesNeeded);
+      const goingBack = canTurnRound && backwardsMRef.current >= backLimit;
+      if (goingBack && !wrongDirAnnouncedRef.current) {
+        wrongDirAnnouncedRef.current = true;
+        NavMetrics.event("wrong_direction", null, { mode: profile.kind });
+        if (profile.wrongWay === "u-turn") {
+          forceRerouteRef.current = true;
+          backwardsMRef.current = 0;
+        } else if (hapticGateRef.current.allow(P.normal)) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+        }
+      }
+      if (profile.wrongWay === "turn-around" && navHints !== "off" && backwardsMRef.current >= backLimit * 2) {
+        NavVoice.say({
+          key: `g${routeGenRef.current}:turnaround:${result.stepIndex}:${Math.floor(Date.now() / 60_000)}`,
+          text: "You're heading the wrong way. Turn around.",
+          priority: P.normal,
+        });
+      }
+      if (backwardsMRef.current === 0) wrongDirAnnouncedRef.current = false;
+      setWrongDirection(goingBack && profile.wrongWay === "turn-around");
 
       // A passenger can't turn round, but should know when the car or the boda
       // is carrying them away from where they're going.
@@ -988,7 +1109,7 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
           );
           if (away && !headingAwayRef.current) {
             NavMetrics.event("heading_away", null, { mode: profile.kind });
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+            if (hapticGateRef.current.allow(P.normal)) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
           }
           if (away !== headingAwayRef.current) {
             headingAwayRef.current = away;
@@ -998,6 +1119,40 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
       } else if (headingAwayRef.current) {
         headingAwayRef.current = false;
         setHeadingAway(false);
+      }
+
+      // Road reports on the way ahead (Waze's habit): said once, to whoever
+      // is in control, at about 30 s in a vehicle or a block on foot; shown
+      // to everyone. Once passed, "Still there?" so the map stays honest.
+      if (hazardsRef.current.length && engineRef.current) {
+        const engine = engineRef.current;
+        const total = engine.totalDistM || 1;
+        const progressM = ((engine.totalDistM - result.remainingDistanceM) / total) * (routeLengthRef.current || total);
+        const { ahead, passed } = hazardsNear(hazardsRef.current, progressM, profile.kind, speed);
+        if (ahead) {
+          if (speaksHazard(profile.kind, profile.role) && navHints !== "off") {
+            NavVoice.say({
+              key: `hazard:${ahead.id}`,
+              text: hazardText(String(ahead.type), ahead.aheadM),
+              priority: ahead.type === "accident" || ahead.type === "road_blocked" ? P.high : P.normal,
+              ttlMs: 10_000,
+            });
+          }
+          const next: NavHazard = {
+            id: ahead.id, type: String(ahead.type), aheadM: ahead.aheadM, passed: false,
+            source: ahead.source ?? "community", upvotes: ahead.upvotes ?? 0, createdAt: ahead.created_at ?? null,
+          };
+          setHazard((prev) =>
+            prev && prev.id === next.id && !prev.passed && Math.round((prev.aheadM ?? 0) / 25) === Math.round((next.aheadM ?? 0) / 25)
+              ? prev : next);
+        } else if (passed && !votedHazardsRef.current.has(passed.id)) {
+          setHazard((prev) => prev && prev.id === passed.id && prev.passed ? prev : {
+            id: passed.id, type: String(passed.type), aheadM: null, passed: true,
+            source: "community", upvotes: passed.upvotes ?? 0, createdAt: passed.created_at ?? null,
+          });
+        } else {
+          setHazard((prev) => (prev ? null : prev));
+        }
       }
 
       const nowMs = Date.now();
@@ -1038,7 +1193,7 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
             stepIndexRef.current     = 0;
             prevStepIndexRef.current = 0;
             lastAnnouncedRef.current = "";
-            lastAlightAlertRef.current = -1;
+            alightCueRef.current = { cue: null, at: 0, leg: -1 };
 
             const hints = usePrefsStore.getState().prefs.navHints;
             if (hints !== "off") {
@@ -1145,7 +1300,7 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
       }
       VoiceGuide.stop();
       setWrongDirection(false);
-      wrongDirStrikesRef.current   = 0;
+      backwardsMRef.current        = 0;
       wrongDirAnnouncedRef.current = false;
     };
   }, [isNavigating, handleLocationUpdate]);
@@ -1208,14 +1363,19 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
     if (activeJourney) {
       setTripStatus("IN_TRANSIT");
 
-      wrongDirStrikesRef.current   = 0;
+      backwardsMRef.current        = 0;
       wrongDirAnnouncedRef.current = false;
       lastSaveTimeRef.current      = 0;
       prevSavedStepRef.current     = -1;
-      alightWarningFiredRef.current = false;
-      alightNotifIdRef.current      = null;
-      wrongDirNotifIdRef.current    = null;
       spokenCuesRef.current         = new Map();
+      alightCueRef.current          = { cue: null, at: 0, leg: -1 };
+      lastFixRef.current            = null;
+      forceRerouteRef.current       = false;
+      votedHazardsRef.current       = new Set();
+      setHazard(null);
+      setToast(null);
+      NavVoice.resetKeys();
+      setTripActive(true);
       lastRerouteAtRef.current      = 0;
       phaseRef.current.reset();
       alightUndoRef.current         = null;
@@ -1325,7 +1485,20 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
     NavMetrics.endSession(lastRemainingMRef.current).catch(() => {});
     disarmAlightGeofence().catch(() => {});
     VoiceGuide.stop();
+    setTripActive(false);
+    clearTripAlert().catch(() => {});
+    setHazard(null);
+    setToast(null);
   }, [setTripStatus, syncPhase]);
+
+  /** "Still there?" answered: the report is confirmed or doubted for everyone. */
+  const voteHazard = useCallback((id: string, stillThere: boolean) => {
+    votedHazardsRef.current.add(id);
+    setHazard((prev) => (prev?.id === id ? null : prev));
+    setToast({ text: stillThere ? "Thanks, confirmed for others" : "Thanks, we'll let others know", at: Date.now() });
+    if (!stillThere) hazardsRef.current = hazardsRef.current.filter((h) => h.id !== id);
+    ReportService.voteReport(id, stillThere ? "up" : "down").catch(() => {});
+  }, []);
 
   /**
    * Manual boarding trigger ("I'm on board"). GPS-based transit detection is
@@ -1352,7 +1525,7 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
     lastAnnouncedRef.current     = "";
     lastAnnouncedStopRef.current = null;
     prevApproachPhaseRef.current = null;
-    lastAlightAlertRef.current   = -1;
+    alightCueRef.current = { cue: null, at: 0, leg: -1 };
     setCanBoardTransit(false);
     useJourneyStore.getState().setTripStatus("IN_TRANSIT");
     phaseRef.current.set("ride");
@@ -1455,5 +1628,8 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
     canAlight,
     alightTransit,
     startRide,
+    hazard,
+    voteHazard,
+    toast,
   };
 }
