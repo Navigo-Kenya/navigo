@@ -1,15 +1,18 @@
 // store/mapIntentStore.ts
 //
 // Asks the map screen to show something, from a sheet that lives outside it
-// (the Transit and Saved tabs): a stop with its departures, a line with its
-// stops. The map takes the intent once (consume) and
-// acts as if the user had tapped it there.
+// (the Transit, Saved and Contribute tabs): a stop with its departures, a
+// line with its stops, the report sheet (with a type already picked). The
+// map takes the intent once (consume) and acts as if the user had tapped it
+// there.
 import { create } from "zustand";
 import type { Stop } from "@/utils/mapHelpers";
+import type { ReportCategory } from "@/services/report";
 
 export type MapIntent =
   | { kind: "stop"; stop: Stop }
-  | { kind: "line"; routeId: string };
+  | { kind: "line"; routeId: string }
+  | { kind: "report"; type?: ReportCategory | null };
 
 interface MapIntentState {
   intent: (MapIntent & { at: number }) | null;

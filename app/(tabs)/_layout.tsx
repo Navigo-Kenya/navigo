@@ -429,7 +429,7 @@ export default function TabsLayout() {
           <GuestWall
             icon="megaphone-outline"
             title="Contribute to Navigo"
-            subtitle="Sign in to report stage queues, traffic, and earn Navigo Points."
+            subtitle="Sign in to report stage queues, traffic, and earn Safiri Points."
           />
         )}
       </DraggableSheet>

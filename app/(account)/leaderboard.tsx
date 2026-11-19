@@ -1,263 +1,305 @@
 // app/(account)/leaderboard.tsx
+//
+// Who keeps Navigo honest. This week first (from Monday, Nairobi time, so
+// everyone starts level and there's a reset to count down to), all time
+// beside it.
+//   - The top three on a podium, in the badge tiers' metals: Dhahabu gold,
+//     Fedha silver, Shaba copper.
+//   - Everyone else with their level.
+//   - You, pinned at the bottom wherever you are, with what's next: "12
+//     points to pass Wanjiru".
 import { ScreenHeader } from "@/components/app/ScreenHeader";
-import { ContributionService } from "@/services/contribution";
-import { useAuthStore } from "@/store/authStore";
-import { Image } from "expo-image";
-import { useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  useColorScheme,
-} from "react-native";
+import { TIERS } from "@/components/badges/NavigoBadge";
+import { LEVELS, levelFor } from "@/components/badges/levels";
 import { Icon } from "@/components/icons/Icon";
+import { PressableScale } from "@/components/ui/PressableScale";
+import { ContributionService, type Leaderboard, type LeaderboardEntry, type Standing } from "@/services/contribution";
+import { useAuthStore } from "@/store/authStore";
+import { useContributionStore } from "@/store/contributionStore";
+import { firstName, nextStep, resetsIn } from "@/utils/leaderboard";
+import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
+import * as Haptics from "expo-haptics";
+import { useCallback, useEffect, useState } from "react";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View, useColorScheme } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const ORANGE = "#FF6F00";
-const GREY   = "#8E8E93";
-const GOLD   = "#F59E0B";
-const SILVER = "#9CA3AF";
-const BRONZE = "#B45309";
+type Period = "weekly" | "all";
 
 function makeC(dark: boolean) {
   return {
-    bg:       dark ? "#0F0F0F" : "#F6F7F8",
-    card:     dark ? "#1C1C1E" : "#FFFFFF",
-    text:     dark ? "#FFFFFF" : "#1C1C1E",
-    sub:      dark ? GREY      : "#6B7280",
-    border:   dark ? "#2C2C2E" : "#E5E7EB",
-    hairline: dark ? "#2C2C2E" : "#E5E7EB",
-    ownRow:   dark ? "rgba(255,111,0,0.14)" : "#FFF3E0",
+    bg: dark ? "#0F0F10" : "#F6F7F8",
+    card: dark ? "#1C1C1F" : "#FFFFFF",
+    text: dark ? "#F4F4F5" : "#111827",
+    sub: dark ? "#A1A1AA" : "#6B7280",
+    line: dark ? "#232326" : "#EEF0F3",
+    seg: dark ? "#232326" : "#E9EAEE",
+    mine: dark ? "rgba(255,111,0,0.16)" : "#FFF4EB",
+    skel: dark ? "#232326" : "#ECEDF0",
   };
 }
+type Palette = ReturnType<typeof makeC>;
 
-type Entry = { id: number; name: string; avatar: string | null; points: number };
+/** Podium metals, from the badge tiers. */
+const METAL = { 1: TIERS[2].metal, 2: TIERS[1].metal, 3: TIERS[0].metal } as const;
+const METAL_NAME = { 1: TIERS[2].name, 2: TIERS[1].name, 3: TIERS[0].name } as const;
 
-function initials(name: string): string {
-  return name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+const initials = (name: string) =>
+  name.split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "?";
+
+function levelOf(e: LeaderboardEntry, period: Period) {
+  if (e.level) return LEVELS[Math.min(LEVELS.length, Math.max(1, e.level)) - 1];
+  return levelFor(period === "all" ? e.points : e.total_points ?? 0);
 }
 
-function Avatar({ entry, size }: { entry: Entry; size: number }) {
-  const showImg = entry.avatar && !entry.avatar.startsWith("data:");
-  return showImg ? (
-    <Image
-      source={{ uri: entry.avatar! }}
-      style={{ width: size, height: size, borderRadius: size / 2 }}
-      contentFit="cover"
-    />
-  ) : (
-    <View
-      style={[
-        a.fallback,
-        { width: size, height: size, borderRadius: size / 2, backgroundColor: ORANGE },
-      ]}
-    >
-      <Text style={[a.fallbackText, { fontSize: size * 0.36 }]}>{initials(entry.name)}</Text>
-    </View>
-  );
-}
-
-const a = StyleSheet.create({
-  fallback:     { alignItems: "center", justifyContent: "center" },
-  fallbackText: { color: "#FFF", fontWeight: "700" },
-});
-
-function PodiumStep({
-  entry,
-  rank,
-  height,
-  avatarSize,
-  color,
-  C,
-}: {
-  entry: Entry | undefined;
-  rank: number;
-  height: number;
-  avatarSize: number;
-  color: string;
-  C: ReturnType<typeof makeC>;
-}) {
-  if (!entry) return <View style={{ flex: 1 }} />;
-  const medal = rank === 1 ? "trophy" : "medal-outline";
-
+function Avatar({ e, size, ring }: { e: LeaderboardEntry; size: number; ring: string }) {
+  const img = e.avatar && !e.avatar.startsWith("data:") ? e.avatar : null;
   return (
-    <View style={p.item}>
-      <View style={p.topSection}>
-        <Icon name={medal as any} size={rank === 1 ? 20 : 16} color={color} style={{ marginBottom: 4 }} />
-        <View style={[p.avatarRing, { borderColor: color }]}>
-          <Avatar entry={entry} size={avatarSize} />
-        </View>
-        <Text style={[p.name, { color: C.text }]} numberOfLines={1}>{entry.name}</Text>
-        <Text style={[p.pts, { color: color }]}>{entry.points.toLocaleString()} pts</Text>
-      </View>
-      <View style={[p.step, { height, backgroundColor: color + "28", borderTopColor: color }]}>
-        <Text style={[p.rank, { color }]}>#{rank}</Text>
-      </View>
-    </View>
-  );
-}
-
-const p = StyleSheet.create({
-  item:       { flex: 1, alignItems: "center" },
-  topSection: { alignItems: "center", paddingBottom: 10 },
-  avatarRing: { borderWidth: 2.5, borderRadius: 999, padding: 2, marginBottom: 6 },
-  name:       { fontSize: 12, fontWeight: "700", maxWidth: 90, textAlign: "center" },
-  pts:        { fontSize: 11, fontWeight: "600", marginTop: 2 },
-  step:       { width: "100%", borderTopLeftRadius: 10, borderTopRightRadius: 10, borderTopWidth: 2, alignItems: "center", justifyContent: "center" },
-  rank:       { fontSize: 18, fontWeight: "800" },
-});
-
-function RankRow({
-  entry,
-  rank,
-  isOwn,
-  C,
-}: {
-  entry: Entry;
-  rank: number;
-  isOwn: boolean;
-  C: ReturnType<typeof makeC>;
-}) {
-  return (
-    <View style={[r.row, { borderBottomColor: C.border }, isOwn && { backgroundColor: C.ownRow }]}>
-      <Text style={[r.rank, { color: C.sub }]}>#{rank}</Text>
-      <Avatar entry={entry} size={32} />
-      <Text style={[r.name, { color: C.text }, isOwn && { color: ORANGE }]} numberOfLines={1}>
-        {entry.name}
-        {isOwn ? "  (You)" : ""}
-      </Text>
-      <Text style={[r.pts, { color: isOwn ? ORANGE : C.sub }]}>
-        {entry.points.toLocaleString()} pts
-      </Text>
-    </View>
-  );
-}
-
-const r = StyleSheet.create({
-  row:  { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
-  rank: { width: 30, fontSize: 13, fontWeight: "700", textAlign: "center" },
-  name: { flex: 1, fontSize: 14, fontWeight: "500" },
-  pts:  { fontSize: 13, fontWeight: "700" },
-});
-
-export default function LeaderboardScreen() {
-  const dark = useColorScheme() === "dark";
-  const C    = makeC(dark);
-  const { user } = useAuthStore();
-
-  const [period, setPeriod]   = useState<"all" | "weekly">("all");
-  const [data, setData]       = useState<Entry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState(false);
-
-  const load = (p: "all" | "weekly" = period) => {
-    setLoading(true);
-    setError(false);
-    ContributionService.getLeaderboard(p)
-      .then(setData)
-      .catch(() => setError(true))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => { load(period); }, [period]);
-
-  const [second, first, third] = [data[1], data[0], data[2]];
-  const rest = data.slice(3);
-
-  return (
-    <View style={[ls.root, { backgroundColor: C.bg }]}>
-      <ScreenHeader
-        title="Community Leaderboard"
-        C={{ bg: C.card, text: C.text, hairline: C.hairline }}
-      />
-
-      {loading ? (
-        <View style={ls.center}>
-          <ActivityIndicator size="large" color={ORANGE} />
-        </View>
-      ) : error ? (
-        <View style={ls.center}>
-          <Icon name="cloud-offline-outline" size={40} color={C.sub} />
-          <Text style={[ls.errorText, { color: C.sub }]}>Could not load leaderboard</Text>
-          <Pressable style={ls.retryBtn} onPress={load}>
-            <Text style={ls.retryText}>Try again</Text>
-          </Pressable>
-        </View>
-      ) : data.length === 0 ? (
-        <View style={ls.center}>
-          <Icon name="trophy-outline" size={40} color={C.sub} />
-          <Text style={[ls.errorText, { color: C.sub }]}>No entries yet</Text>
-        </View>
+    <View style={{ width: size + 6, height: size + 6, borderRadius: (size + 6) / 2, borderWidth: 3, borderColor: ring, alignItems: "center", justifyContent: "center" }}>
+      {img ? (
+        <Image source={{ uri: img }} style={{ width: size - 2, height: size - 2, borderRadius: size / 2 }} contentFit="cover" />
       ) : (
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
-          {/* Period tabs */}
-          <View style={[ls.tabs, { backgroundColor: C.card }]}>
-            {(["all", "weekly"] as const).map((p) => (
-              <Pressable
-                key={p}
-                onPress={() => setPeriod(p)}
-                style={[ls.tab, period === p && { backgroundColor: ORANGE }]}
-              >
-                <Text style={[ls.tabText, { color: period === p ? "#FFF" : C.sub }]}>
-                  {p === "all" ? "All Time" : "This Week"}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          {/* Podium */}
-          <View style={[ls.podiumWrapper, { backgroundColor: C.card }]}>
-            <Text style={[ls.podiumTitle, { color: C.sub }]}>
-              {period === "weekly" ? "TOP THIS WEEK" : "TOP CONTRIBUTORS"}
-            </Text>
-            <View style={ls.podium}>
-              <PodiumStep entry={second} rank={2} height={72}  avatarSize={44} color={SILVER} C={C} />
-              <PodiumStep entry={first}  rank={1} height={100} avatarSize={56} color={GOLD}   C={C} />
-              <PodiumStep entry={third}  rank={3} height={56}  avatarSize={40} color={BRONZE} C={C} />
-            </View>
-          </View>
-
-          {/* Ranked list */}
-          {rest.length > 0 && (
-            <View style={[ls.listCard, { backgroundColor: C.card, borderColor: C.border }]}>
-              {rest.map((entry, i) => (
-                <RankRow
-                  key={entry.id}
-                  entry={entry}
-                  rank={i + 4}
-                  isOwn={entry.id === user?.id}
-                  C={C}
-                />
-              ))}
-            </View>
-          )}
-
-          {/* Current user's own position if in top 3 */}
-          {data.slice(0, 3).some((e) => e.id === user?.id) && (
-            <Text style={[ls.ownNote, { color: ORANGE }]}>
-              You're in the top 3!
-            </Text>
-          )}
-        </ScrollView>
+        <View style={{ width: size - 2, height: size - 2, borderRadius: size / 2, backgroundColor: ring, alignItems: "center", justifyContent: "center" }}>
+          <Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: size * 0.36 }}>{initials(e.name)}</Text>
+        </View>
       )}
     </View>
   );
 }
 
-const ls = StyleSheet.create({
-  root:         { flex: 1 },
-  center:       { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-  errorText:    { fontSize: 15, fontWeight: "500" },
-  retryBtn:     { marginTop: 4, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: ORANGE, borderRadius: 10 },
-  retryText:    { color: "#FFF", fontWeight: "700", fontSize: 14 },
-  tabs:         { flexDirection: "row", marginHorizontal: 16, marginTop: 16, borderRadius: 12, padding: 4, gap: 4 },
-  tab:          { flex: 1, paddingVertical: 8, borderRadius: 9, alignItems: "center" },
-  tabText:      { fontSize: 13, fontWeight: "600" },
-  podiumWrapper:{ marginHorizontal: 16, marginTop: 10, borderRadius: 16, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 0, overflow: "hidden" },
-  podiumTitle:  { fontSize: 11, fontWeight: "700", letterSpacing: 0.6, textAlign: "center", marginBottom: 16 },
-  podium:       { flexDirection: "row", alignItems: "flex-end", gap: 8, minHeight: 200 },
-  listCard:     { marginHorizontal: 16, marginTop: 12, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },
-  ownNote:      { textAlign: "center", fontWeight: "700", fontSize: 13, marginTop: 12 },
+function Podium({ top, period, meId, C }: { top: LeaderboardEntry[]; period: Period; meId?: number; C: Palette }) {
+  // 2 · 1 · 3, the middle step highest.
+  const order: [LeaderboardEntry | undefined, 1 | 2 | 3][] = [[top[1], 2], [top[0], 1], [top[2], 3]];
+  return (
+    <View style={s.podium}>
+      {order.map(([e, rank]) => {
+        if (!e) return <View key={rank} style={{ flex: 1 }} />;
+        const metal = METAL[rank];
+        const big = rank === 1;
+        return (
+          <View key={rank} style={s.podItem}>
+            {big ? <Icon name="trophy" size={20} color={metal[1]} style={{ marginBottom: 4 }} /> : null}
+            <Avatar e={e} size={big ? 62 : 50} ring={metal[1]} />
+            <Text style={[s.podName, { color: C.text }]} numberOfLines={1}>{e.id === meId ? "You" : firstName(e.name)}</Text>
+            {period === "all" || e.level || e.total_points ? (
+              <Text style={[s.podLevel, { color: levelOf(e, period).color }]} numberOfLines={1}>{levelOf(e, period).name}</Text>
+            ) : null}
+            <Text style={[s.podPts, { color: C.sub }]}>{e.points.toLocaleString()} pts</Text>
+            <LinearGradient colors={[metal[0], metal[1]]} style={[s.step, { height: big ? 74 : rank === 2 ? 56 : 44 }]}>
+              <Text style={s.stepRank}>{rank}</Text>
+              <Text style={s.stepMetal}>{METAL_NAME[rank].toUpperCase()}</Text>
+            </LinearGradient>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function RankRow({ e, rank, mine, period, C }: { e: LeaderboardEntry; rank: number; mine: boolean; period: Period; C: Palette }) {
+  const lvl = levelOf(e, period);
+  return (
+    <View style={[s.row, mine && { backgroundColor: C.mine }]}>
+      <Text style={[s.rank, { color: mine ? ORANGE : C.sub }]}>{rank}</Text>
+      <Avatar e={e} size={34} ring={lvl.color} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[s.name, { color: mine ? ORANGE : C.text }]} numberOfLines={1}>{mine ? `${e.name} (you)` : e.name}</Text>
+        <Text style={[s.level, { color: C.sub }]} numberOfLines={1}>{lvl.name}</Text>
+      </View>
+      <Text style={[s.pts, { color: mine ? ORANGE : C.text }]}>{e.points.toLocaleString()}</Text>
+    </View>
+  );
+}
+
+export default function LeaderboardScreen() {
+  const dark = useColorScheme() === "dark";
+  const C = makeC(dark);
+  const insets = useSafeAreaInsets();
+  const user = useAuthStore((st) => st.user);
+  const stats = useContributionStore((st) => st.stats);
+
+  const [period, setPeriod] = useState<Period>("weekly");
+  const [boards, setBoards] = useState<Partial<Record<Period, Leaderboard>>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async (p: Period) => {
+    setError(false);
+    try {
+      const b = await ContributionService.getLeaderboard(p);
+      setBoards((x) => ({ ...x, [p]: b }));
+    } catch {
+      setError(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (boards[period]) return;
+    setLoading(true);
+    load(period).finally(() => setLoading(false));
+  }, [period, boards, load]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    await load(period);
+    setRefreshing(false);
+  };
+
+  const board = boards[period];
+  const data = board?.data ?? [];
+  const weekly = period === "weekly";
+  // Older APIs don't send `me`: the profile's rank stands in.
+  const me: Standing | null =
+    board?.me ??
+    (stats?.rank
+      ? { rank: weekly ? stats.rank.weekly : stats.rank.all, points: weekly ? stats.rank.weekly_points : stats.points, ahead: null }
+      : null);
+  const myIndex = data.findIndex((e) => e.id === user?.id);
+  const reset = weekly ? resetsIn(board?.resets_at) : null;
+
+  return (
+    <View style={[s.root, { backgroundColor: C.bg }]}>
+      <ScreenHeader title="Leaderboard" C={{ bg: C.bg, text: C.text, hairline: C.line }} />
+
+      <View style={[s.seg, { backgroundColor: C.seg }]}>
+        {(["weekly", "all"] as Period[]).map((p) => {
+          const on = p === period;
+          return (
+            <Pressable
+              key={p}
+              onPress={() => { Haptics.selectionAsync(); setPeriod(p); }}
+              style={[s.segBtn, on && { backgroundColor: C.card }]}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: on }}
+            >
+              <Text style={[s.segText, { color: on ? C.text : C.sub }]}>{p === "weekly" ? "This week" : "All time"}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {reset ? (
+        <View style={s.resetRow}>
+          <Icon name="time-outline" size={13} color={C.sub} />
+          <Text style={[s.resetText, { color: C.sub }]}>{reset} · Monday 00:00</Text>
+        </View>
+      ) : null}
+
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: insets.bottom + (user ? 110 : 24), flexGrow: 1 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={ORANGE} />}
+        showsVerticalScrollIndicator={false}
+      >
+        {loading && !board ? (
+          <View style={{ padding: 16, gap: 12 }}>
+            <View style={[s.skelPodium, { backgroundColor: C.skel }]} />
+            {[0, 1, 2, 3, 4].map((i) => <View key={i} style={[s.skelRow, { backgroundColor: C.skel }]} />)}
+          </View>
+        ) : error && !board ? (
+          <View style={s.center}>
+            <Icon name="cloud-offline-outline" size={40} color={C.sub} />
+            <Text style={[s.centerText, { color: C.sub }]}>Couldn&apos;t load the board.</Text>
+            <PressableScale onPress={() => { setLoading(true); load(period).finally(() => setLoading(false)); }} style={s.retry}>
+              <Text style={s.retryText}>Try again</Text>
+            </PressableScale>
+          </View>
+        ) : data.length === 0 ? (
+          <View style={s.center}>
+            <Icon name="trophy-outline" size={44} color={C.sub} />
+            <Text style={[s.centerTitle, { color: C.text }]}>{weekly ? "A fresh week" : "No one yet"}</Text>
+            <Text style={[s.centerText, { color: C.sub }]}>
+              {weekly ? "Nobody has scored this week. One road report puts you first." : "Be the first: report a jam or review a stage."}
+            </Text>
+          </View>
+        ) : (
+          <>
+            <View style={[s.podiumCard, { backgroundColor: C.card }]}>
+              <Podium top={data.slice(0, 3)} period={period} meId={user?.id} C={C} />
+            </View>
+            {data.length > 3 ? (
+              <View style={[s.list, { backgroundColor: C.card }]}>
+                {data.slice(3).map((e, i) => (
+                  <View key={e.id}>
+                    {i > 0 ? <View style={[s.sep, { backgroundColor: C.line }]} /> : null}
+                    <RankRow e={e} rank={i + 4} mine={e.id === user?.id} period={period} C={C} />
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            <Text style={[s.howto, { color: C.sub }]}>
+              Points come from road reports, reviews, photos and fixes{weekly ? " made since Monday" : ""}. Reports the community dismisses don&apos;t count.
+            </Text>
+          </>
+        )}
+      </ScrollView>
+
+      {/* You, wherever you are on the board */}
+      {user && board ? (
+        <View style={[s.meBar, { backgroundColor: C.card, paddingBottom: insets.bottom + 12 }]}>
+          <View style={[s.meRank, { backgroundColor: ORANGE }]}>
+            <Text style={s.meRankText}>{me?.rank ? `#${me.rank}` : "–"}</Text>
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[s.meTitle, { color: C.text }]} numberOfLines={1}>
+              You · {(me?.points ?? 0).toLocaleString()} pts{weekly ? " this week" : ""}
+            </Text>
+            <Text style={[s.meSub, { color: C.sub }]} numberOfLines={2}>
+              {myIndex >= 0 && myIndex < 3 ? `On the podium, ${METAL_NAME[(myIndex + 1) as 1 | 2 | 3]}. ` : ""}
+              {nextStep(me, weekly)}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+const s = StyleSheet.create({
+  root: { flex: 1 },
+  seg: { flexDirection: "row", marginHorizontal: 16, marginTop: 10, padding: 4, borderRadius: 14 },
+  segBtn: { flex: 1, height: 36, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  segText: { fontSize: 14, fontWeight: "800" },
+  resetRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingTop: 8 },
+  resetText: { fontSize: 12.5, fontWeight: "600" },
+
+  podiumCard: { marginHorizontal: 14, marginTop: 12, borderRadius: 22, paddingTop: 18, paddingHorizontal: 10, overflow: "hidden" },
+  podium: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
+  podItem: { flex: 1, alignItems: "center" },
+  podName: { fontSize: 13.5, fontWeight: "800", marginTop: 6, maxWidth: "100%" },
+  podPts: { fontSize: 12, fontWeight: "600", marginBottom: 8 },
+  step: { width: "100%", borderTopLeftRadius: 12, borderTopRightRadius: 12, alignItems: "center", justifyContent: "center" },
+  stepRank: { color: "#FFFFFF", fontSize: 22, fontWeight: "900", textShadowColor: "rgba(0,0,0,0.25)", textShadowRadius: 3 },
+  stepMetal: { color: "#FFFFFF", fontSize: 9, fontWeight: "900", letterSpacing: 1 },
+  podLevel: { fontSize: 11, fontWeight: "800", marginTop: 1 },
+
+  list: { marginHorizontal: 14, marginTop: 12, borderRadius: 20, overflow: "hidden" },
+  row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 10 },
+  rank: { width: 26, fontSize: 14, fontWeight: "900", textAlign: "center" },
+  name: { fontSize: 14.5, fontWeight: "700" },
+  level: { fontSize: 12, marginTop: 1 },
+  pts: { fontSize: 15, fontWeight: "900" },
+  sep: { height: StyleSheet.hairlineWidth, marginLeft: 92 },
+  howto: { fontSize: 12, lineHeight: 17, textAlign: "center", paddingHorizontal: 28, paddingTop: 14 },
+
+  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10, paddingHorizontal: 36, paddingBottom: 40 },
+  centerTitle: { fontSize: 19, fontWeight: "800" },
+  centerText: { fontSize: 14, textAlign: "center", lineHeight: 20 },
+  retry: { marginTop: 6, paddingHorizontal: 20, height: 42, borderRadius: 21, backgroundColor: ORANGE, justifyContent: "center" },
+  retryText: { color: "#FFFFFF", fontWeight: "800", fontSize: 14 },
+
+  skelPodium: { height: 200, borderRadius: 22 },
+  skelRow: { height: 54, borderRadius: 14 },
+
+  meBar: {
+    position: "absolute", left: 0, right: 0, bottom: 0,
+    flexDirection: "row", alignItems: "center", gap: 12,
+    paddingHorizontal: 16, paddingTop: 12,
+    borderTopLeftRadius: 22, borderTopRightRadius: 22,
+    shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 16, shadowOffset: { width: 0, height: -4 }, elevation: 12,
+  },
+  meRank: { minWidth: 52, height: 40, borderRadius: 12, paddingHorizontal: 8, alignItems: "center", justifyContent: "center" },
+  meRankText: { color: "#FFFFFF", fontSize: 16, fontWeight: "900" },
+  meTitle: { fontSize: 15, fontWeight: "800" },
+  meSub: { fontSize: 12.5, marginTop: 1, lineHeight: 17 },
 });

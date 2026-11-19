@@ -1,15 +1,33 @@
 // app/(account)/notification-inbox.tsx
+//
+// The inbox, read the way Snapchat reads chats: a coloured circle for each
+// kind (trips, service alerts, points, Navigo), the title in bold while
+// it's new, and a status line, a filled mark "New alert · 3m" or an outline
+// "Opened · 2h". Chips filter by kind. A tap opens what it's about (and
+// marks it read); one with nowhere to go opens up to show all its text.
+// Hold one for its actions. Pull to refresh.
 import { ScreenHeader } from "@/components/app/ScreenHeader";
 import ApiClient from "@/services/apiClient";
 import { CacheService, CACHE_KEYS, CACHE_TTL } from "@/services/cache";
+import {
+  KIND_META,
+  KIND_ORDER,
+  kindOf,
+  sectionOf,
+  statusLine,
+  type NotifKind,
+} from "@/services/inAppNotifications";
 import { useNotificationStore } from "@/store/notificationStore";
-import { Ionicons } from "@expo/vector-icons";
+import { useActionSheet } from "@/components/ui/ActionSheet";
+import { PressableScale } from "@/components/ui/PressableScale";
 import { useRouter } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import * as Haptics from "expo-haptics";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -20,423 +38,326 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Icon } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
-const GREY   = "#8E8E93";
-
-// ── API types ─────────────────────────────────────────────────────────────────
 
 interface ApiNotification {
-  id:         number;
-  type:       string;
-  title:      string;
-  body:       string;
-  data:       Record<string, unknown> | null;
-  read_at:    string | null;
+  id: number;
+  type: string;
+  title: string;
+  body: string;
+  data: Record<string, unknown> | null;
+  read_at: string | null;
   created_at: string;
 }
 
 interface PaginatedResponse {
-  data:         ApiNotification[];
+  data: ApiNotification[];
   current_page: number;
-  last_page:    number;
+  last_page: number;
 }
 
-// ── Category derivation from notification type ────────────────────────────────
-
-type NotifCategory = "transit" | "community" | "system" | "journey";
-
-const TYPE_TO_CATEGORY: Record<string, NotifCategory> = {
-  route_changes:    "transit",
-  disruptions:      "transit",
-  stop_updates:     "transit",
-  bus_arriving:     "transit",
-  journey_reminder: "journey",
-  turn_by_turn:     "journey",
-  alight_warning:   "journey",
-  arrival:          "journey",
-  wrong_direction:  "journey",
-  nearby_contrib:   "community",
-  points_earned:    "community",
-  tips:             "system",
-  app_news:         "system",
-};
-
-function categoryFor(type: string): NotifCategory {
-  return TYPE_TO_CATEGORY[type] ?? "system";
-}
-
-const CATEGORY_META: Record<NotifCategory, { icon: keyof typeof Ionicons.glyphMap; color: string; bg: string; darkBg: string }> = {
-  transit:   { icon: "bus",             color: ORANGE,    bg: "#FFF3E0", darkBg: "rgba(255,111,0,0.18)"  },
-  community: { icon: "people",          color: "#10B981", bg: "#F0FFF4", darkBg: "rgba(16,185,129,0.15)" },
-  system:    { icon: "information",     color: "#3B82F6", bg: "#EFF6FF", darkBg: "rgba(59,130,246,0.15)" },
-  journey:   { icon: "navigate-circle", color: "#8B5CF6", bg: "#F5F3FF", darkBg: "rgba(139,92,246,0.15)" },
-};
-
-// ── Color factory ─────────────────────────────────────────────────────────────
+type Filter = "all" | NotifKind;
 
 function makeC(dark: boolean) {
   return {
-    bg:       dark ? "#0F0F0F" : "#F6F7F8",
-    card:     dark ? "#1C1C1E" : "#FFFFFF",
-    text:     dark ? "#FFFFFF" : "#1C1C1E",
-    sub:      dark ? GREY      : "#6B7280",
-    hairline: dark ? "#2C2C2E" : "#E5E7EB",
-    unread:   dark ? "#2C2C2E" : "#FFF8F4",
+    bg: dark ? "#0F0F10" : "#FFFFFF",
+    text: dark ? "#F4F4F5" : "#111827",
+    sub: dark ? "#A1A1AA" : "#6B7280",
+    line: dark ? "#232326" : "#F1F2F4",
+    chip: dark ? "#232326" : "#F3F4F6",
+    pressed: dark ? "#1C1C1F" : "#F7F7F8",
   };
 }
+type Palette = ReturnType<typeof makeC>;
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+const screenOf = (n: ApiNotification) => (typeof n.data?.screen === "string" ? (n.data.screen as string) : null);
 
-function formatTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1)    return "Just now";
-  if (m < 60)   return `${m}m ago`;
-  if (m < 1440) return `${Math.floor(m / 60)}h ago`;
-  return new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" });
-}
+// ── A row ────────────────────────────────────────────────────────────────────
 
-function isToday(iso: string): boolean {
-  const d = new Date(iso);
-  const n = new Date();
-  return d.getDate() === n.getDate() && d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear();
-}
-
-// ── Notification row ──────────────────────────────────────────────────────────
-
-function NotifRow({
-  notif,
-  C,
-  dark,
-  onPress,
-}: {
-  notif: ApiNotification;
-  C: ReturnType<typeof makeC>;
-  dark: boolean;
-  onPress: (id: number) => void;
+function Row({ n, C, expanded, onPress, onLongPress }: {
+  n: ApiNotification;
+  C: Palette;
+  expanded: boolean;
+  onPress: () => void;
+  onLongPress: () => void;
 }) {
-  const cat  = categoryFor(notif.type);
-  const meta = CATEGORY_META[cat];
-  const bg   = dark ? meta.darkBg : meta.bg;
-  const read = notif.read_at !== null;
+  const kind = kindOf(n.type);
+  const meta = KIND_META[kind];
+  const unread = n.read_at === null;
+  const opens = !!screenOf(n);
 
   return (
     <Pressable
-      onPress={() => { if (!read) onPress(notif.id); }}
-      style={({ pressed }) => [
-        s.notifRow,
-        { backgroundColor: read ? C.card : C.unread },
-        pressed && { opacity: 0.72 },
-      ]}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={350}
+      style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : "transparent" }]}
+      accessibilityRole="button"
+      accessibilityLabel={`${unread ? "New. " : ""}${n.title}. ${n.body}`}
     >
-      <View style={[s.notifIcon, { backgroundColor: bg }]}>
-        <Icon name={meta.icon} size={20} color={meta.color} />
+      <View style={[s.avatar, { backgroundColor: unread ? meta.color : meta.color + "26" }]}>
+        <Icon name={meta.icon} size={21} color={unread ? "#FFFFFF" : meta.color} />
       </View>
-
-      <View style={s.notifBody}>
-        <View style={s.notifTop}>
-          <Text style={[s.notifTitle, { color: C.text }]} numberOfLines={1}>{notif.title}</Text>
-          <Text style={[s.notifTime, { color: C.sub }]}>{formatTime(notif.created_at)}</Text>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[s.title, { color: C.text, fontWeight: unread ? "800" : "500" }]} numberOfLines={1}>{n.title}</Text>
+        <View style={s.status}>
+          {/* Snapchat's mark: filled while new, an outline once opened. */}
+          <View style={[s.mark, unread ? { backgroundColor: meta.color } : { borderWidth: 1.5, borderColor: meta.color }]} />
+          <Text style={[s.statusText, { color: unread ? meta.color : C.sub, fontWeight: unread ? "800" : "600" }]} numberOfLines={1}>
+            {statusLine(kind, unread, n.created_at)}
+          </Text>
         </View>
-        <Text style={[s.notifText, { color: C.sub }]} numberOfLines={2}>{notif.body}</Text>
+        {n.body ? (
+          <Text style={[s.body, { color: C.sub }]} numberOfLines={expanded ? undefined : 2}>{n.body}</Text>
+        ) : null}
       </View>
-
-      {!read && <View style={[s.unreadDot, { backgroundColor: ORANGE }]} />}
+      {opens ? <Icon name="chevron-forward" size={16} color={C.sub} style={{ marginTop: 14 }} /> : null}
     </Pressable>
   );
 }
 
-function SectionLabel({ label, C }: { label: string; C: ReturnType<typeof makeC> }) {
-  return (
-    <View style={[s.sectionLabel, { backgroundColor: C.bg }]}>
-      <Text style={[s.sectionText, { color: C.sub }]}>{label}</Text>
-    </View>
-  );
-}
-
-// ── Empty state ───────────────────────────────────────────────────────────────
-
-function EmptyState({ C }: { C: ReturnType<typeof makeC> }) {
-  const router = useRouter();
-  return (
-    <View style={s.empty}>
-      <View style={s.emptyIconWrap}>
-        <View style={[s.emptyIconOuter, { backgroundColor: ORANGE + "18" }]}>
-          <View style={[s.emptyIconInner, { backgroundColor: ORANGE + "30" }]}>
-            <Icon name="notifications" size={38} color={ORANGE} />
-          </View>
-        </View>
-        <View style={s.emptySparkle1}><Icon name="sparkles" size={14} color={ORANGE} /></View>
-        <View style={s.emptySparkle2}><Icon name="star" size={10} color="#FCD34D" /></View>
-      </View>
-
-      <Text style={[s.emptyTitle, { color: C.text }]}>You're all caught up</Text>
-      <Text style={[s.emptySub, { color: C.sub }]}>
-        Transit alerts, journey reminders, and community updates will appear here.
-      </Text>
-
-      <View style={s.categoryRow}>
-        {(Object.entries(CATEGORY_META) as [NotifCategory, typeof CATEGORY_META[NotifCategory]][]).map(([key, meta]) => (
-          <View key={key} style={[s.categoryChip, { backgroundColor: meta.bg }]}>
-            <Icon name={meta.icon} size={13} color={meta.color} />
-            <Text style={[s.categoryChipText, { color: meta.color }]}>
-              {key.charAt(0).toUpperCase() + key.slice(1)}
-            </Text>
-          </View>
-        ))}
-      </View>
-
-      <Pressable
-        style={({ pressed }) => [s.settingsLink, { backgroundColor: C.card, opacity: pressed ? 0.7 : 1 }]}
-        onPress={() => router.push("/(account)/notifications" as any)}
-      >
-        <View style={[s.settingsIcon, { backgroundColor: ORANGE + "18" }]}>
-          <Icon name="settings-outline" size={18} color={ORANGE} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={[s.settingsTitle, { color: C.text }]}>Notification settings</Text>
-          <Text style={[s.settingsSub, { color: C.sub }]}>Control what you receive and how</Text>
-        </View>
-        <Icon name="chevron-forward" size={16} color={C.sub} />
-      </Pressable>
-    </View>
-  );
-}
-
-// ── Main screen ───────────────────────────────────────────────────────────────
+// ── Screen ───────────────────────────────────────────────────────────────────
 
 export default function NotificationInbox() {
-  const insets  = useSafeAreaInsets();
-  const dark    = useColorScheme() === "dark";
-  const C       = makeC(dark);
-  const router  = useRouter();
+  const insets = useSafeAreaInsets();
+  const dark = useColorScheme() === "dark";
+  const C = makeC(dark);
+  const router = useRouter();
+  const sheet = useActionSheet();
+  const setUnreadCount = useNotificationStore((st) => st.setUnreadCount);
 
-  const setUnreadCount = useNotificationStore((s) => s.setUnreadCount);
+  const [items, setItems] = useState<ApiNotification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [filter, setFilter] = useState<Filter>("all");
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
 
-  const [notifications, setNotifications] = useState<ApiNotification[]>([]);
-  const [loading, setLoading]             = useState(true);
-  const [markingAll, setMarkingAll]       = useState(false);
-  const mountedRef = useRef(true);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
-
-  const syncUnread = useCallback((list: ApiNotification[]) => {
-    const count = list.filter((n) => n.read_at === null).length;
-    setUnreadCount(count);
+  const keep = useCallback((list: ApiNotification[]) => {
+    setItems(list);
+    setUnreadCount(list.filter((n) => n.read_at === null).length);
+    CacheService.set(CACHE_KEYS.NOTIFICATIONS_INBOX, list);
   }, [setUnreadCount]);
 
-  const loadNotifications = useCallback(async () => {
-    // Show cached data immediately
-    const cached = await CacheService.get<ApiNotification[]>(CACHE_KEYS.NOTIFICATIONS_INBOX, CACHE_TTL.NOTIFICATIONS_INBOX);
-    if (cached && mountedRef.current) {
-      setNotifications(cached);
-      syncUnread(cached);
-      setLoading(false);
-    }
-
-    // Fetch fresh from server
+  const load = useCallback(async () => {
     try {
       const res = await ApiClient.get<PaginatedResponse>("/auth/notifications");
-      const fresh = res.data.data;
-      if (mountedRef.current) {
-        setNotifications(fresh);
-        syncUnread(fresh);
-        setLoading(false);
-      }
-      await CacheService.set(CACHE_KEYS.NOTIFICATIONS_INBOX, fresh);
+      if (mounted.current) keep(res.data.data);
     } catch {
-      if (mountedRef.current) setLoading(false);
+      // The cached list stays.
+    } finally {
+      if (mounted.current) setLoading(false);
     }
-  }, [syncUnread]);
+  }, [keep]);
 
   useEffect(() => {
-    loadNotifications();
-  }, [loadNotifications]);
+    CacheService.get<ApiNotification[]>(CACHE_KEYS.NOTIFICATIONS_INBOX, CACHE_TTL.NOTIFICATIONS_INBOX).then((cached) => {
+      if (cached && mounted.current) {
+        setItems(cached);
+        setLoading(false);
+      }
+    });
+    load();
+  }, [load]);
 
-  const handleMarkRead = useCallback(async (id: number) => {
-    const updated = notifications.map((n) =>
-      n.id === id ? { ...n, read_at: new Date().toISOString() } : n,
-    );
-    setNotifications(updated);
-    syncUnread(updated);
-    CacheService.set(CACHE_KEYS.NOTIFICATIONS_INBOX, updated);
+  const refresh = async () => {
+    setRefreshing(true);
+    await load();
+    if (mounted.current) setRefreshing(false);
+  };
 
+  const markRead = useCallback((id: number) => {
+    const n = items.find((x) => x.id === id);
+    if (!n || n.read_at) return;
+    keep(items.map((x) => (x.id === id ? { ...x, read_at: new Date().toISOString() } : x)));
     ApiClient.patch(`/auth/notifications/${id}/read`).catch(() => {});
-  }, [notifications, syncUnread]);
+  }, [items, keep]);
 
-  const handleMarkAllRead = useCallback(async () => {
-    if (markingAll) return;
-    setMarkingAll(true);
+  const markAllRead = async () => {
+    const before = items;
     const now = new Date().toISOString();
-    const updated = notifications.map((n) => ({ ...n, read_at: n.read_at ?? now }));
-    setNotifications(updated);
-    syncUnread(updated);
-    CacheService.set(CACHE_KEYS.NOTIFICATIONS_INBOX, updated);
-
+    keep(items.map((n) => ({ ...n, read_at: n.read_at ?? now })));
+    Haptics.selectionAsync();
     try {
       await ApiClient.post("/auth/notifications/mark-all-read");
     } catch {
-      Alert.alert("Error", "Could not mark all as read. Please try again.");
-      setNotifications(notifications);
-      syncUnread(notifications);
-    } finally {
-      if (mountedRef.current) setMarkingAll(false);
+      keep(before);
+      Alert.alert("Couldn't mark them read", "Check your connection and try again.");
     }
-  }, [markingAll, notifications, syncUnread]);
+  };
 
-  const unreadCount = notifications.filter((n) => n.read_at === null).length;
-  const today       = notifications.filter((n) => isToday(n.created_at));
-  const earlier     = notifications.filter((n) => !isToday(n.created_at));
+  const open = (n: ApiNotification) => {
+    markRead(n.id);
+    const to = screenOf(n);
+    if (to) router.push(to as any);
+    else setExpanded((e) => (e === n.id ? null : n.id));
+  };
 
-  const headerC = { bg: C.card, text: C.text, hairline: C.hairline };
+  const actions = (n: ApiNotification) => {
+    const kind = kindOf(n.type);
+    sheet.open(n.title, [
+      ...(screenOf(n) ? [{ label: "Open", icon: "open-outline" as const, run: () => open(n) }] : []),
+      ...(n.read_at === null ? [{ label: "Mark as read", icon: "checkmark-done" as const, run: () => markRead(n.id) }] : []),
+      {
+        label: `${KIND_META[kind].label} settings`,
+        icon: "options-outline" as const,
+        hint: "Choose which of these reach you",
+        run: () => router.push("/(account)/notifications" as any),
+      },
+    ], statusLine(kind, n.read_at === null, n.created_at));
+  };
 
-  const headerRight = unreadCount > 0 ? (
-    <Pressable
-      onPress={handleMarkAllRead}
-      disabled={markingAll}
-      style={({ pressed }) => ({ opacity: pressed || markingAll ? 0.5 : 1 })}
-    >
-      <Text style={s.markAllText}>
-        {markingAll ? "Marking…" : "Mark all read"}
-      </Text>
-    </Pressable>
-  ) : undefined;
+  const unreadBy = useMemo(() => {
+    const m: Record<string, number> = { all: 0 };
+    for (const n of items) {
+      if (n.read_at !== null) continue;
+      m.all += 1;
+      const k = kindOf(n.type);
+      m[k] = (m[k] ?? 0) + 1;
+    }
+    return m;
+  }, [items]);
+
+  const shown = filter === "all" ? items : items.filter((n) => kindOf(n.type) === filter);
+  const kindsPresent = KIND_ORDER.filter((k) => items.some((n) => kindOf(n.type) === k));
+  const sections = useMemo(() => {
+    const out: { title: string; rows: ApiNotification[] }[] = [];
+    for (const n of shown) {
+      const t = sectionOf(n.created_at);
+      const last = out[out.length - 1];
+      if (last?.title === t) last.rows.push(n);
+      else out.push({ title: t, rows: [n] });
+    }
+    return out;
+  }, [shown]);
 
   return (
     <View style={[s.root, { backgroundColor: C.bg }]}>
       <ScreenHeader
         title="Notifications"
-        C={headerC}
-        rightLabel={unreadCount > 0 ? undefined : "Settings"}
-        rightAction={unreadCount > 0 ? undefined : () => router.push("/(account)/notifications" as any)}
-        rightNode={headerRight}
+        C={{ bg: C.bg, text: C.text, hairline: C.line }}
+        rightNode={
+          <Pressable onPress={() => router.push("/(account)/notifications" as any)} hitSlop={10} accessibilityLabel="Notification settings">
+            <Icon name="settings-outline" size={21} color={C.text} />
+          </Pressable>
+        }
       />
 
-      {loading && notifications.length === 0 ? (
-        <View style={s.loaderWrap}>
-          <ActivityIndicator color={ORANGE} />
+      {items.length > 0 ? (
+        <View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chips}>
+            {(["all", ...kindsPresent] as Filter[]).map((f) => {
+              const on = f === filter;
+              const color = f === "all" ? ORANGE : KIND_META[f].color;
+              const count = unreadBy[f] ?? 0;
+              return (
+                <PressableScale
+                  key={f}
+                  onPress={() => { Haptics.selectionAsync(); setFilter(f); }}
+                  style={[s.chip, { backgroundColor: on ? color : C.chip }]}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: on }}
+                >
+                  {f !== "all" ? <Icon name={KIND_META[f].icon} size={13} color={on ? "#FFFFFF" : color} /> : null}
+                  <Text style={[s.chipText, { color: on ? "#FFFFFF" : C.text }]}>{f === "all" ? "All" : KIND_META[f].label}</Text>
+                  {count > 0 ? (
+                    <View style={[s.chipCount, { backgroundColor: on ? "rgba(255,255,255,0.28)" : color }]}>
+                      <Text style={s.chipCountText}>{count}</Text>
+                    </View>
+                  ) : null}
+                </PressableScale>
+              );
+            })}
+          </ScrollView>
+          {unreadBy.all > 0 ? (
+            <Pressable onPress={markAllRead} style={s.markAll} hitSlop={6} accessibilityRole="button">
+              <Icon name="checkmark-done" size={15} color={ORANGE} />
+              <Text style={s.markAllText}>Mark all {unreadBy.all} as read</Text>
+            </Pressable>
+          ) : null}
         </View>
-      ) : notifications.length === 0 ? (
-        <ScrollView
-          contentContainerStyle={[s.emptyScroll, { paddingBottom: insets.bottom + 32 }]}
-          showsVerticalScrollIndicator={false}
-        >
-          <EmptyState C={C} />
-        </ScrollView>
+      ) : null}
+
+      {loading && items.length === 0 ? (
+        <View style={s.center}><ActivityIndicator color={ORANGE} /></View>
       ) : (
         <ScrollView
-          contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 24, flexGrow: 1 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={ORANGE} />}
           showsVerticalScrollIndicator={false}
         >
-          {today.length > 0 && (
-            <>
-              <SectionLabel label="TODAY" C={C} />
-              {today.map((n) => (
-                <NotifRow key={n.id} notif={n} C={C} dark={dark} onPress={handleMarkRead} />
-              ))}
-            </>
-          )}
-          {earlier.length > 0 && (
-            <>
-              <SectionLabel label="EARLIER" C={C} />
-              {earlier.map((n) => (
-                <NotifRow key={n.id} notif={n} C={C} dark={dark} onPress={handleMarkRead} />
-              ))}
-            </>
+          {shown.length === 0 ? (
+            <Empty C={C} filter={filter} onSettings={() => router.push("/(account)/notifications" as any)} />
+          ) : (
+            sections.map((sec) => (
+              <View key={sec.title}>
+                <Text style={[s.section, { color: C.sub }]}>{sec.title}</Text>
+                {sec.rows.map((n, i) => (
+                  <View key={n.id}>
+                    {i > 0 ? <View style={[s.sep, { backgroundColor: C.line }]} /> : null}
+                    <Row n={n} C={C} expanded={expanded === n.id} onPress={() => open(n)} onLongPress={() => { Haptics.selectionAsync(); actions(n); }} />
+                  </View>
+                ))}
+              </View>
+            ))
           )}
         </ScrollView>
       )}
+      {sheet.element}
     </View>
   );
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
+function Empty({ C, filter, onSettings }: { C: Palette; filter: Filter; onSettings: () => void }) {
+  const meta = filter === "all" ? null : KIND_META[filter];
+  return (
+    <View style={s.empty}>
+      <View style={s.emptyStack}>
+        {KIND_ORDER.map((k, i) => (
+          <View key={k} style={[s.emptyDot, { backgroundColor: KIND_META[k].color, left: i * 30, borderColor: C.bg }]}>
+            <Icon name={KIND_META[k].icon} size={20} color="#FFFFFF" />
+          </View>
+        ))}
+      </View>
+      <Text style={[s.emptyTitle, { color: C.text }]}>{meta ? `No ${meta.label.toLowerCase()} yet` : "Nothing new"}</Text>
+      <Text style={[s.emptySub, { color: C.sub }]}>
+        Trip updates, service alerts on your lines, points and news from Navigo land here.
+      </Text>
+      <PressableScale onPress={onSettings} style={[s.emptyBtn, { backgroundColor: C.chip }]} accessibilityRole="button">
+        <Icon name="options-outline" size={16} color={C.text} />
+        <Text style={[s.emptyBtnText, { color: C.text }]}>Choose what you get</Text>
+      </PressableScale>
+    </View>
+  );
+}
 
 const s = StyleSheet.create({
   root: { flex: 1 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center" },
 
-  loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
+  chips: { gap: 8, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 6 },
+  chip: { flexDirection: "row", alignItems: "center", gap: 6, height: 34, paddingHorizontal: 13, borderRadius: 17 },
+  chipText: { fontSize: 13.5, fontWeight: "700" },
+  chipCount: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, alignItems: "center", justifyContent: "center" },
+  chipCountText: { color: "#FFFFFF", fontSize: 11, fontWeight: "900" },
+  markAll: { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", paddingHorizontal: 16, paddingVertical: 6 },
+  markAllText: { color: ORANGE, fontSize: 13, fontWeight: "700" },
 
-  markAllText: { fontSize: 14, fontWeight: "600", color: ORANGE },
+  section: { fontSize: 13, fontWeight: "800", paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4 },
+  row: { flexDirection: "row", alignItems: "flex-start", gap: 12, paddingHorizontal: 16, paddingVertical: 11 },
+  avatar: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center" },
+  title: { fontSize: 15.5 },
+  status: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 },
+  mark: { width: 10, height: 10, borderRadius: 2.5 },
+  statusText: { fontSize: 12.5, flexShrink: 1 },
+  body: { fontSize: 13.5, lineHeight: 19, marginTop: 4 },
+  sep: { height: StyleSheet.hairlineWidth, marginLeft: 74 },
 
-  notifRow: {
-    flexDirection:    "row",
-    alignItems:       "flex-start",
-    paddingHorizontal: 16,
-    paddingVertical:  14,
-    gap:              12,
-  },
-  notifIcon: {
-    width:          44,
-    height:         44,
-    borderRadius:   14,
-    alignItems:     "center",
-    justifyContent: "center",
-    flexShrink:     0,
-  },
-  notifBody:  { flex: 1, gap: 4 },
-  notifTop:   { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
-  notifTitle: { fontSize: 14, fontWeight: "600", flex: 1 },
-  notifTime:  { fontSize: 12, flexShrink: 0 },
-  notifText:  { fontSize: 13, lineHeight: 18 },
-  unreadDot:  { width: 8, height: 8, borderRadius: 4, marginTop: 5, flexShrink: 0 },
-
-  sectionLabel: {
-    paddingHorizontal: 16,
-    paddingTop:        16,
-    paddingBottom:      6,
-  },
-  sectionText: {
-    fontSize:      11,
-    fontWeight:    "700",
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-  },
-
-  emptyScroll: { flexGrow: 1, paddingHorizontal: 24 },
-  empty: {
-    flex:           1,
-    alignItems:     "center",
-    justifyContent: "center",
-    gap:            16,
-    paddingTop:     48,
-    paddingBottom:  32,
-  },
-  emptyIconWrap:  { position: "relative", width: 120, height: 120, alignItems: "center", justifyContent: "center", marginBottom: 8 },
-  emptyIconOuter: { width: 110, height: 110, borderRadius: 55, alignItems: "center", justifyContent: "center" },
-  emptyIconInner: { width: 78,  height: 78,  borderRadius: 39, alignItems: "center", justifyContent: "center" },
-  emptySparkle1:  { position: "absolute", top: 4,  right: 6  },
-  emptySparkle2:  { position: "absolute", bottom: 8, left: 8 },
-  emptyTitle: { fontSize: 21, fontWeight: "800", letterSpacing: -0.4 },
-  emptySub:   { fontSize: 14, textAlign: "center", lineHeight: 20, maxWidth: 280 },
-
-  categoryRow: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 8, marginTop: 4 },
-  categoryChip: {
-    flexDirection:    "row",
-    alignItems:       "center",
-    gap:              5,
-    paddingHorizontal: 10,
-    paddingVertical:   6,
-    borderRadius:     99,
-  },
-  categoryChipText: { fontSize: 12, fontWeight: "600" },
-
-  settingsLink: {
-    flexDirection:    "row",
-    alignItems:       "center",
-    gap:              12,
-    marginTop:        24,
-    borderRadius:     16,
-    paddingHorizontal: 14,
-    paddingVertical:  14,
-    shadowColor:      "#000",
-    shadowOpacity:    0.04,
-    shadowRadius:     8,
-    elevation:        2,
-  },
-  settingsIcon:  { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  settingsTitle: { fontSize: 15, fontWeight: "600" },
-  settingsSub:   { fontSize: 12, marginTop: 1 },
+  empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 36, paddingBottom: 60, gap: 10 },
+  emptyStack: { width: 46 + 3 * 30, height: 46, marginBottom: 8 },
+  emptyDot: { position: "absolute", top: 0, width: 46, height: 46, borderRadius: 23, borderWidth: 3, alignItems: "center", justifyContent: "center" },
+  emptyTitle: { fontSize: 19, fontWeight: "800" },
+  emptySub: { fontSize: 14, textAlign: "center", lineHeight: 20 },
+  emptyBtn: { flexDirection: "row", alignItems: "center", gap: 8, height: 42, paddingHorizontal: 16, borderRadius: 21, marginTop: 8 },
+  emptyBtnText: { fontSize: 14, fontWeight: "700" },
 });

@@ -1,1398 +1,474 @@
-import BadgeUnlockModal from "@/components/contribution/BadgeUnlockModal";
-import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
-import * as Haptics from "expo-haptics";
-import * as Location from "expo-location";
-import * as Notifications from "expo-notifications";
+// app/(tabs)/contribution.tsx
+//
+// The Contribute tab: what you can do for the next rider, and what it earns.
+//   - Your level, points and streak (tap: levels & badges), and where you
+//     stand this week (tap: the leaderboard).
+//   - On the road: the map's own road reports, with the type already
+//     picked, and "Matatu late?" at a stage. Live for everyone nearby.
+//   - Improve the map: review, photo, fix a stage, add a missing one. The
+//     same forms as a stop's sheet (components/app/stop), after "Which
+//     stage?" (nearby first, or search).
+//   - Stages near you, with a one-tap review or photo (Google Maps' "rate
+//     places you've been").
+//   - Your contributions, badges, the leaderboard, and how points work.
+// Every point shown comes from services/contribution, as the API awards
+// it, and every contribution says thanks with the same toast (RewardToast).
+import React, { useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View, useColorScheme } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableWithoutFeedback,
-  View,
-  useColorScheme,
-} from "react-native";
-import MapView, { PROVIDER_GOOGLE, Region } from "react-native-maps";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as Haptics from "expo-haptics";
 import { useContributionStore } from "@/store/contributionStore";
+import { useMapIntentStore } from "@/store/mapIntentStore";
+import {
+  AUTO_APPROVED,
+  CONTRIBUTION_POINTS as P,
+  FIRST_PHOTO_BONUS,
+  REPORT_POINTS,
+} from "@/services/contribution";
 import { StopService } from "@/services/stop";
-import { UnifiedLocation } from "@/store/journeyStore";
-import { Icon } from "@/components/icons/Icon";
+import { distanceM, formatDistance } from "@/services/exploreSearch";
+import { hereWithoutAsking, type LatLng } from "@/services/here";
+import { streakLine, syncStreakReminder } from "@/services/streakReminder";
+import { deepen, levelProgress } from "@/components/badges/levels";
+import { REPORT_TYPES, type ReportType } from "@/components/icons/reportIcons";
+import { ReportTypeIcon } from "@/components/icons/ReportTypeIcon";
 import { StopTypeBadge } from "@/components/app/StopTypeBadge";
+import { StopPickerSheet, type PickedStop } from "@/components/contribution/StopPickerSheet";
+import { StopReviewForm } from "@/components/app/stop/StopReviewForm";
+import { StopEditForm } from "@/components/app/stop/StopEditForm";
+import { StopReportForm, type ReportLine } from "@/components/app/stop/StopReportForm";
+import { NewStopForm } from "@/components/app/stop/NewStopForm";
+import { PressableScale } from "@/components/ui/PressableScale";
+import { Icon, type IconName } from "@/components/icons/Icon";
 
 const ORANGE = "#FF6F00";
-const GREEN  = "#10B981";
-const RED    = "#EF4444";
-const GREY   = "#8E8E93";
+const AMBER = "#F59E0B";
+const PURPLE = "#8B5CF6";
+const BLUE = "#2563EB";
+const GREEN = "#059669";
+const RED = "#DC2626";
 
-// ── Mapbox static thumbnail ──────────────────────────────────────────────────
-function mapboxThumb(lng: number, lat: number, w = 600, h = 180): string {
-  const token = process.env.EXPO_PUBLIC_MAPBOX_TOKEN ?? "";
-  return `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/${lng},${lat},15/${w}x${h}@2x?access_token=${token}`;
-}
-
-// ── Color factory ────────────────────────────────────────────────────────────
 function makeC(dark: boolean) {
   return {
-    bg:       dark ? "#0F0F0F" : "#FFFFFF",
-    card:     dark ? "#1C1C1E" : "#F6F7F8",
-    text:     dark ? "#FFFFFF" : "#1C1C1E",
-    sub:      dark ? GREY      : "#6B7280",
-    hairline: dark ? "#2C2C2E" : "#E5E7EB",
-    border:   dark ? "#3A3A3C" : "#E5E7EB",
-    input:    dark ? "#2C2C2E" : "#F3F4F6",
-    pressed:  dark ? "#2C2C2E" : "#F2F2F7",
-    sheetBg:  dark ? "#1C1C1E" : "#FFFFFF",
-    pill:     dark ? "rgba(255,111,0,0.18)" : "#FFF3E0",
+    card: dark ? "#1F1F23" : "#FFFFFF",
+    tile: dark ? "#232326" : "#F6F6F8",
+    text: dark ? "#F4F4F5" : "#111827",
+    sub: dark ? "#A1A1AA" : "#6B7280",
+    line: dark ? "#2A2A2F" : "#EEF0F3",
+    pressed: dark ? "#27272A" : "#F3F4F6",
   };
 }
+type Palette = ReturnType<typeof makeC>;
 
-// ── StopSearchInput ──────────────────────────────────────────────────────────
-function StopSearchInput({
-  value,
-  onChange,
-  placeholder = "Search stops…",
-  C,
-}: {
-  value: UnifiedLocation | null;
-  onChange: (stop: UnifiedLocation | null) => void;
-  placeholder?: string;
-  C: ReturnType<typeof makeC>;
-}) {
-  const [query, setQuery]     = useState("");
-  const [results, setResults] = useState<UnifiedLocation[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [open, setOpen]       = useState(false);
-  const timerRef              = useRef<ReturnType<typeof setTimeout> | null>(null);
+/** The road reports offered here, most common first; the rest are one tap away on the map. */
+const ROAD: ReportType[] = ["traffic_jam", "accident", "police_check", "flooded_route", "road_blocked", "stage_queue"];
 
+type Task = "review" | "photo" | "edit" | "late";
+const TASKS: Record<Task, { title: string; subtitle: string; icon: IconName; color: string }> = {
+  review: { title: "Review a stage", subtitle: "Which stage was it?", icon: "star", color: AMBER },
+  photo: { title: "Add a photo", subtitle: "Which stage is it of?", icon: "camera", color: PURPLE },
+  edit: { title: "Fix a stage", subtitle: "Which stage needs fixing?", icon: "create", color: BLUE },
+  late: { title: "Matatu late?", subtitle: "Where are you waiting?", icon: "time", color: RED },
+};
+
+type Form =
+  | { kind: "review"; stop: PickedStop }
+  | { kind: "edit"; stop: PickedStop; landmark: string | null; lines: { id: string; short_name: string }[] }
+  | { kind: "late"; stop: PickedStop; lines: ReportLine[] }
+  | { kind: "new" };
+
+/** "now" for what's approved at once, "if approved" for what a moderator checks. */
+const when = (type: keyof typeof P) => (AUTO_APPROVED.includes(type) ? "now" : "if approved");
+
+export default function ContributeScreen() {
+  const dark = useColorScheme() === "dark";
+  const C = makeC(dark);
+  const router = useRouter();
+  const { stats, contributions, fetch: fetchStore } = useContributionStore();
+
+  const [near, setNear] = useState<LatLng | null>(null);
+  const [nearby, setNearby] = useState<PickedStop[]>([]);
+  const [task, setTask] = useState<Task | null>(null);
+  const [form, setForm] = useState<Form | null>(null);
+  const [opening, setOpening] = useState<string | null>(null);
+  const [showPoints, setShowPoints] = useState(false);
+
+  useEffect(() => { fetchStore().catch(() => {}); }, [fetchStore]);
+  // Where you are, if location is already allowed: never a prompt here.
+  useEffect(() => { hereWithoutAsking().then(setNear); }, []);
   useEffect(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    if (query.length < 2) { setResults([]); setOpen(false); return; }
-    timerRef.current = setTimeout(async () => {
-      setLoading(true);
-      try {
-        const res = await StopService.searchStops(query);
-        setResults(res.slice(0, 5));
-        setOpen(true);
-      } catch {
-        setResults([]);
-      } finally {
-        setLoading(false);
-      }
-    }, 300);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [query]);
+    if (!near) return;
+    StopService.getNearbyStops(near.lat, near.lng, 800, 8)
+      .then((list) => setNearby(list as PickedStop[]))
+      .catch(() => {});
+  }, [near]);
+  // Tonight's streak reminder follows the latest stats (and the settings).
+  useEffect(() => {
+    syncStreakReminder(stats ? { streak_days: stats.streak_days, contributed_today: stats.contributed_today } : null);
+  }, [stats?.streak_days, stats?.contributed_today]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (value !== null) {
-    return (
-      <View style={[ssi.chip, { backgroundColor: C.input, borderColor: C.border }]}>
-        <StopTypeBadge stop={value as any} size={20} />
-        <Text style={[ssi.chipText, { color: C.text }]} numberOfLines={1}>{value.name}</Text>
-        <Pressable onPress={() => onChange(null)} hitSlop={8}>
-          <Icon name="close-circle" size={18} color={C.sub} />
-        </Pressable>
-      </View>
-    );
-  }
+  const pending = useMemo(() => contributions.filter((c) => c.status === "pending").length, [contributions]);
+
+  const report = (type: ReportType | null) => {
+    Haptics.selectionAsync();
+    // The map opens its report sheet; the tab sheet makes way.
+    useMapIntentStore.getState().show({ kind: "report", type });
+  };
+
+  const start = (t: Task) => {
+    Haptics.selectionAsync();
+    setTask(t);
+  };
+
+  /** The stop's lines and landmark, for the forms that need them. */
+  const details = async (stop: PickedStop) => {
+    setOpening(stop.name);
+    try {
+      return await StopService.getStopDetails(stop.id);
+    } catch {
+      return null;
+    } finally {
+      setOpening(null);
+    }
+  };
+
+  const picked = async (t: Task, stop: PickedStop) => {
+    if (t === "review") { setForm({ kind: "review", stop }); return; }
+    if (t === "photo") {
+      router.push({ pathname: "/(account)/add-photo", params: { stopId: stop.id, stopName: stop.name } } as any);
+      return;
+    }
+    const d = await details(stop);
+    const routes = d?.routes ?? [];
+    if (t === "edit") {
+      setForm({
+        kind: "edit",
+        stop,
+        landmark: (d?.stop as any)?.landmark ?? null,
+        lines: routes.map((r) => ({ id: r.id, short_name: r.short_name })),
+      });
+    } else {
+      setForm({
+        kind: "late",
+        stop,
+        lines: routes.map((r) => ({ route_id: r.id, short_name: r.short_name, color: r.route_color ?? null })),
+      });
+    }
+  };
+
+  const level = levelProgress(stats?.points ?? 0);
+  const streak = stats?.streak_days ?? 0;
+  const weekly = stats?.rank?.weekly ?? null;
 
   return (
-    <View>
-      <View style={[ssi.inputRow, { backgroundColor: C.input, borderColor: C.border }]}>
-        <Icon name="search-outline" size={16} color={C.sub} />
-        <TextInput
-          style={[ssi.textInput, { color: C.text }]}
-          placeholder={placeholder}
-          placeholderTextColor={C.sub}
-          value={query}
-          onChangeText={setQuery}
-          autoCorrect={false}
-        />
-        {loading && <ActivityIndicator size="small" color={ORANGE} />}
+    <View style={s.root}>
+      <View style={s.header}>
+        <View style={{ flex: 1 }}>
+          <Text style={[s.title, { color: C.text }]}>Contribute</Text>
+          <Text style={[s.subtitle, { color: C.sub }]}>Every report, photo and fix helps the next rider.</Text>
+        </View>
       </View>
 
-      {open && (
-        <View style={[ssi.dropdown, { backgroundColor: C.sheetBg, borderColor: C.border }]}>
-          {loading && results.length === 0 ? (
-            <View style={ssi.dropRow}>
-              <ActivityIndicator size="small" color={ORANGE} />
+      {opening ? (
+        <View style={[s.opening, { backgroundColor: C.tile }]}>
+          <ActivityIndicator size="small" color={ORANGE} />
+          <Text style={[s.openingText, { color: C.sub }]} numberOfLines={1}>Opening {opening}…</Text>
+        </View>
+      ) : null}
+
+      {/* Level, points, streak */}
+      {stats ? (
+        <PressableScale pressedScale={0.98} onPress={() => router.push("/(account)/badges" as any)} accessibilityRole="button" accessibilityLabel={`Level ${level.level.n}, ${level.level.name}, ${stats.points} Safiri Points. Levels and badges`}>
+          <LinearGradient colors={[level.level.color, deepen(level.level.color)]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.hero}>
+            <View style={s.heroTop}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={s.heroKicker} numberOfLines={1}>LEVEL {level.level.n} · {level.level.name.toUpperCase()}</Text>
+                <Text style={s.heroPoints} numberOfLines={1}>
+                  {stats.points.toLocaleString()} <Text style={s.heroUnit}>Safiri Points</Text>
+                </Text>
+              </View>
+              <View style={s.flame} accessibilityLabel={`${streak}-day streak`}>
+                <Icon name="flame" size={17} color="#FFFFFF" />
+                <Text style={s.flameN}>{streak}</Text>
+              </View>
             </View>
-          ) : results.length === 0 ? (
-            <View style={ssi.dropRow}>
-              <Text style={[ssi.noResults, { color: C.sub }]}>No stops found</Text>
+            <View style={s.track}>
+              <View style={[s.fill, { width: `${Math.round(level.ratio * 100)}%` }]} />
             </View>
-          ) : (
-            results.map((stop) => (
-              <Pressable
-                key={stop.id}
-                style={({ pressed }) => [ssi.dropRow, pressed && { backgroundColor: C.pressed }]}
-                onPress={() => { onChange(stop); setQuery(""); setOpen(false); }}
-              >
-                <StopTypeBadge stop={stop as any} size={22} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[ssi.dropName, { color: C.text }]} numberOfLines={1}>{stop.name}</Text>
-                  {stop.route_nams ? (
-                    <Text style={[ssi.dropRoutes, { color: C.sub }]} numberOfLines={1}>{stop.route_nams}</Text>
-                  ) : null}
-                </View>
-              </Pressable>
-            ))
-          )}
+            <View style={s.heroFoot}>
+              <Text style={s.heroNext} numberOfLines={2}>
+                {streakLine(streak, stats.contributed_today)}
+                {level.next ? ` · ${level.toNext.toLocaleString()} to ${level.next.name}` : ""}
+              </Text>
+              {weekly ? (
+                <Pressable onPress={() => router.push("/(account)/leaderboard" as any)} style={s.rankChip} hitSlop={6} accessibilityRole="button" accessibilityLabel={`Number ${weekly} this week. Leaderboard`}>
+                  <Icon name="trophy" size={12} color="#FFFFFF" />
+                  <Text style={s.rankText}>#{weekly} this week</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </LinearGradient>
+        </PressableScale>
+      ) : (
+        <View style={[s.heroPlaceholder, { backgroundColor: C.tile }]}>
+          <ActivityIndicator color={ORANGE} />
         </View>
       )}
-    </View>
-  );
-}
 
-const ssi = StyleSheet.create({
-  chip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    height: 44,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-  },
-  chipText: { flex: 1, fontSize: 15, fontWeight: "500" },
-  inputRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    height: 44,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-  },
-  textInput: { flex: 1, fontSize: 15 },
-  dropdown: {
-    marginTop: 4,
-    borderRadius: 10,
-    borderWidth: 1,
-    overflow: "hidden",
-  },
-  dropRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  dropName:   { fontSize: 14, fontWeight: "500" },
-  dropRoutes: { fontSize: 12, marginTop: 1 },
-  noResults:  { fontSize: 14, fontStyle: "italic" },
-});
-
-// ── LocationPickerModal ──────────────────────────────────────────────────────
-function LocationPickerModal({
-  visible,
-  onClose,
-  onConfirm,
-  initialLat = -1.2921,
-  initialLng = 36.8219,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onConfirm: (loc: { lat: number; lng: number }) => void;
-  initialLat?: number;
-  initialLng?: number;
-}) {
-  const insets     = useSafeAreaInsets();
-  const mapRef     = useRef<MapView>(null);
-  const centerRef  = useRef({ lat: initialLat, lng: initialLng });
-  const [displayCoords, setDisplayCoords] = useState({ lat: initialLat, lng: initialLng });
-  const [gpsLoading, setGpsLoading]       = useState(false);
-
-  const onRegionChangeComplete = (r: Region) => {
-    centerRef.current = { lat: r.latitude, lng: r.longitude };
-    setDisplayCoords({ lat: r.latitude, lng: r.longitude });
-  };
-
-  const handleMyLocation = async () => {
-    setGpsLoading(true);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Permission needed", "Enable location in Settings.");
-        return;
-      }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const { latitude, longitude } = pos.coords;
-      mapRef.current?.animateToRegion(
-        { latitude, longitude, latitudeDelta: 0.005, longitudeDelta: 0.005 },
-        500,
-      );
-      centerRef.current = { lat: latitude, lng: longitude };
-      setDisplayCoords({ lat: latitude, lng: longitude });
-    } catch {
-      Alert.alert("Error", "Could not get your location.");
-    } finally {
-      setGpsLoading(false);
-    }
-  };
-
-  return (
-    <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose} statusBarTranslucent>
-      <View style={{ flex: 1 }}>
-        <MapView
-          ref={mapRef}
-          provider={PROVIDER_GOOGLE}
-          style={StyleSheet.absoluteFill}
-          initialRegion={{
-            latitude:      initialLat,
-            longitude:     initialLng,
-            latitudeDelta:  0.01,
-            longitudeDelta: 0.01,
-          }}
-          onRegionChangeComplete={onRegionChangeComplete}
-          showsUserLocation
-          showsMyLocationButton={false}
-        />
-
-        {/* Centered pin, pointer-events none so map panning works */}
-        <View pointerEvents="none" style={[StyleSheet.absoluteFill, lpm.pinContainer]}>
-          <Icon name="location" size={44} color={ORANGE} style={{ marginBottom: -4 }} />
-          <View style={lpm.pinShadow} />
-        </View>
-
-        {/* Top bar */}
-        <View style={[lpm.topBar, { paddingTop: insets.top + 8 }]}>
-          <Pressable style={lpm.topBtn} onPress={onClose}>
-            <Icon name="arrow-back" size={20} color="#1C1C1E" />
-            <Text style={lpm.topBtnText}>Cancel</Text>
-          </Pressable>
-          <Pressable style={lpm.topBtn} onPress={handleMyLocation} disabled={gpsLoading}>
-            {gpsLoading
-              ? <ActivityIndicator size="small" color="#1C1C1E" />
-              : <Icon name="locate-outline" size={20} color="#1C1C1E" />}
-            <Text style={lpm.topBtnText}>My Location</Text>
-          </Pressable>
-        </View>
-
-        {/* Bottom card */}
-        <View style={[lpm.bottomCard, { paddingBottom: insets.bottom + 16 }]}>
-          <View style={lpm.coordChip}>
-            <Icon name="location-outline" size={14} color={GREY} />
-            <Text style={lpm.coordText}>
-              {displayCoords.lat.toFixed(5)}, {displayCoords.lng.toFixed(5)}
-            </Text>
-          </View>
-          <Pressable
-            style={lpm.confirmBtn}
-            onPress={() => { onConfirm(centerRef.current); onClose(); }}
-          >
-            <Icon name="checkmark-circle-outline" size={18} color="#FFF" />
-            <Text style={lpm.confirmText}>Confirm Location</Text>
-          </Pressable>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-const lpm = StyleSheet.create({
-  pinContainer: { alignItems: "center", justifyContent: "center" },
-  pinShadow: {
-    width: 10,
-    height: 5,
-    borderRadius: 5,
-    backgroundColor: "rgba(0,0,0,0.25)",
-  },
-  topBar: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-  },
-  topBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "rgba(255,255,255,0.92)",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-  },
-  topBtnText: { fontWeight: "600", fontSize: 14, color: "#1C1C1E" },
-  bottomCard: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: "#FFFFFF",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingTop: 16,
-    paddingHorizontal: 16,
-    gap: 12,
-    shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: -2 },
-    elevation: 8,
-  },
-  coordChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "#F3F4F6",
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    alignSelf: "center",
-  },
-  coordText: { fontSize: 13, fontWeight: "500", color: "#6B7280" },
-  confirmBtn: {
-    backgroundColor: ORANGE,
-    height: 50,
-    borderRadius: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  confirmText: { color: "#FFF", fontWeight: "700", fontSize: 16 },
-});
-
-// ── Sheet backdrop + slide-up container ──────────────────────────────────────
-function BottomSheet({
-  visible,
-  onClose,
-  title,
-  children,
-  C,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  title: string;
-  children: React.ReactNode;
-  C: ReturnType<typeof makeC>;
-}) {
-  const slideAnim = useRef(new Animated.Value(500)).current;
-
-  useEffect(() => {
-    if (visible) {
-      Animated.spring(slideAnim, {
-        toValue: 0,
-        useNativeDriver: true,
-        damping: 20,
-        stiffness: 200,
-      }).start();
-    } else {
-      slideAnim.setValue(500);
-    }
-  }, [visible]);
-
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="none"
-      onRequestClose={onClose}
-      statusBarTranslucent
-    >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={{ flex: 1 }}
-      >
-        <TouchableWithoutFeedback onPress={onClose}>
-          <View style={sh.backdrop} />
-        </TouchableWithoutFeedback>
-        <Animated.View
-          style={[sh.sheet, { backgroundColor: C.sheetBg, transform: [{ translateY: slideAnim }] }]}
-        >
-          <View style={sh.sheetHandle} />
-          <View style={sh.sheetHeader}>
-            <Text style={[sh.sheetTitle, { color: C.text }]}>{title}</Text>
-            <Pressable onPress={onClose} hitSlop={12}>
-              <Icon name="close" size={22} color={C.sub} />
-            </Pressable>
-          </View>
-          {children}
-        </Animated.View>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
-type BadgeUnlockCb = (pts: number, badges: string[], streak?: number) => void;
-
-// ── Delay Report Sheet ───────────────────────────────────────────────────────
-function DelayReportSheet({
-  visible,
-  onClose,
-  onBadgeUnlock,
-  C,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onBadgeUnlock: BadgeUnlockCb;
-  C: ReturnType<typeof makeC>;
-}) {
-  const [selectedStop, setSelectedStop] = useState<UnifiedLocation | null>(null);
-  const [severity, setSeverity]         = useState<"minor" | "major" | "cancelled">("minor");
-  const [note, setNote]                 = useState("");
-  const [loading, setLoading]           = useState(false);
-  const { submit } = useContributionStore();
-
-  const SEVERITIES: { key: "minor" | "major" | "cancelled"; label: string; color: string }[] = [
-    { key: "minor",     label: "Minor",     color: "#F59E0B" },
-    { key: "major",     label: "Major",     color: RED       },
-    { key: "cancelled", label: "Cancelled", color: "#6B7280" },
-  ];
-
-  const handleSubmit = async () => {
-    setLoading(true);
-    try {
-      const result = await submit({
-        type: "delay_report",
-        stop_id: selectedStop?.id ?? undefined,
-        data: { severity, note: note.trim() || undefined },
-      });
-      onClose();
-      setNote(""); setSeverity("minor"); setSelectedStop(null);
-      if (result.points_awarded > 0 || result.new_badges.length > 0) {
-        onBadgeUnlock(result.points_awarded, result.new_badges, result.streak_days);
-      }
-    } catch {
-      Alert.alert("Error", "Could not submit. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <BottomSheet visible={visible} onClose={onClose} title="Report a Delay" C={C}>
-      <ScrollView contentContainerStyle={sh.sheetBody} keyboardShouldPersistTaps="handled">
-        <Text style={[sh.fieldLabel, { color: C.sub }]}>STOP (OPTIONAL)</Text>
-        <StopSearchInput
-          value={selectedStop}
-          onChange={setSelectedStop}
-          placeholder="Which stop had the delay?"
-          C={C}
-        />
-
-        <Text style={[sh.fieldLabel, { color: C.sub, marginTop: 20 }]}>SEVERITY</Text>
-        <View style={sh.pillRow}>
-          {SEVERITIES.map((sv) => (
-            <Pressable
-              key={sv.key}
-              onPress={() => setSeverity(sv.key)}
-              style={[
-                sh.severityPill,
-                { borderColor: severity === sv.key ? sv.color : C.border },
-                severity === sv.key && { backgroundColor: sv.color + "18" },
-              ]}
-            >
-              <Text style={[sh.severityText, { color: severity === sv.key ? sv.color : C.sub }]}>
-                {sv.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-
-        <Text style={[sh.fieldLabel, { color: C.sub, marginTop: 20 }]}>NOTE (OPTIONAL)</Text>
-        <TextInput
-          style={[sh.textArea, { backgroundColor: C.input, color: C.text, borderColor: C.border }]}
-          placeholder="E.g. Route 23 stuck near Globe Roundabout…"
-          placeholderTextColor={C.sub}
-          multiline
-          numberOfLines={3}
-          value={note}
-          onChangeText={setNote}
-          maxLength={300}
-        />
-
-        <Text style={[sh.pointsHint, { color: C.sub }]}>Awards +3 Safiri Points immediately</Text>
-
-        <Pressable
-          style={[sh.submitBtn, loading && { opacity: 0.6 }]}
-          onPress={handleSubmit}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#FFF" size="small" />
-          ) : (
-            <Text style={sh.submitText}>Submit Report</Text>
-          )}
-        </Pressable>
-      </ScrollView>
-    </BottomSheet>
-  );
-}
-
-// ── Stop Review Sheet ────────────────────────────────────────────────────────
-function StopReviewSheet({
-  visible,
-  onClose,
-  onBadgeUnlock,
-  C,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onBadgeUnlock: BadgeUnlockCb;
-  C: ReturnType<typeof makeC>;
-}) {
-  const [selectedStop, setSelectedStop] = useState<UnifiedLocation | null>(null);
-  const [safety, setSafety]             = useState(0);
-  const [comfort, setComfort]           = useState(0);
-  const [cleanliness, setCleanliness]   = useState(0);
-  const [reviewText, setReviewText]     = useState("");
-  const [loading, setLoading]           = useState(false);
-  const { submit } = useContributionStore();
-
-  const StarRow = ({
-    label,
-    value,
-    onSet,
-  }: {
-    label: string;
-    value: number;
-    onSet: (n: number) => void;
-  }) => (
-    <View style={sh.starRow}>
-      <Text style={[sh.starLabel, { color: C.text }]}>{label}</Text>
-      <View style={{ flexDirection: "row", gap: 6 }}>
-        {[1, 2, 3, 4, 5].map((n) => (
-          <Pressable key={n} onPress={() => onSet(n)} hitSlop={6}>
-            <Icon
-              name={n <= value ? "star" : "star-outline"}
-              size={26}
-              color={n <= value ? "#F59E0B" : C.sub}
-            />
-          </Pressable>
+      {/* On the road */}
+      <Section title="On the road" sub="Live for everyone nearby, gone when it clears" C={C} />
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.roadRow}>
+        {ROAD.map((t) => (
+          <PressableScale key={t} onPress={() => report(t)} style={[s.roadTile, { backgroundColor: C.tile }]} accessibilityRole="button" accessibilityLabel={`Report ${REPORT_TYPES[t].label}`}>
+            <ReportTypeIcon type={t} size={44} />
+            <Text style={[s.roadLabel, { color: C.text }]} numberOfLines={1}>{REPORT_TYPES[t].label}</Text>
+            <Text style={[s.roadPts, { color: C.sub }]}>+{REPORT_POINTS[t] ?? 2}</Text>
+          </PressableScale>
         ))}
+        <PressableScale onPress={() => start("late")} style={[s.roadTile, { backgroundColor: C.tile }]} accessibilityRole="button" accessibilityLabel="Matatu late at a stage">
+          <View style={[s.roadGlyph, { backgroundColor: RED + "1A" }]}>
+            <Icon name="time" size={22} color={RED} />
+          </View>
+          <Text style={[s.roadLabel, { color: C.text }]} numberOfLines={1}>Matatu late</Text>
+          <Text style={[s.roadPts, { color: C.sub }]}>+{P.delay_report}</Text>
+        </PressableScale>
+        <PressableScale onPress={() => report(null)} style={[s.roadTile, { backgroundColor: C.tile }]} accessibilityRole="button" accessibilityLabel="All road alerts">
+          <View style={[s.roadGlyph, { backgroundColor: C.line }]}>
+            <Icon name="grid" size={20} color={C.sub} />
+          </View>
+          <Text style={[s.roadLabel, { color: C.text }]} numberOfLines={1}>All alerts</Text>
+          <Text style={[s.roadPts, { color: C.sub }]}> </Text>
+        </PressableScale>
+      </ScrollView>
+
+      {/* Improve the map */}
+      <Section title="Improve the map" sub="Stays for every rider who comes after you" C={C} />
+      <View style={s.grid}>
+        <ActionCard C={C} icon="star" color={AMBER} title="Review a stage" sub="Safety, comfort, how clean" pts={`+${P.stop_review} ${when("stop_review")}`} onPress={() => start("review")} />
+        <ActionCard C={C} icon="camera" color={PURPLE} title="Add a photo" sub="The sign, the queue, the shelter" pts={`+${P.stop_photo} ${when("stop_photo")}`} onPress={() => start("photo")} />
+        <ActionCard C={C} icon="create" color={BLUE} title="Fix a stage" sub="Name, landmark, where it is" pts={`+${P.stop_edit} ${when("stop_edit")}`} onPress={() => start("edit")} />
+        <ActionCard C={C} icon="add-circle" color={GREEN} title="Add a missing stage" sub="Where riders wait" pts={`+${P.new_stop} ${when("new_stop")}`} onPress={() => { Haptics.selectionAsync(); setForm({ kind: "new" }); }} />
       </View>
+
+      {/* Stages near you */}
+      {nearby.length > 0 ? (
+        <>
+          <Section title="Stages near you" sub="Been there? Tell the next rider" C={C} />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearRow}>
+            {nearby.slice(0, 6).map((st) => (
+              <View key={st.id} style={[s.nearCard, { backgroundColor: C.card, borderColor: C.line }]}>
+                <View style={s.nearTop}>
+                  <StopTypeBadge stop={st as any} size={30} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[s.nearName, { color: C.text }]} numberOfLines={2}>{st.name}</Text>
+                    <Text style={[s.nearMeta, { color: C.sub }]} numberOfLines={1}>
+                      {[near ? formatDistance(distanceM(near.lat, near.lng, st.lat, st.lng)) : null, st.route_nams].filter(Boolean).join(" · ")}
+                    </Text>
+                  </View>
+                </View>
+                <View style={s.nearBtns}>
+                  <PressableScale onPress={() => { Haptics.selectionAsync(); setForm({ kind: "review", stop: st }); }} style={[s.nearBtn, { backgroundColor: AMBER + "1A" }]} accessibilityRole="button" accessibilityLabel={`Review ${st.name}`}>
+                    <Icon name="star" size={14} color={AMBER} />
+                    <Text style={[s.nearBtnText, { color: AMBER }]}>Review</Text>
+                  </PressableScale>
+                  <PressableScale onPress={() => picked("photo", st)} style={[s.nearBtn, { backgroundColor: PURPLE + "1A" }]} accessibilityRole="button" accessibilityLabel={`Add a photo of ${st.name}`}>
+                    <Icon name="camera" size={14} color={PURPLE} />
+                    <Text style={[s.nearBtnText, { color: PURPLE }]}>Photo</Text>
+                  </PressableScale>
+                </View>
+              </View>
+            ))}
+          </ScrollView>
+        </>
+      ) : null}
+
+      {/* Yours */}
+      <View style={[s.card, { backgroundColor: C.card, borderColor: C.line, marginTop: 18 }]}>
+        <LinkRow C={C} icon="trophy" color={AMBER} title="Leaderboard" value={weekly ? `#${weekly} this week` : "This week's top riders"} onPress={() => router.push("/(account)/leaderboard" as any)} />
+        <View style={[s.sep, { backgroundColor: C.line }]} />
+        <LinkRow
+          C={C}
+          icon="file-tray-full"
+          color={BLUE}
+          title="Your contributions"
+          value={stats?.submissions_count ? `${stats.submissions_count} sent${pending ? ` · ${pending} waiting` : ""}` : "None yet"}
+          onPress={() => router.push("/(account)/submissions" as any)}
+        />
+        <View style={[s.sep, { backgroundColor: C.line }]} />
+        <LinkRow C={C} icon="ribbon" color={ORANGE} title="Levels & badges" value={stats ? `${stats.badges_count} earned` : ""} onPress={() => router.push("/(account)/badges" as any)} />
+      </View>
+
+      {/* How points work */}
+      <Pressable onPress={() => setShowPoints((v) => !v)} style={s.pointsHead} accessibilityRole="button" accessibilityState={{ expanded: showPoints }}>
+        <Icon name="information-circle-outline" size={17} color={C.sub} />
+        <Text style={[s.pointsHeadText, { color: C.sub }]}>How points work</Text>
+        <Icon name={showPoints ? "chevron-up" : "chevron-down"} size={15} color={C.sub} />
+      </Pressable>
+      {showPoints ? (
+        <View style={[s.card, { backgroundColor: C.card, borderColor: C.line, paddingVertical: 6 }]}>
+          <PointsRow C={C} what="Road report" pts={`+${Math.min(...Object.values(REPORT_POINTS))} to +${Math.max(...Object.values(REPORT_POINTS))}`} when="now; accidents and floods earn most" />
+          <PointsRow C={C} what="Matatu late at a stage" pts={`+${P.delay_report}`} when="now" />
+          <PointsRow C={C} what="Stage review" pts={`+${P.stop_review}`} when="now" />
+          <PointsRow C={C} what="Photo" pts={`+${P.stop_photo}`} when={`if approved; +${FIRST_PHOTO_BONUS} more for a stage's first photo`} />
+          <PointsRow C={C} what="Fix a stage" pts={`+${P.stop_edit}`} when="each change approved" />
+          <PointsRow C={C} what="Missing stage" pts={`+${P.new_stop}`} when="if approved" />
+          <PointsRow C={C} what="5 people confirm your report" pts="+5" when="once per report" />
+          <Text style={[s.pointsFoot, { color: C.sub }]}>
+            A streak adds +1 a day to reviews and late-matatu reports, up to +7. A report, review or photo each day keeps it going.
+          </Text>
+        </View>
+      ) : null}
+
+      <StopPickerSheet
+        visible={task !== null}
+        title={task ? TASKS[task].title : ""}
+        subtitle={task ? TASKS[task].subtitle : undefined}
+        icon={task ? TASKS[task].icon : "location"}
+        accent={task ? TASKS[task].color : ORANGE}
+        near={near}
+        onPick={(stop) => { if (task) picked(task, stop); }}
+        onClose={() => setTask(null)}
+      />
+      {form?.kind === "review" ? (
+        <StopReviewForm visible onClose={() => setForm(null)} stop={form.stop} onSubmitted={() => {}} />
+      ) : null}
+      {form?.kind === "edit" ? (
+        <StopEditForm visible onClose={() => setForm(null)} stop={{ ...form.stop, landmark: form.landmark }} lines={form.lines} />
+      ) : null}
+      {form?.kind === "late" ? (
+        <StopReportForm visible onClose={() => setForm(null)} stop={form.stop} lines={form.lines} />
+      ) : null}
+      {form?.kind === "new" ? <NewStopForm visible onClose={() => setForm(null)} near={near} /> : null}
     </View>
   );
+}
 
-  const handleSubmit = async () => {
-    if (!selectedStop) {
-      Alert.alert("Select a stop", "Please search for and select the stop you are reviewing.");
-      return;
-    }
-    if (!safety || !comfort || !cleanliness) {
-      Alert.alert("Rate all categories", "Please give a rating for Safety, Comfort, and Cleanliness.");
-      return;
-    }
-    setLoading(true);
-    try {
-      const result = await submit({
-        type: "stop_review",
-        stop_id: selectedStop.id,
-        title: selectedStop.name,
-        data: { safety, comfort, cleanliness, text: reviewText.trim() || undefined },
-      });
-      onClose();
-      setSafety(0); setComfort(0); setCleanliness(0); setSelectedStop(null); setReviewText("");
-      if (result.points_awarded > 0 || result.new_badges.length > 0) {
-        onBadgeUnlock(result.points_awarded, result.new_badges, result.streak_days);
-      }
-    } catch {
-      Alert.alert("Error", "Could not submit. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
+function Section({ title, sub, C }: { title: string; sub: string; C: Palette }) {
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="Review a Stop" C={C}>
-      <ScrollView contentContainerStyle={sh.sheetBody} keyboardShouldPersistTaps="handled">
-        <Text style={[sh.fieldLabel, { color: C.sub }]}>STOP</Text>
-        <StopSearchInput
-          value={selectedStop}
-          onChange={setSelectedStop}
-          placeholder="Search for the stop…"
-          C={C}
-        />
-        {selectedStop?.route_nams ? (
-          <View style={[sh.routeHint, { borderColor: C.border }]}>
-            <Icon name="bus-outline" size={12} color={C.sub} />
-            <Text style={[sh.routeHintText, { color: C.sub }]} numberOfLines={1}>
-              {selectedStop.route_nams}
-            </Text>
-          </View>
-        ) : null}
-
-        <Text style={[sh.fieldLabel, { color: C.sub, marginTop: 20 }]}>RATINGS</Text>
-        <View style={[sh.ratingsCard, { backgroundColor: C.input, borderColor: C.border }]}>
-          <StarRow label="Safety"      value={safety}      onSet={setSafety}      />
-          <View style={[sh.divider, { backgroundColor: C.hairline }]} />
-          <StarRow label="Comfort"     value={comfort}     onSet={setComfort}     />
-          <View style={[sh.divider, { backgroundColor: C.hairline }]} />
-          <StarRow label="Cleanliness" value={cleanliness} onSet={setCleanliness} />
-        </View>
-
-        <Text style={[sh.fieldLabel, { color: C.sub, marginTop: 20 }]}>REVIEW (OPTIONAL)</Text>
-        <TextInput
-          style={[sh.textArea, { backgroundColor: C.input, color: C.text, borderColor: C.border }]}
-          placeholder="Share your experience at this stop…"
-          placeholderTextColor={C.sub}
-          multiline
-          numberOfLines={3}
-          value={reviewText}
-          onChangeText={setReviewText}
-          maxLength={500}
-        />
-
-        <Text style={[sh.pointsHint, { color: C.sub }]}>Awards +10 Safiri Points immediately</Text>
-
-        <Pressable
-          style={[sh.submitBtn, loading && { opacity: 0.6 }]}
-          onPress={handleSubmit}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#FFF" size="small" />
-          ) : (
-            <Text style={sh.submitText}>Submit Review</Text>
-          )}
-        </Pressable>
-      </ScrollView>
-    </BottomSheet>
+    <View style={s.section}>
+      <Text style={[s.sectionTitle, { color: C.text }]}>{title}</Text>
+      <Text style={[s.sectionSub, { color: C.sub }]}>{sub}</Text>
+    </View>
   );
 }
 
-// ── Stop Edit Sheet ──────────────────────────────────────────────────────────
-function StopEditSheet({
-  visible,
-  onClose,
-  onBadgeUnlock,
-  C,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onBadgeUnlock: BadgeUnlockCb;
-  C: ReturnType<typeof makeC>;
-}) {
-  const [selectedStop, setSelectedStop]       = useState<UnifiedLocation | null>(null);
-  const [field, setField]                     = useState<"name" | "location" | "routes" | "landmark">("name");
-  const [currentVal, setCurrentVal]           = useState("");
-  const [proposedVal, setProposedVal]         = useState("");
-  const [editNote, setEditNote]               = useState("");
-  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
-  const [loading, setLoading]                 = useState(false);
-  const { submit } = useContributionStore();
-
-  const FIELDS: { key: "name" | "location" | "routes" | "landmark"; label: string }[] = [
-    { key: "name",     label: "Name"     },
-    { key: "location", label: "Location" },
-    { key: "routes",   label: "Routes"   },
-    { key: "landmark", label: "Landmark" },
-  ];
-
-  useEffect(() => {
-    if (!selectedStop) { setCurrentVal(""); return; }
-    switch (field) {
-      case "name":     setCurrentVal(selectedStop.name); break;
-      case "location": setCurrentVal(`${selectedStop.lat.toFixed(5)}, ${selectedStop.lng.toFixed(5)}`); break;
-      case "routes":   setCurrentVal(selectedStop.route_nams ?? ""); break;
-      case "landmark": setCurrentVal(""); break;
-    }
-  }, [selectedStop, field]);
-
-  const handleSubmit = async () => {
-    if (!selectedStop) {
-      Alert.alert("Select a stop", "Please search for and select the stop you want to edit.");
-      return;
-    }
-    if (!proposedVal.trim()) {
-      Alert.alert("Missing info", "Please enter a proposed value.");
-      return;
-    }
-    setLoading(true);
-    try {
-      await submit({
-        type: "stop_edit",
-        stop_id: selectedStop.id,
-        title: `${selectedStop.name} – ${field}`,
-        data: {
-          field,
-          current_value:  currentVal.trim()  || undefined,
-          proposed_value: proposedVal.trim(),
-          note:           editNote.trim()     || undefined,
-        },
-      });
-      onClose();
-      setSelectedStop(null); setCurrentVal(""); setProposedVal(""); setEditNote("");
-      setField("name"); setLocationPickerVisible(false);
-      Alert.alert("Submitted", "Your edit has been submitted for review.");
-    } catch {
-      Alert.alert("Error", "Could not submit. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <>
-      <BottomSheet visible={visible} onClose={onClose} title="Edit Stop Info" C={C}>
-        <ScrollView contentContainerStyle={sh.sheetBody} keyboardShouldPersistTaps="handled">
-          <Text style={[sh.fieldLabel, { color: C.sub }]}>STOP</Text>
-          <StopSearchInput
-            value={selectedStop}
-            onChange={(s) => { setSelectedStop(s); setProposedVal(""); }}
-            placeholder="Search for the stop to edit…"
-            C={C}
-          />
-
-          <Text style={[sh.fieldLabel, { color: C.sub, marginTop: 20 }]}>WHAT TO EDIT</Text>
-          <View style={sh.pillRow}>
-            {FIELDS.map((f) => (
-              <Pressable
-                key={f.key}
-                onPress={() => setField(f.key)}
-                style={[
-                  sh.severityPill,
-                  { borderColor: field === f.key ? ORANGE : C.border },
-                  field === f.key && { backgroundColor: ORANGE + "18" },
-                ]}
-              >
-                <Text style={[sh.severityText, { color: field === f.key ? ORANGE : C.sub }]}>
-                  {f.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          <Text style={[sh.fieldLabel, { color: C.sub, marginTop: 20 }]}>CURRENT VALUE</Text>
-          <TextInput
-            style={[sh.input, { backgroundColor: C.input, color: C.text, borderColor: C.border, opacity: 0.65 }]}
-            value={currentVal}
-            editable={false}
-            placeholder="Auto-filled when stop is selected"
-            placeholderTextColor={C.sub}
-          />
-
-          <Text style={[sh.fieldLabel, { color: C.sub, marginTop: 12 }]}>PROPOSED VALUE</Text>
-          <TextInput
-            style={[sh.input, { backgroundColor: C.input, color: C.text, borderColor: C.border }]}
-            placeholder={field === "landmark" ? "E.g. in front of Hilton Hotel…" : "What it should say…"}
-            placeholderTextColor={C.sub}
-            value={proposedVal}
-            onChangeText={setProposedVal}
-          />
-          {field === "landmark" && (
-            <Text style={[sh.pointsHint, { color: C.sub, marginTop: 0, marginBottom: 0, textAlign: "left", fontSize: 12 }]}>
-              A nearby landmark helps riders find the boarding point (e.g. "in front of Hilton")
-            </Text>
-          )}
-
-          {field === "location" && (
-            <Pressable
-              style={[sh.mapPickBtn, { borderColor: ORANGE }]}
-              onPress={() => setLocationPickerVisible(true)}
-            >
-              <Icon name="map-outline" size={15} color={ORANGE} />
-              <Text style={[sh.mapPickBtnText, { color: ORANGE }]}>Pick on Map</Text>
-            </Pressable>
-          )}
-
-          <Text style={[sh.fieldLabel, { color: C.sub, marginTop: 12 }]}>NOTE (OPTIONAL)</Text>
-          <TextInput
-            style={[sh.textArea, { backgroundColor: C.input, color: C.text, borderColor: C.border }]}
-            placeholder="Any additional context…"
-            placeholderTextColor={C.sub}
-            multiline
-            numberOfLines={2}
-            value={editNote}
-            onChangeText={setEditNote}
-            maxLength={300}
-          />
-
-          <Text style={[sh.pointsHint, { color: C.sub }]}>Awards +15 Safiri Points if approved</Text>
-
-          <Pressable
-            style={[sh.submitBtn, loading && { opacity: 0.6 }]}
-            onPress={handleSubmit}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#FFF" size="small" />
-            ) : (
-              <Text style={sh.submitText}>Submit Edit</Text>
-            )}
-          </Pressable>
-        </ScrollView>
-      </BottomSheet>
-
-      <LocationPickerModal
-        visible={locationPickerVisible}
-        onClose={() => setLocationPickerVisible(false)}
-        onConfirm={(loc) => setProposedVal(`${loc.lat.toFixed(5)}, ${loc.lng.toFixed(5)}`)}
-        initialLat={selectedStop?.lat ?? -1.2921}
-        initialLng={selectedStop?.lng ?? 36.8219}
-      />
-    </>
-  );
-}
-
-// ── New Stop Sheet ───────────────────────────────────────────────────────────
-function NewStopSheet({
-  visible,
-  onClose,
-  C,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  C: ReturnType<typeof makeC>;
-}) {
-  const [stopName, setStopName]   = useState("");
-  const [stopType, setStopType]   = useState<"bus_stop" | "stage" | "station">("bus_stop");
-  const [coords, setCoords]       = useState<{ lat: number; lng: number } | null>(null);
-  const [routes, setRoutes]       = useState("");
-  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
-  const [gpsLoading, setGpsLoading] = useState(false);
-  const [loading, setLoading]     = useState(false);
-  const { submit } = useContributionStore();
-
-  const TYPES: { key: "bus_stop" | "stage" | "station"; label: string }[] = [
-    { key: "bus_stop", label: "Bus stop" },
-    { key: "stage",    label: "Stage"    },
-    { key: "station",  label: "Station"  },
-  ];
-
-  const handleUseMyLocation = async () => {
-    setGpsLoading(true);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Permission needed", "Enable location in Settings.");
-        return;
-      }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-    } catch {
-      Alert.alert("Error", "Could not get your location.");
-    } finally {
-      setGpsLoading(false);
-    }
-  };
-
-  const handleSubmit = async () => {
-    if (!stopName.trim() || !coords) {
-      Alert.alert("Missing info", "Please enter a stop name and set the location.");
-      return;
-    }
-    setLoading(true);
-    try {
-      await submit({
-        type: "new_stop",
-        title: `New stop: ${stopName.trim()}`,
-        data: {
-          lat: coords.lat,
-          lng: coords.lng,
-          name: stopName.trim(),
-          stop_type: stopType,
-          routes: routes.trim() || undefined,
-        },
-      });
-      onClose();
-      setStopName(""); setCoords(null); setStopType("bus_stop");
-      setRoutes(""); setLocationPickerVisible(false);
-      Alert.alert("Submitted", "Your new stop suggestion is under review. If approved, you'll earn +50 Safiri Points.");
-    } catch {
-      Alert.alert("Error", "Could not submit. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <>
-      <BottomSheet visible={visible} onClose={onClose} title="Suggest a New Stop" C={C}>
-        <ScrollView contentContainerStyle={sh.sheetBody} keyboardShouldPersistTaps="handled">
-          <Text style={[sh.fieldLabel, { color: C.sub }]}>STOP NAME</Text>
-          <TextInput
-            style={[sh.input, { backgroundColor: C.input, color: C.text, borderColor: C.border }]}
-            placeholder="E.g. New Westlands Junction…"
-            placeholderTextColor={C.sub}
-            value={stopName}
-            onChangeText={setStopName}
-          />
-
-          <Text style={[sh.fieldLabel, { color: C.sub, marginTop: 20 }]}>STOP TYPE</Text>
-          <View style={sh.pillRow}>
-            {TYPES.map((t) => (
-              <Pressable
-                key={t.key}
-                onPress={() => setStopType(t.key)}
-                style={[
-                  sh.severityPill,
-                  { borderColor: stopType === t.key ? GREEN : C.border },
-                  stopType === t.key && { backgroundColor: GREEN + "18" },
-                ]}
-              >
-                <Text style={[sh.severityText, { color: stopType === t.key ? GREEN : C.sub }]}>
-                  {t.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          <Text style={[sh.fieldLabel, { color: C.sub, marginTop: 20 }]}>LOCATION</Text>
-
-          {/* Location preview card */}
-          <View style={[sh.locationCard, { backgroundColor: C.input, borderColor: C.border }]}>
-            {coords ? (
-              <>
-                <Image
-                  source={{ uri: mapboxThumb(coords.lng, coords.lat) }}
-                  style={sh.locationThumb}
-                  contentFit="cover"
-                />
-                <View style={sh.coordChipRow}>
-                  <Icon name="location" size={13} color={ORANGE} />
-                  <Text style={[sh.coordText, { color: C.text }]}>
-                    {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}
-                  </Text>
-                  <Pressable onPress={() => setCoords(null)} hitSlop={8}>
-                    <Icon name="close-circle" size={16} color={C.sub} />
-                  </Pressable>
-                </View>
-              </>
-            ) : (
-              <Text style={[sh.locationEmpty, { color: C.sub }]}>No location set</Text>
-            )}
-          </View>
-
-          {/* GPS + Map picker buttons */}
-          <View style={[sh.pillRow, { marginTop: 10 }]}>
-            <Pressable
-              style={[sh.locationBtn, { borderColor: C.border, backgroundColor: C.input }]}
-              onPress={handleUseMyLocation}
-              disabled={gpsLoading}
-            >
-              {gpsLoading
-                ? <ActivityIndicator size="small" color={ORANGE} />
-                : <Icon name="locate-outline" size={16} color={C.text} />}
-              <Text style={[sh.locationBtnText, { color: C.text }]}>My Location</Text>
-            </Pressable>
-            <Pressable
-              style={[sh.locationBtn, { borderColor: C.border, backgroundColor: C.input }]}
-              onPress={() => setLocationPickerVisible(true)}
-            >
-              <Icon name="map-outline" size={16} color={C.text} />
-              <Text style={[sh.locationBtnText, { color: C.text }]}>Pick on Map</Text>
-            </Pressable>
-          </View>
-
-          <Text style={[sh.fieldLabel, { color: C.sub, marginTop: 20 }]}>ROUTES SERVED (OPTIONAL)</Text>
-          <TextInput
-            style={[sh.textArea, { backgroundColor: C.input, color: C.text, borderColor: C.border }]}
-            placeholder="E.g. 23, 58, 125A"
-            placeholderTextColor={C.sub}
-            multiline
-            numberOfLines={2}
-            value={routes}
-            onChangeText={setRoutes}
-            maxLength={200}
-          />
-
-          <Text style={[sh.pointsHint, { color: C.sub }]}>Awards +50 Safiri Points if approved</Text>
-
-          <Pressable
-            style={[sh.submitBtn, { backgroundColor: GREEN }, loading && { opacity: 0.6 }]}
-            onPress={handleSubmit}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#FFF" size="small" />
-            ) : (
-              <Text style={sh.submitText}>Submit New Stop</Text>
-            )}
-          </Pressable>
-        </ScrollView>
-      </BottomSheet>
-
-      <LocationPickerModal
-        visible={locationPickerVisible}
-        onClose={() => setLocationPickerVisible(false)}
-        onConfirm={(loc) => setCoords(loc)}
-        initialLat={coords?.lat ?? -1.2921}
-        initialLng={coords?.lng ?? 36.8219}
-      />
-    </>
-  );
-}
-
-// ── Schedule a 19:00 streak-preservation local notification (opt-in, one/day)
-async function scheduleStreakReminder() {
-  try {
-    const now = new Date();
-    const fire = new Date(now);
-    fire.setHours(19, 0, 0, 0);
-    if (fire <= now) return; // already past 19:00 today
-    // Cancel any existing one before scheduling (idempotent)
-    await Notifications.cancelScheduledNotificationAsync("streak-reminder").catch(() => {});
-    await Notifications.scheduleNotificationAsync({
-      identifier: "streak-reminder",
-      content: {
-        title: "🔥 Don't lose your streak!",
-        body: "Contribute before midnight to keep your streak alive.",
-        sound: true,
-        data: { screen: "/(tabs)/contribution" },
-      },
-      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: fire },
-    });
-  } catch {
-    // Notifications not available, streak feature still works without reminder.
-  }
-}
-
-// ── MAIN SCREEN ──────────────────────────────────────────────────────────────
-// Picker UI replicates mobile/src/features/contribution/components/ContributionSheet.tsx's
-// design (title+subtitle header, a stats pill, a 4-card type grid, a leaderboard link)
-// instead of the previous level-track/recent-submissions/badges-preview dashboard.
-// "Add a new stop" is a 5th card in the same visual style, not part of the mobile
-// design being replicated, kept because it's real, working functionality
-// (NewStopSheet below) that shouldn't quietly disappear just because the reference
-// screen doesn't have an equivalent action.
-type ActiveSheet = "delay" | "review" | "edit" | "new_stop" | null;
-
-interface ContributionType {
-  id: ActiveSheet | "photo";
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  subtitle: string;
-  points: number;
-}
-
-const TYPES: ContributionType[] = [
-  { id: "edit",     icon: "pencil-outline",     label: "Edit a stop",     subtitle: "Fix a name or location",   points: 10 },
-  { id: "photo",    icon: "camera-outline",     label: "Add a photo",     subtitle: "Help others recognize it", points: 5  },
-  { id: "delay",    icon: "megaphone-outline",  label: "Report an issue", subtitle: "Delays, hazards, closures", points: 8 },
-  { id: "review",   icon: "star-outline",       label: "Write a review",  subtitle: "Rate a route or stop",     points: 5  },
-  { id: "new_stop", icon: "location-outline",   label: "Add a new stop",  subtitle: "Missing from the map",     points: 12 },
-];
-
-function TypeCard({
-  type,
-  C,
-  onPress,
-}: {
-  type: ContributionType;
-  C: ReturnType<typeof makeC>;
+function ActionCard({ C, icon, color, title, sub, pts, onPress }: {
+  C: Palette;
+  icon: IconName;
+  color: string;
+  title: string;
+  sub: string;
+  pts: string;
   onPress: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} style={{ width: "48%" }}>
-      <View style={[s.typeCard, { backgroundColor: C.card, borderColor: C.border }]}>
-        <View style={[s.typeIconCircle, { backgroundColor: ORANGE + "18" }]}>
-          <Icon name={type.icon} size={19} color={ORANGE} />
-        </View>
-        <Text style={[s.typeLabel, { color: C.text }]}>{type.label}</Text>
-        <Text style={[s.typeSub, { color: C.sub }]}>{type.subtitle}</Text>
-        <Text style={s.typePoints}>+{type.points} pts</Text>
+    <PressableScale onPress={onPress} pressedScale={0.97} containerStyle={s.cardCell} style={[s.action, { backgroundColor: C.card, borderColor: C.line }]} accessibilityRole="button" accessibilityLabel={`${title}, ${pts} Safiri Points`}>
+      <View style={[s.actionIcon, { backgroundColor: color + "1A" }]}>
+        <Icon name={icon} size={19} color={color} />
       </View>
+      <Text style={[s.actionTitle, { color: C.text }]} numberOfLines={1}>{title}</Text>
+      <Text style={[s.actionSub, { color: C.sub }]} numberOfLines={1}>{sub}</Text>
+      <Text style={[s.actionPts, { color }]}>{pts}</Text>
+    </PressableScale>
+  );
+}
+
+function LinkRow({ C, icon, color, title, value, onPress }: {
+  C: Palette;
+  icon: IconName;
+  color: string;
+  title: string;
+  value: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [s.link, { backgroundColor: pressed ? C.pressed : "transparent" }]} accessibilityRole="button" accessibilityLabel={`${title}, ${value}`}>
+      <View style={[s.linkIcon, { backgroundColor: color + "1A" }]}>
+        <Icon name={icon} size={17} color={color} />
+      </View>
+      <Text style={[s.linkTitle, { color: C.text }]} numberOfLines={1}>{title}</Text>
+      <Text style={[s.linkValue, { color: C.sub }]} numberOfLines={1}>{value}</Text>
+      <Icon name="chevron-forward" size={16} color={C.sub} />
     </Pressable>
   );
 }
 
-export default function ContributionScreen() {
-  const dark   = useColorScheme() === "dark";
-  const C      = makeC(dark);
-  const router = useRouter();
-
-  const { stats, fetch: fetchStore } = useContributionStore();
-
-  const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null);
-  const [badgeModal, setBadgeModal]   = useState<{
-    visible: boolean; pointsAwarded: number; badges: string[]; streakDays?: number;
-  }>({ visible: false, pointsAwarded: 0, badges: [] });
-
-  useEffect(() => {
-    fetchStore().catch(() => {});
-  }, [fetchStore]);
-
-  // Schedule 19:00 reminder only when the user has an active streak and hasn't
-  // contributed today, purely advisory, dismissed if they contribute before then.
-  useEffect(() => {
-    if (stats && stats.streak_days > 0 && !stats.contributed_today) {
-      scheduleStreakReminder();
-    }
-  }, [stats?.streak_days, stats?.contributed_today]);
-
-  const handleTypePress = (id: ActiveSheet | "photo") => {
-    Haptics.selectionAsync();
-    if (id === "photo") {
-      router.push("/(account)/add-photo" as any);
-      return;
-    }
-    setActiveSheet(id as ActiveSheet);
-  };
-
+function PointsRow({ C, what, pts, when: w }: { C: Palette; what: string; pts: string; when: string }) {
   return (
-    <View style={[s.root, { backgroundColor: C.bg }]}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 50, gap: 24 }}
-      >
-        <View>
-          <Text style={[s.headerTitle, { color: C.text }]}>Contribute</Text>
-          <Text style={[s.headerSub, { color: C.sub }]}>Help improve Navigo for everyone in Nairobi.</Text>
-        </View>
-
-        {stats ? (
-          <Pressable onPress={() => router.push("/(account)/badges" as any)}>
-            <View style={[s.statsPill, { backgroundColor: C.card }]}>
-              <View>
-                <Text style={[s.statsPillPoints, { color: C.text }]}>{stats.points.toLocaleString()} pts</Text>
-                <Text style={[s.statsPillLevel, { color: C.sub }]}>{stats.level_label}</Text>
-              </View>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                {stats.streak_days > 0 ? (
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                    <Text style={{ fontSize: 16 }}>🔥</Text>
-                    <Text style={[s.statsPillStreak, { color: C.text }]}>{stats.streak_days}d</Text>
-                  </View>
-                ) : null}
-                <Icon name="chevron-forward" size={18} color={C.sub} />
-              </View>
-            </View>
-          </Pressable>
-        ) : null}
-
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12, justifyContent: "space-between" }}>
-          {TYPES.map((type) => (
-            <TypeCard key={type.id} type={type} C={C} onPress={() => handleTypePress(type.id)} />
-          ))}
-        </View>
-
-        <Pressable
-          onPress={() => router.push("/(account)/leaderboard" as any)}
-          style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 8 }}
-        >
-          <Icon name="trophy-outline" size={16} color={ORANGE} />
-          <Text style={{ color: ORANGE, fontWeight: "600" }}>View leaderboard</Text>
-        </Pressable>
-      </ScrollView>
-
-      {/* ── Action Sheets ── */}
-      <DelayReportSheet
-        visible={activeSheet === "delay"}
-        onClose={() => setActiveSheet(null)}
-        onBadgeUnlock={(pts, badges, streak) =>
-          setBadgeModal({ visible: true, pointsAwarded: pts, badges, streakDays: streak })
-        }
-        C={C}
-      />
-      <StopReviewSheet
-        visible={activeSheet === "review"}
-        onClose={() => setActiveSheet(null)}
-        onBadgeUnlock={(pts, badges, streak) =>
-          setBadgeModal({ visible: true, pointsAwarded: pts, badges, streakDays: streak })
-        }
-        C={C}
-      />
-      <StopEditSheet
-        visible={activeSheet === "edit"}
-        onClose={() => setActiveSheet(null)}
-        onBadgeUnlock={(pts, badges, streak) =>
-          setBadgeModal({ visible: true, pointsAwarded: pts, badges, streakDays: streak })
-        }
-        C={C}
-      />
-      <NewStopSheet visible={activeSheet === "new_stop"} onClose={() => setActiveSheet(null)} C={C} />
-
-      <BadgeUnlockModal
-        visible={badgeModal.visible}
-        onDismiss={() => setBadgeModal((p) => ({ ...p, visible: false }))}
-        pointsAwarded={badgeModal.pointsAwarded}
-        badges={badgeModal.badges}
-        streakDays={badgeModal.streakDays}
-      />
+    <View style={s.pointsRow}>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[s.pointsWhat, { color: C.text }]}>{what}</Text>
+        <Text style={[s.pointsWhen, { color: C.sub }]}>{w}</Text>
+      </View>
+      <Text style={s.pointsPts}>{pts}</Text>
     </View>
   );
 }
 
-// ── Sheet styles ─────────────────────────────────────────────────────────────
-const sh = StyleSheet.create({
-  backdrop:    { flex: 1, backgroundColor: "rgba(0,0,0,0.45)" },
-  sheet: {
-    borderTopLeftRadius:  24,
-    borderTopRightRadius: 24,
-    paddingBottom: 40,
-    maxHeight: "90%",
-  },
-  sheetHandle: {
-    width:  36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "#C7C7CC",
-    alignSelf: "center",
-    marginTop:    12,
-    marginBottom:  4,
-  },
-  sheetHeader: {
-    flexDirection:  "row",
-    alignItems:     "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical:   14,
-  },
-  sheetTitle: { fontSize: 18, fontWeight: "700" },
-  sheetBody:  { paddingHorizontal: 20, paddingBottom: 24 },
-
-  fieldLabel: { fontSize: 11, fontWeight: "700", letterSpacing: 0.5, marginBottom: 8 },
-  input: {
-    height: 44,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    fontSize: 15,
-  },
-  textArea: {
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    fontSize: 15,
-    minHeight: 80,
-    textAlignVertical: "top",
-  },
-  pillRow:      { flexDirection: "row", gap: 10 },
-  severityPill: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    alignItems: "center",
-  },
-  severityText: { fontWeight: "600", fontSize: 14 },
-
-  ratingsCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    overflow: "hidden",
-  },
-  starRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  starLabel: { fontSize: 15, fontWeight: "500" },
-  divider:   { height: StyleSheet.hairlineWidth, marginHorizontal: 14 },
-
-  routeHint: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginTop: 6,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  routeHintText: { fontSize: 12, flex: 1 },
-
-  mapPickBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginTop: 10,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 9,
-    paddingHorizontal: 14,
-    alignSelf: "flex-start",
-  },
-  mapPickBtnText: { fontWeight: "600", fontSize: 13 },
-
-  locationCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    overflow: "hidden",
-    minHeight: 64,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  locationThumb:  { width: "100%", height: 120 },
-  locationEmpty:  { fontSize: 14, paddingVertical: 20 },
-  coordChipRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  coordText:      { fontSize: 13, fontWeight: "500", flex: 1 },
-  locationBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  locationBtnText: { fontWeight: "600", fontSize: 13 },
-
-  pointsHint: { fontSize: 13, marginTop: 16, marginBottom: 8, textAlign: "center" },
-  submitBtn: {
-    backgroundColor: ORANGE,
-    height: 50,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 8,
-  },
-  submitText: { color: "#FFF", fontWeight: "700", fontSize: 16 },
-});
-
-// ── Screen styles ─────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  root: { flex: 1 },
+  root: { paddingHorizontal: 14, paddingTop: 2 },
+  header: { flexDirection: "row", alignItems: "flex-start", paddingHorizontal: 2, marginBottom: 12 },
+  title: { fontSize: 24, fontWeight: "800", letterSpacing: -0.5 },
+  subtitle: { fontSize: 13.5, marginTop: 2 },
 
-  headerTitle: { fontSize: 26, fontWeight: "800", letterSpacing: -0.4 },
-  headerSub:   { fontSize: 14, marginTop: 2 },
+  opening: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, height: 36, borderRadius: 12, marginBottom: 10 },
+  openingText: { fontSize: 13, fontWeight: "600", flex: 1 },
 
-  statsPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: 16,
-    borderRadius: 20,
-  },
-  statsPillPoints: { fontSize: 22, fontWeight: "800" },
-  statsPillLevel:  { fontSize: 13, marginTop: 2 },
-  statsPillStreak: { fontSize: 13, fontWeight: "700" },
+  hero: { borderRadius: 22, padding: 16, gap: 10 },
+  heroPlaceholder: { height: 132, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  heroTop: { flexDirection: "row", alignItems: "center", gap: 12 },
+  heroKicker: { color: "rgba(255,255,255,0.9)", fontSize: 11, fontWeight: "800", letterSpacing: 0.8 },
+  heroPoints: { color: "#FFFFFF", fontSize: 28, fontWeight: "900", letterSpacing: -0.6, marginTop: 2 },
+  heroUnit: { fontSize: 14, fontWeight: "700", letterSpacing: 0 },
+  flame: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(0,0,0,0.2)", paddingHorizontal: 11, height: 34, borderRadius: 17 },
+  flameN: { color: "#FFFFFF", fontSize: 16, fontWeight: "900" },
+  track: { height: 8, borderRadius: 4, backgroundColor: "rgba(255,255,255,0.28)", overflow: "hidden" },
+  fill: { height: "100%", borderRadius: 4, backgroundColor: "#FFFFFF" },
+  heroFoot: { flexDirection: "row", alignItems: "center", gap: 10 },
+  heroNext: { flex: 1, color: "#FFFFFF", fontSize: 12.5, fontWeight: "600", lineHeight: 17 },
+  rankChip: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(0,0,0,0.22)", paddingHorizontal: 10, height: 28, borderRadius: 14 },
+  rankText: { color: "#FFFFFF", fontSize: 12, fontWeight: "800" },
 
-  typeCard: {
-    borderRadius: 20,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: 16,
-  },
-  typeIconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 12,
-  },
-  typeLabel: { fontSize: 15, fontWeight: "600" },
-  typeSub:   { fontSize: 13, marginTop: 2, marginBottom: 8 },
-  typePoints: { fontSize: 13, fontWeight: "700", color: ORANGE },
+  section: { marginTop: 20, marginBottom: 10, paddingHorizontal: 2 },
+  sectionTitle: { fontSize: 17, fontWeight: "800", letterSpacing: -0.2 },
+  sectionSub: { fontSize: 12.5, marginTop: 1 },
+
+  roadRow: { gap: 8, paddingRight: 6 },
+  roadTile: { width: 92, borderRadius: 18, paddingVertical: 12, alignItems: "center", gap: 6 },
+  roadGlyph: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  roadLabel: { fontSize: 12, fontWeight: "700", paddingHorizontal: 6 },
+  roadPts: { fontSize: 11, fontWeight: "700", marginTop: -3 },
+
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  cardCell: { width: "48.5%", flexGrow: 1 },
+  action: { borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, padding: 14, gap: 3 },
+  actionIcon: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center", marginBottom: 8 },
+  actionTitle: { fontSize: 14.5, fontWeight: "800" },
+  actionSub: { fontSize: 12 },
+  actionPts: { fontSize: 12, fontWeight: "800", marginTop: 6 },
+
+  nearRow: { gap: 10, paddingRight: 6 },
+  nearCard: { width: 228, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, padding: 12, gap: 12 },
+  nearTop: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
+  nearName: { fontSize: 14, fontWeight: "700", lineHeight: 18 },
+  nearMeta: { fontSize: 12, marginTop: 2 },
+  nearBtns: { flexDirection: "row", gap: 8 },
+  nearBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, height: 34, borderRadius: 12 },
+  nearBtnText: { fontSize: 13, fontWeight: "800" },
+
+  card: { borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },
+  sep: { height: StyleSheet.hairlineWidth, marginLeft: 60 },
+  link: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 12 },
+  linkIcon: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  linkTitle: { fontSize: 15, fontWeight: "600", flexShrink: 0 },
+  linkValue: { flex: 1, fontSize: 13, textAlign: "right" },
+
+  pointsHead: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 14 },
+  pointsHeadText: { fontSize: 13, fontWeight: "700" },
+  pointsRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 8 },
+  pointsWhat: { fontSize: 14, fontWeight: "600" },
+  pointsWhen: { fontSize: 12, marginTop: 1 },
+  pointsPts: { fontSize: 14, fontWeight: "900", color: ORANGE },
+  pointsFoot: { fontSize: 12, lineHeight: 17, paddingHorizontal: 14, paddingTop: 6, paddingBottom: 8 },
 });

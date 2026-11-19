@@ -90,8 +90,19 @@ export const ReportService = {
     return { reports: data.data, incidents: data.incidents ?? [] };
   },
 
-  async createReport(lat: number, lng: number, type: ReportCategory): Promise<void> {
-    await api.post("/reports", { lat, lng, type });
+  /** Sends a report; resolves to what it earned (signed in), as the API says. */
+  async createReport(
+    lat: number,
+    lng: number,
+    type: ReportCategory
+  ): Promise<{ points_awarded: number; new_badges: string[]; streak_days: number | null }> {
+    const res = await api.post("/reports", { lat, lng, type });
+    const d = res.data?.data ?? {};
+    return {
+      points_awarded: Number(d.points_awarded ?? 0),
+      new_badges: Array.isArray(d.new_badges) ? d.new_badges : [],
+      streak_days: typeof d.streak_days === "number" ? d.streak_days : null,
+    };
   },
 
   /**

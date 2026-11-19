@@ -16,7 +16,7 @@ import {
   tierOf,
   type BadgeFamily,
 } from "@/components/badges/NavigoBadge";
-import { LEVELS, levelProgress } from "@/components/badges/levels";
+import { LEVELS, deepen, levelProgress } from "@/components/badges/levels";
 import type { Badge } from "@/services/contribution";
 import { useContributionStore } from "@/store/contributionStore";
 import { LinearGradient } from "expo-linear-gradient";
@@ -268,11 +268,7 @@ function BadgeModal({ badge, all, earned, C, onClose }: {
   );
 }
 
-function shadeHex(hex: string): string {
-  const n = parseInt(hex.slice(1), 16);
-  const f = (c: number) => Math.round(c * 0.62);
-  return `#${((1 << 24) | (f((n >> 16) & 255) << 16) | (f((n >> 8) & 255) << 8) | f(n & 255)).toString(16).slice(1)}`;
-}
+const shadeHex = deepen;
 
 const s = StyleSheet.create({
   root: { flex: 1 },

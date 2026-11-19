@@ -3,17 +3,14 @@ import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { router } from "expo-router";
 import ApiClient from "./apiClient";
+import { foregroundPresentation } from "./inAppNotifications";
 
 const PROJECT_ID = "acc62a4b-150f-4ea6-b0f3-296dca0d6683";
 
+// While the app is open, a notification is shown in the app's own card
+// (services/inAppNotifications), not the system banner over the map.
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
+  handleNotification: foregroundPresentation,
 });
 
 export async function requestNotificationPermission(): Promise<boolean> {

@@ -6,17 +6,17 @@
 // field becomes its own stop_edit contribution (with stop_id, so moderators
 // see the stop and an approved landmark is applied to it).
 import React, { useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View, useColorScheme } from "react-native";
+import { Alert, Pressable, StyleSheet, Text, TextInput, View, useColorScheme } from "react-native";
 import * as Haptics from "expo-haptics";
-import * as Location from "expo-location";
-import { Camera as MapboxCamera, MapView as MapboxMapView } from "@rnmapbox/maps";
 import { useContributionStore } from "@/store/contributionStore";
+import { showReward } from "@/store/rewardStore";
+import { CONTRIBUTION_POINTS } from "@/services/contribution";
 import { distanceM, formatDistance } from "@/services/exploreSearch";
 import { FormLabel, FormSheet, formColors } from "./FormSheet";
+import { PinMapBox, type PinMapBoxHandle } from "./PinMapBox";
 import { Icon } from "@/components/icons/Icon";
 
 const BLUE = "#2563EB";
-const ORANGE = "#FF6F00";
 /** Moves smaller than this are GPS noise, not an edit. */
 const MIN_MOVE_M = 8;
 
@@ -36,7 +36,7 @@ export function StopEditForm({
   const dark = useColorScheme() === "dark";
   const C = formColors(dark);
   const { submit } = useContributionStore();
-  const cameraRef = useRef<MapboxCamera>(null);
+  const mapRef = useRef<PinMapBoxHandle>(null);
 
   const [name, setName] = useState(stop.name);
   const [landmark, setLandmark] = useState(stop.landmark ?? "");
@@ -44,7 +44,6 @@ export function StopEditForm({
   const [removed, setRemoved] = useState<string[]>([]);
   const [added, setAdded] = useState("");
   const [note, setNote] = useState("");
-  const [gps, setGps] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const moved = distanceM(stop.lat, stop.lng, pos.lat, pos.lng);
@@ -78,25 +77,6 @@ export function StopEditForm({
     return out;
   }, [name, landmark, moved, pos, removed, addedLines, lines, stop]);
 
-  const useMyLocation = async () => {
-    setGps(true);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Location is off", "Allow location access to use where you're standing.");
-        return;
-      }
-      const p = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      const next = { lat: p.coords.latitude, lng: p.coords.longitude };
-      setPos(next);
-      cameraRef.current?.setCamera({ centerCoordinate: [next.lng, next.lat], zoomLevel: 18, animationDuration: 500 });
-    } catch {
-      Alert.alert("Couldn't get your location", "Please try again outside.");
-    } finally {
-      setGps(false);
-    }
-  };
-
   const handleSubmit = async () => {
     if (!changes.length) return;
     setLoading(true);
@@ -114,12 +94,12 @@ export function StopEditForm({
           },
         });
       }
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onClose();
-      Alert.alert(
-        "Thanks, sent for review",
-        `${changes.length} change${changes.length === 1 ? "" : "s"} submitted. You'll earn +15 points for each one approved.`
-      );
+      showReward({
+        points: 0,
+        title: changes.length === 1 ? "Edit sent for review" : `${changes.length} edits sent for review`,
+        pendingPoints: CONTRIBUTION_POINTS.stop_edit * changes.length,
+      });
     } catch {
       Alert.alert("Couldn't send your edit", "Please try again.");
     } finally {
@@ -139,7 +119,7 @@ export function StopEditForm({
       submitting={loading}
       submitDisabled={!changes.length}
       onSubmit={handleSubmit}
-      footerHint="A moderator checks every edit · +15 points each"
+      footerHint={`A moderator checks every edit · +${CONTRIBUTION_POINTS.stop_edit} Safiri Points each`}
     >
       <View>
         <FormLabel color={C.sub}>NAME</FormLabel>
@@ -170,42 +150,12 @@ export function StopEditForm({
         <View style={styles.rowBetween}>
           <FormLabel color={C.sub}>WHERE THE STOP REALLY IS</FormLabel>
           {moved >= MIN_MOVE_M && (
-            <Pressable
-              onPress={() => {
-                setPos({ lat: stop.lat, lng: stop.lng });
-                cameraRef.current?.setCamera({ centerCoordinate: [stop.lng, stop.lat], zoomLevel: 17, animationDuration: 400 });
-              }}
-              hitSlop={8}
-            >
+            <Pressable onPress={() => mapRef.current?.moveTo(stop.lat, stop.lng, 17)} hitSlop={8}>
               <Text style={[styles.link, { color: BLUE }]}>Reset</Text>
             </Pressable>
           )}
         </View>
-        <View style={styles.mapBox}>
-          <MapboxMapView
-            style={StyleSheet.absoluteFill}
-            styleURL={dark ? "mapbox://styles/mapbox/dark-v11" : process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL ?? "mapbox://styles/mapbox/streets-v12"}
-            logoEnabled={false}
-            attributionEnabled={false}
-            scaleBarEnabled={false}
-            compassEnabled={false}
-            pitchEnabled={false}
-            rotateEnabled={false}
-            onRegionDidChange={(f: any) => {
-              const [lng, lat] = f?.geometry?.coordinates ?? [];
-              if (Number.isFinite(lat) && Number.isFinite(lng)) setPos({ lat, lng });
-            }}
-          >
-            <MapboxCamera ref={cameraRef} defaultSettings={{ centerCoordinate: [stop.lng, stop.lat], zoomLevel: 17.5 }} />
-          </MapboxMapView>
-          {/* Fixed pin: the map moves under it. */}
-          <View pointerEvents="none" style={styles.pinWrap}>
-            <Icon name="location" size={38} color={ORANGE} style={{ marginBottom: 30 }} />
-          </View>
-          <Pressable onPress={useMyLocation} style={[styles.gpsBtn, { backgroundColor: C.bg }]} hitSlop={6}>
-            {gps ? <ActivityIndicator size="small" color={BLUE} /> : <Icon name="locate" size={18} color={BLUE} />}
-          </Pressable>
-        </View>
+        <PinMapBox ref={mapRef} initial={{ lat: stop.lat, lng: stop.lng }} onMove={setPos} buttonBg={C.bg} />
         <Text style={[styles.help, { color: C.sub }]}>
           {moved >= MIN_MOVE_M
             ? `Moved ${formatDistance(moved)} from the current position`
@@ -282,22 +232,6 @@ const styles = StyleSheet.create({
   help: { fontSize: 11.5, marginTop: 6 },
   rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
   link: { fontSize: 12.5, fontWeight: "700" },
-  mapBox: { height: 190, borderRadius: 14, overflow: "hidden" },
-  pinWrap: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
-  gpsBtn: {
-    position: "absolute",
-    right: 10,
-    bottom: 10,
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 4,
-  },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 11, paddingVertical: 7, borderRadius: 10 },
   chipText: { fontSize: 13, fontWeight: "700" },

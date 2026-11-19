@@ -65,6 +65,12 @@ export const UserService = {
     await api.delete(`/user/saved-places/${id}`);
   },
 
+  /** Sets a saved place's note; a blank note clears it. */
+  async setPlaceNote(id: number, note: string): Promise<SavedPlace> {
+    const res = await api.patch(`/user/saved-places/${id}`, { note });
+    return res.data;
+  },
+
   async getSavedJourneys(): Promise<SavedJourney[]> {
     const res = await api.get("/user/saved-journeys");
     return res.data;

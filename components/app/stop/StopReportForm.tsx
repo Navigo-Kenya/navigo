@@ -8,6 +8,8 @@ import { Alert, Pressable, StyleSheet, Text, TextInput, View, useColorScheme } f
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useContributionStore } from "@/store/contributionStore";
+import { showReward } from "@/store/rewardStore";
+import { CONTRIBUTION_POINTS } from "@/services/contribution";
 import { FormLabel, FormSheet, formColors } from "./FormSheet";
 import { Icon } from "@/components/icons/Icon";
 
@@ -60,9 +62,8 @@ export function StopReportForm({
           note: note.trim() || undefined,
         } as any,
       });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onClose();
-      if (res.points_awarded > 0) Alert.alert("Thanks for the heads-up", `+${res.points_awarded} Navigo Points earned.`);
+      showReward({ points: res.points_awarded, badges: res.new_badges, streak: res.streak_days, title: "Thanks for the heads-up" });
     } catch {
       Alert.alert("Couldn't send your report", "Please try again.");
     } finally {
@@ -81,7 +82,7 @@ export function StopReportForm({
       submitLabel="Send report"
       submitting={loading}
       onSubmit={handleSubmit}
-      footerHint="+3 Navigo Points · riders nearby see it for 2 hours"
+      footerHint={`+${CONTRIBUTION_POINTS.delay_report} Safiri Points · riders nearby see it for 2 hours`}
     >
       <View>
         <FormLabel color={C.sub}>{"WHAT'S HAPPENING?"}</FormLabel>

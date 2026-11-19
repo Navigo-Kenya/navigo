@@ -17,6 +17,8 @@ import { useAuthStore } from "@/store/authStore";
 import api from "@/services/apiClient";
 import { syncQuickActions } from "@/services/quickActions";
 import { useSavedStore } from "@/store/savedStore";
+import { RewardToast } from "@/components/contribution/RewardToast";
+import { InAppBanner } from "@/components/notifications/InAppBanner";
 import { useQuickActionRouting } from "expo-quick-actions/router";
 import Mapbox from "@rnmapbox/maps";
 import * as Sentry from "@sentry/react-native";
@@ -116,6 +118,10 @@ function RootLayout() {
           <Stack.Screen name="kwame" options={{ animation: "slide_from_bottom", gestureEnabled: true }} />
           <Stack.Screen name="kwame-settings" options={{ animation: "slide_from_right", headerShown: false }} />
         </Stack>
+        {/* Above every screen: a notification that arrives while the app is
+            open, and the thanks after a contribution. */}
+        <InAppBanner />
+        <RewardToast />
       </QueryClientProvider>
     </SafeAreaProvider>
   );

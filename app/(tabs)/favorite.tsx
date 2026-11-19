@@ -21,11 +21,6 @@ import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useEffect, useMemo, useState } from "react";
 import {
-  ActionSheetIOS,
-  Alert,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -37,7 +32,9 @@ import { Icon } from "@/components/icons/Icon";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { ListTile } from "@/components/saved/ListTile";
 import { NewListForm, type ListDraft } from "@/components/saved/NewListForm";
+import { useListEditing } from "@/components/saved/useListEditing";
 import { SaveToListSheet } from "@/components/saved/SaveToListSheet";
+import { useActionSheet, type SheetAction } from "@/components/ui/ActionSheet";
 import type { SaveTarget } from "@/store/savedStore";
 
 const ORANGE = "#FF6F00";
@@ -73,26 +70,6 @@ function timeAgo(iso: string): string {
   if (d < 7) return `${d} days ago`;
   if (d < 30) return `${Math.floor(d / 7)} wk ago`;
   return new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" });
-}
-
-/** One choice list, as an action sheet on iOS and an alert elsewhere. */
-function choose(title: string, options: { label: string; destructive?: boolean; run: () => void }[]) {
-  if (Platform.OS === "ios") {
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        title,
-        options: [...options.map((o) => o.label), "Cancel"],
-        cancelButtonIndex: options.length,
-        destructiveButtonIndex: options.findIndex((o) => o.destructive),
-      },
-      (i) => { if (i < options.length) options[i].run(); }
-    );
-    return;
-  }
-  Alert.alert(title, undefined, [
-    ...options.map((o) => ({ text: o.label, style: o.destructive ? ("destructive" as const) : undefined, onPress: o.run })),
-    { text: "Cancel", style: "cancel" as const },
-  ]);
 }
 
 // ── Home / Work ───────────────────────────────────────────────────────────────
@@ -249,40 +226,6 @@ function JourneyCard({ journey, C, dark, onPress, onLongPress }: {
   );
 }
 
-// ── Edit a list ───────────────────────────────────────────────────────────────
-
-function EditListModal({ list, dark, onClose, onSave }: {
-  list: SavedListMeta | null;
-  dark: boolean;
-  onClose: () => void;
-  onSave: (draft: ListDraft) => Promise<string | null>;
-}) {
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => setError(null), [list]);
-  return (
-    <Modal visible={!!list} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={s.modalWrap}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-        {list ? (
-          <View style={[s.modalCard, { backgroundColor: dark ? "#18181B" : "#FFFFFF" }]}>
-            <Text style={[s.modalTitle, { color: dark ? "#F4F4F5" : "#111827" }]}>
-              {list.builtIn ? `Style "${list.name}"` : "Edit list"}
-            </Text>
-            <NewListForm
-              dark={dark}
-              initial={{ name: list.name, color: list.color, icon: list.icon }}
-              submitLabel="Save"
-              error={error}
-              onCancel={onClose}
-              onSubmit={async (d) => setError(await onSave(d))}
-            />
-          </View>
-        ) : null}
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
 // ── Main screen ───────────────────────────────────────────────────────────────
 
 export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
@@ -292,14 +235,15 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const {
     places, journeys, customLists, fetch: fetchSaved, removePlace, removeJourney,
-    renameList, deleteListPlaces,
   } = useSavedStore();
-  const { custom, create, update, remove, migrate } = useSavedListsStore();
+  const { custom, create, migrate } = useSavedListsStore();
   const setJourney = useJourneyStore((s) => s.setJourney);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<SavedListMeta | null>(null);
   const [changing, setChanging] = useState<SaveTarget | null>(null);
+  // Menus in a plain sheet: an Alert would cut them to three buttons on Android.
+  const sheet = useActionSheet();
+  const choose = (title: string, options: SheetAction[]) => sheet.open(title, options);
 
   useEffect(() => { if (isAuthenticated) fetchSaved().catch(() => {}); }, [isAuthenticated, fetchSaved]);
   useEffect(() => { migrate(customLists); }, [customLists, migrate]);
@@ -323,6 +267,7 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
   }, [listPlaces, custom]);
 
   const countOf = (key: string) => listPlaces.filter((p) => p.list === key).length;
+  const listEdit = useListEditing(lists, countOf);
 
   const openOnMap = (p: SavedPlace) => {
     Haptics.selectionAsync();
@@ -348,21 +293,22 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
   const pinMore = (pin: "home" | "work", place?: SavedPlace) => {
     if (!place) return;
     choose(pin === "home" ? "Home" : "Work", [
-      { label: "Change location", run: () => router.push({ pathname: "/(account)/pick-place", params: { pin } } as any) },
-      { label: `Remove ${pin === "home" ? "Home" : "Work"}`, destructive: true, run: () => removePlace(place.id).catch(() => {}) },
+      { label: "Change location", icon: "location-outline", run: () => router.push({ pathname: "/(account)/pick-place", params: { pin } } as any) },
+      { label: `Remove ${pin === "home" ? "Home" : "Work"}`, icon: "trash-outline", destructive: true, run: () => removePlace(place.id).catch(() => {}) },
     ]);
   };
 
   const placeMore = (p: SavedPlace, inLists: SavedListMeta[]) => {
     const rows = listPlaces.filter((r) => (r.place_id ?? `${r.lat},${r.lng}`) === (p.place_id ?? `${p.lat},${p.lng}`));
     choose(p.name, [
-      { label: "Directions", run: () => directionsTo(p) },
-      { label: "Show on map", run: () => openOnMap(p) },
+      { label: "Directions", icon: "navigate-outline", run: () => directionsTo(p) },
+      { label: "Show on map", icon: "map-outline", run: () => openOnMap(p) },
       ...(p.place_id
-        ? [{ label: "Change lists", run: () => setChanging({ name: p.name, lat: p.lat, lng: p.lng, type: p.type, place_id: p.place_id!, category: p.category }) }]
+        ? [{ label: "Change lists", icon: "bookmarks-outline" as const, run: () => setChanging({ name: p.name, lat: p.lat, lng: p.lng, type: p.type, place_id: p.place_id!, category: p.category }) }]
         : []),
       {
         label: inLists.length > 1 ? `Remove from ${inLists.length} lists` : "Remove",
+        icon: "trash-outline",
         destructive: true,
         run: () => { Promise.all(rows.map((r) => removePlace(r.id))).catch(() => {}); },
       },
@@ -372,49 +318,17 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
   const listMore = (l: SavedListMeta) => {
     const n = countOf(l.key);
     choose(l.name, [
-      { label: n ? `View ${n} place${n === 1 ? "" : "s"}` : "Open list", run: () => viewList(l.key) },
-      { label: l.builtIn ? "Change colour and icon" : "Edit list", run: () => setEditing(l) },
+      { label: n ? `View ${n} place${n === 1 ? "" : "s"}` : "Open list", icon: "list-outline", run: () => viewList(l.key) },
+      { label: l.builtIn ? "Change colour and icon" : "Edit list", icon: "color-palette-outline", run: () => listEdit.edit(l) },
       ...(!l.builtIn
         ? [{
             label: "Delete list",
+            icon: "trash-outline" as const,
             destructive: true,
-            run: () => Alert.alert(
-              `Delete "${l.name}"?`,
-              n ? `Its ${n} saved place${n === 1 ? "" : "s"} will be removed from this list. Places in other lists stay there.` : undefined,
-              [
-                { text: "Cancel", style: "cancel" },
-                {
-                  text: "Delete",
-                  style: "destructive",
-                  onPress: () => { deleteListPlaces(l.key).catch(() => {}); remove(l.key); },
-                },
-              ]
-            ),
+            run: () => listEdit.confirmDelete(l),
           }]
         : []),
     ]);
-  };
-
-  const saveEdit = async (d: ListDraft): Promise<string | null> => {
-    if (!editing) return null;
-    const name = d.name.replace(/\s+/g, " ").trim();
-    const renamed = !editing.builtIn && name && name !== editing.name;
-    if (renamed && lists.some((l) => l.key !== editing.key && (l.name.toLowerCase() === name.toLowerCase() || l.key.toLowerCase() === name.toLowerCase()))) {
-      return "You already have a list with this name.";
-    }
-    if (renamed) {
-      try {
-        await renameList(editing.key, name);
-      } catch {
-        return "Couldn't rename the list. Check your connection.";
-      }
-      remove(editing.key);
-      update(name, { name, color: d.color, icon: d.icon });
-    } else {
-      update(editing.key, { color: d.color, icon: d.icon });
-    }
-    setEditing(null);
-    return null;
   };
 
   const submitNew = (d: ListDraft) => {
@@ -435,8 +349,8 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
   const journeyMore = (journey: SavedJourney) => {
     const label = journey.label ?? `${journey.from_name} → ${journey.to_name}`;
     choose(label, [
-      { label: "Show on map", run: () => loadJourneyOnMap(journey) },
-      { label: "Remove", destructive: true, run: () => removeJourney(journey.id).catch(() => {}) },
+      { label: "Show on map", icon: "map-outline", run: () => loadJourneyOnMap(journey) },
+      { label: "Remove", icon: "trash-outline", destructive: true, run: () => removeJourney(journey.id).catch(() => {}) },
     ]);
   };
 
@@ -519,8 +433,9 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
         ) : null}
       </View>
 
-      <EditListModal list={editing} dark={dark} onClose={() => setEditing(null)} onSave={saveEdit} />
+      {listEdit.element}
       <SaveToListSheet target={changing} onClose={() => setChanging(null)} />
+      {sheet.element}
     </View>
   );
 }
