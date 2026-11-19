@@ -52,6 +52,20 @@ export interface CommunityStats {
   badges_preview: Pick<Badge, "slug" | "name" | "icon" | "color">[];
   streak_days: number;
   contributed_today: boolean;
+  /** The counts badges are earned from (newer APIs), for exact progress. */
+  progress?: {
+    total: number;
+    by_type: Record<string, number>;
+    approved_by_type: Record<string, number>;
+    report_total: number;
+    report_by_type: Record<string, number>;
+  };
+  /** Leaderboard positions (newer APIs); null where the user has no points yet. */
+  rank?: {
+    all: number | null;
+    weekly: number | null;
+    weekly_points: number;
+  };
 }
 
 export interface StopReview {
