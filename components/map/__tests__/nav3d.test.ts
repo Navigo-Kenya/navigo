@@ -1,6 +1,8 @@
 import {
   cameraFor,
   lightPresetAt,
+  modelScaleArr,
+  navLightPreset,
   modelScaleAt,
   modelYaw,
   modelsFor,
@@ -20,6 +22,16 @@ describe("light for the time of day", () => {
     expect(lightPresetAt(NAIROBI.lat, NAIROBI.lng, eat("2026-11-18T00:30:00"))).toBe("night");
     expect(lightPresetAt(NAIROBI.lat, NAIROBI.lng, eat("2026-11-18T06:10:00"))).toBe("dawn");
     expect(lightPresetAt(NAIROBI.lat, NAIROBI.lng, eat("2026-11-18T18:40:00"))).toBe("dusk");
+    // Daylight from sunrise, not 25 minutes after it.
+    expect(lightPresetAt(NAIROBI.lat, NAIROBI.lng, eat("2026-11-18T06:40:00"))).toBe("day");
+  });
+
+  it("follows the setting: like the phone by default, the sun on request", () => {
+    const night = eat("2026-11-18T00:30:00");
+    expect(navLightPreset("phone", false, NAIROBI.lat, NAIROBI.lng, night)).toBe("day");
+    expect(navLightPreset("phone", true, NAIROBI.lat, NAIROBI.lng, eat("2026-11-18T12:30:00"))).toBe("night");
+    expect(navLightPreset("day", true, NAIROBI.lat, NAIROBI.lng, night)).toBe("day");
+    expect(navLightPreset("time", false, NAIROBI.lat, NAIROBI.lng, night)).toBe("night");
   });
 
   it("puts the noon sun high over the equator", () => {
@@ -57,6 +69,15 @@ describe("the vehicle for a leg", () => {
 });
 
 describe("drawing", () => {
+  it("sizes models with a plain [x, y, z] scale for the zoom (no zoom expression on GeoJSON)", () => {
+    const near = modelScaleArr("matatu", 17);
+    const far = modelScaleArr("matatu", 14);
+    expect(near).toHaveLength(3);
+    expect(near[0]).toBe(near[1]);
+    expect(far[0]).toBeGreaterThan(near[0]); // zoomed out: drawn larger, same size on screen
+    expect(modelScaleArr("puck", 22)[0]).toBe(1); // never below real size
+  });
+
   it("keeps a model the same size on screen, never below real size", () => {
     expect(modelScaleAt("matatu", 17)).toBeCloseTo((58 * 0.597) / 5.5, 3);
     expect(modelScaleAt("matatu", 16)).toBeCloseTo(2 * modelScaleAt("matatu", 17), 3);

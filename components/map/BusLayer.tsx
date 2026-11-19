@@ -1,7 +1,10 @@
 // components/map/BusLayer.tsx
 import { Models, ModelLayer, ShapeSource, CircleLayer } from "@rnmapbox/maps";
-import { modelScaleExpr, modelYaw } from "@/components/map/nav3d";
-import { MODEL_ASSETS } from "@/components/map/navModelAssets";
+import { modelScaleArr, modelYaw } from "@/components/map/nav3d";
+import { useModelUris } from "@/components/map/navModelAssets";
+
+const BUS_MODEL: ["matatu"] = ["matatu"];
+const BUS_MODEL_ID = { matatu: "bus-model" } as const;
 import React, { useEffect, useRef, useState } from "react";
 import { routes as allRoutes } from "@/data/routes";
 import { stops as allStops } from "@/data/stops";
@@ -221,14 +224,18 @@ interface BusState {
 }
 
 interface BusLayerProps {
+  /** The map's zoom: the models are sized for it (Mapbox allows no zoom expression here). */
+  zoom?:             number;
   selectedBusId?:    string | null;
   onBusPress?:       (info: SelectedBusInfo) => void;
   followBusId?:      string | null;
   onFollowPosition?: (coords: [number, number]) => void;
 }
 
-export function BusLayer({ selectedBusId, onBusPress, followBusId, onFollowPosition }: BusLayerProps = {}) {
+export function BusLayer({ zoom = 15, selectedBusId, onBusPress, followBusId, onFollowPosition }: BusLayerProps = {}) {
   const pathsRef       = useRef<Map<string, Path>>(STRAIGHT_PATHS);
+  // The matatu model, from a local file (see useModelUris).
+  const busModelUris   = useModelUris(BUS_MODEL, BUS_MODEL_ID);
   const t0Ref          = useRef(Date.now());
   const followIdRef    = useRef(followBusId);
   const onFollowPosRef = useRef(onFollowPosition);
@@ -355,7 +362,7 @@ export function BusLayer({ selectedBusId, onBusPress, followBusId, onFollowPosit
 
 return (
     <>
-      <Models models={{ "bus-model": MODEL_ASSETS.matatu }} />
+      {busModelUris["bus-model"] ? <Models models={busModelUris} /> : null}
       
       <ShapeSource
         id="buses"
@@ -404,7 +411,7 @@ return (
             // GROUND ALIGNMENT
             // Lift the bus so the tires touch the road. 
             // Navigo matatu (metres, origin on the ground): the same size on screen at every zoom.
-            modelScale: modelScaleExpr("matatu"),
+            modelScale: modelScaleArr("matatu", Math.round(zoom * 4) / 4),
 
             modelRotation: ["get", "rotation"], 
             modelOpacity: 1,
