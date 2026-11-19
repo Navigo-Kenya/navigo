@@ -150,6 +150,47 @@ export interface Leaderboard {
   me?: Standing | null;
 }
 
+export interface LeagueMember {
+  rank: number;
+  id: number;
+  name: string;
+  avatar: string | null;
+  points: number;
+  level: number;
+  me: boolean;
+}
+
+/** Where you stand in your group, and what it takes to move. */
+export interface LeagueMe {
+  rank: number;
+  points: number;
+  zone: "up" | "safe" | "down";
+  /** Points to reach the last promotion place. */
+  to_up: number | null;
+  /** Points to climb out of the drop zone. */
+  to_safe: number | null;
+}
+
+/** Your league this week (api: LeagueController). */
+export interface League {
+  tier: number;
+  name: string;
+  next: string | null;
+  prev: string | null;
+  week_start: string;
+  resets_at: string;
+  /** In a group yet (you join when you first score this week). */
+  joined: boolean;
+  size: number;
+  /** How many go up, and down, on Monday. */
+  up: number;
+  down: number;
+  members: LeagueMember[];
+  me: LeagueMe | null;
+  /** How last week ended, until seen. */
+  last_week: { outcome: "up" | "stay" | "down"; rank: number; points: number; from: string; to: string } | null;
+}
+
 export interface CreateContributionPayload {
   type: ContributionType;
   stop_id?: string | null;
@@ -203,6 +244,16 @@ export const ContributionService = {
   async getLeaderboard(period: "all" | "weekly" = "all"): Promise<Leaderboard> {
     const res = await api.get<Leaderboard>("/community/leaderboard", { params: { period } });
     return { ...res.data, data: res.data.data ?? [], period };
+  },
+
+  async getLeague(): Promise<League> {
+    const res = await api.get<League>("/user/league");
+    return res.data;
+  },
+
+  /** Last week's result was shown: don't show it again. */
+  async leagueSeen(): Promise<void> {
+    await api.post("/user/league/seen");
   },
 
   async getStopReviews(stopId: string): Promise<StopReview[]> {
