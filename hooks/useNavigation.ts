@@ -79,6 +79,10 @@ const REROUTE_MIN_INTERVAL_MS = 12_000;
 /** Heading samples against the route before "wrong way". More in a vehicle: its route bends at junctions. */
 const WRONG_WAY_STRIKES_ON_FOOT = 4;
 const WRONG_WAY_STRIKES_VEHICLE = 6;
+/** Dead reckoning: only when moving at least this fast (m/s) when the fixes stopped… */
+const DEAD_RECKON_MIN_MPS = 2;
+/** …and for at most this long (s): a tunnel, not a phone that lost its fix for good. */
+const DEAD_RECKON_MAX_S = 60;
 /** Closer than this, the arrival itself is the cue ("You have arrived"). */
 const ARRIVAL_CUE_MIN_M = 30;
 
@@ -185,6 +189,8 @@ export function useNavigation() {
   const prevApproachPhaseRef  = useRef<string | null>(null);
   const reroutingRef          = useRef<boolean>(false);
   const lastGpsTimeRef       = useRef<number>(Date.now());
+  /** Any fix at all, even one too imprecise to use: the signal isn't lost, it's weak (indoors). */
+  const lastFixAtRef         = useRef<number>(Date.now());
   const lastSpeedRef         = useRef<number>(0);
   const lastDeadReckonTimeRef = useRef<number>(Date.now());
 
@@ -447,6 +453,7 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
     if (!mountedRef.current) return;
 
     const accuracy = loc.coords.accuracy ?? 0;
+    lastFixAtRef.current = Date.now();
 
     // Raw fix into the session trace (pre-filter, so replays show rejects too).
     TraceRecorder.fix({
@@ -1047,7 +1054,11 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
 
   useEffect(() => {
     const gpsOptions = isNavigating
-      ? { accuracy: Location.Accuracy.High,     timeInterval: 1_000,  distanceInterval: 3 }
+      // distanceInterval 0: a fix every second even when standing still. With
+      // 3 m, a user at a stage or a red light got no fixes at all, so the app
+      // declared the GPS lost and dead-reckoned them along the route; the
+      // phase tracker also needs those fixes to see a stop.
+      ? { accuracy: Location.Accuracy.High,     timeInterval: 1_000,  distanceInterval: 0 }
       : { accuracy: Location.Accuracy.Balanced, timeInterval: 10_000, distanceInterval: 5 };
 
     (async () => {
@@ -1144,14 +1155,21 @@ const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
 
     const id = setInterval(() => {
       const now      = Date.now();
-      const sinceGps = (now - lastGpsTimeRef.current) / 1000;
-      const lost     = sinceGps > 8;
+      // Lost = no fix at all for 8 s (a tunnel, an underground platform).
+      // Imprecise fixes still count as signal: indoors shows its own notice.
+      const sinceFix = (now - lastFixAtRef.current) / 1000;
+      const lost     = sinceFix > 8;
       setGpsLost((prev) => {
-        if (lost && !prev) NavMetrics.event("gps_lost", Math.round(sinceGps));
+        if (lost && !prev) NavMetrics.event("gps_lost", Math.round(sinceFix));
         return lost;
       });
 
-      if (lost && useJourneyStore.getState().tripStatus === "IN_TRANSIT" && engineRef.current) {
+      // Dead-reckon only through a real gap while moving, and not forever:
+      // standing still (or waiting for the ride) there's nothing to estimate.
+      const phase = phaseRef.current.phase;
+      const moving = lastSpeedRef.current >= DEAD_RECKON_MIN_MPS;
+      if (lost && moving && sinceFix <= DEAD_RECKON_MAX_S && phase !== "wait" && phase !== "pickup"
+          && useJourneyStore.getState().tripStatus === "IN_TRANSIT" && engineRef.current) {
         const dt = (now - lastDeadReckonTimeRef.current) / 1000;
         engineRef.current.deadReckon(lastSpeedRef.current, dt);
       }

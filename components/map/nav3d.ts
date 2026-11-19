@@ -45,13 +45,15 @@ export function modelScaleAt(model: VehicleModel, zoom: number): number {
   return Math.max(1, (px * metresPerPx(zoom)) / lengthM);
 }
 
-/** Mapbox expression: the same on-screen size at every zoom. */
-export function modelScaleExpr(model: VehicleModel): any[] {
-  const stop = (z: number) => {
-    const s = modelScaleAt(model, z);
-    return ["literal", [s, s, s]];
-  };
-  return ["interpolate", ["exponential", 2], ["zoom"], 8, stop(8), 12, stop(12), 15, stop(15), 17, stop(17), 20, stop(20)];
+/**
+ * The model's scale at this zoom, as Mapbox wants it ([x, y, z]). Mapbox
+ * doesn't allow a zoom expression for model-scale on a GeoJSON source (the
+ * layer then draws nothing), so the scale is worked out here for the
+ * current zoom and passed as a plain value.
+ */
+export function modelScaleArr(model: VehicleModel, zoom: number): [number, number, number] {
+  const s = Math.round(modelScaleAt(model, zoom) * 100) / 100;
+  return [s, s, s];
 }
 
 /** A stable choice per route: about one bus route in three runs a 33-seater nganya. */
@@ -235,12 +237,32 @@ export function sunAt(lat: number, lng: number, date = new Date()): { elevation:
   return { elevation: el / rad, morning: ha < 0 };
 }
 
-/** Mapbox Standard's light preset for the sun's position (civil twilight = dawn / dusk). */
+/**
+ * Mapbox Standard's light preset for the sun's position: day from sunrise to
+ * sunset, dawn and dusk in civil twilight (the sun up to 6° below the
+ * horizon, when it really is dim outside), night after that.
+ */
 export function lightPresetAt(lat: number, lng: number, date = new Date()): LightPreset {
   const { elevation, morning } = sunAt(lat, lng, date);
-  if (elevation > 6) return "day";
+  if (elevation > 0) return "day";
   if (elevation > -6) return morning ? "dawn" : "dusk";
   return "night";
+}
+
+/**
+ * The navigation light for the user's setting: like the phone (light mode:
+ * day, dark mode: night), the sun's time of day, or always day.
+ */
+export function navLightPreset(
+  setting: "phone" | "time" | "day",
+  phoneDark: boolean,
+  lat: number,
+  lng: number,
+  date = new Date(),
+): LightPreset {
+  if (setting === "day") return "day";
+  if (setting === "phone") return phoneDark ? "night" : "day";
+  return lightPresetAt(lat, lng, date);
 }
 
 /** How much the models' lamps, neon and lit signs glow. */

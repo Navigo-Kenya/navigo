@@ -73,6 +73,12 @@ function makeC(dark: boolean) {
   };
 }
 
+const NAV_LIGHT_LABEL: Record<string, string> = {
+  phone: "Like my phone",
+  time:  "Time of day",
+  day:   "Always light",
+};
+
 const NAV_HINT_LABEL: Record<string, string> = {
   off:      "Off",
   concise:  "Concise",
@@ -200,6 +206,16 @@ export default function Profile() {
           onPress={() => pickPref("navView", "Navigation view", [
             { label: "3D (Tilted)", value: "tilted" },
             { label: "Flat (2D)",   value: "flat"   },
+          ])}
+        />
+        <View style={[s.sep, { backgroundColor: C.hairline }]} />
+        <Row
+          C={C} icon="sunny-outline" label="Map light when navigating"
+          value={NAV_LIGHT_LABEL[prefs.navLight ?? "phone"]}
+          onPress={() => pickPref("navLight", "Map light when navigating", [
+            { label: "Like my phone",   value: "phone" },
+            { label: "Time of day",     value: "time"  },
+            { label: "Always light",    value: "day"   },
           ])}
         />
         <View style={[s.sep, { backgroundColor: C.hairline }]} />

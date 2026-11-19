@@ -143,8 +143,14 @@ licence (CC-BY-NC) didn't allow a commercial app.
 
 In the app, `components/map/nav3d.ts` picks the model per leg, keeps it the same
 size on screen at every zoom, frames the camera per mode, and sets Mapbox
-Standard's light from the sun's position (dawn, day, dusk, night). While
-navigating, `map.tsx` adds terrain and `RouteOverlay` makes the route ahead glow.
+Standard's light: like the phone by default (light mode: day, dark mode: night),
+or from the sun's position (Settings → Map light when navigating: Time of day).
+While navigating, `map.tsx` adds terrain and `RouteOverlay` makes the route ahead glow.
+
+Two things learned on the first phone test:
+
+- **Mapbox draws nothing if `model-scale` depends on the zoom and the source is GeoJSON.** The scale is worked out in JS for the current zoom (`modelScaleArr`) and passed as a plain value.
+- **The models are copied to local files before Mapbox gets them** (`useModelUris`, expo-asset). The bundled asset's own URL fails in several cases: Android drops the dev server URL's query, iOS keeps it when there's no port, and an Android release build gives a resource name.
 
 The original recommendation, kept for reference:
 
