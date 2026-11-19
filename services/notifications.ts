@@ -5,6 +5,9 @@ import { router } from "expo-router";
 import ApiClient from "./apiClient";
 import { foregroundPresentation } from "./inAppNotifications";
 
+// Navigation tells the in-app notifications when a trip is being guided.
+export { setTripActive } from "./inAppNotifications";
+
 const PROJECT_ID = "acc62a4b-150f-4ea6-b0f3-296dca0d6683";
 
 // While the app is open, a notification is shown in the app's own card

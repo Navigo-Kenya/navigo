@@ -56,3 +56,16 @@ describe("setting Home on the map", () => {
     expect(pinName(null, { lat: -1.27, lng: 36.80201 }, null)).toBe("-1.27000, 36.80201");
   });
 });
+
+describe("coordinates from the API", () => {
+  it("handles decimal strings like numbers", () => {
+    const { placeKey } = require("../savedPlaces");
+    expect(placeKey({ place_id: null, lat: "-1.2614000" as any, lng: "36.8020000" as any })).toBe("-1.26140,36.80200");
+    expect(listMapUrl([{ lat: "-1.26" as any, lng: "36.8" as any, type: "location" }], "#EF4444", false, "tok")).toContain("(36.80000,-1.26000)");
+  });
+  it("the map's selected place is always numbers", () => {
+    const { useExploreSearchStore } = require("@/store/exploreSearchStore");
+    useExploreSearchStore.getState().selectPlace({ id: "x", name: "Sarit", address: "", category: "", lat: "-1.2614" as any, lng: "36.802" as any });
+    expect(useExploreSearchStore.getState().selectedPlace.lat.toFixed(2)).toBe("-1.26");
+  });
+});

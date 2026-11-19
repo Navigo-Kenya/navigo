@@ -13,7 +13,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Dimensions,
   PanResponder,
@@ -37,7 +36,8 @@ import {
   type StopRouteBoardItem,
 } from "@/services/stop";
 import { useAuthStore } from "@/store/authStore";
-import { useSavedStore } from "@/store/savedStore";
+import { useSavedStore, type SaveTarget } from "@/store/savedStore";
+import { SaveToListSheet } from "@/components/saved/SaveToListSheet";
 import { formatEta } from "@/utils/mapHelpers";
 import { departureMeta } from "@/utils/departures";
 import { StopTypeGlyph } from "@/components/icons/NavigoIcons";
@@ -77,12 +77,6 @@ type Stop = {
 
 type Tab = "arrivals" | "info" | "reviews";
 type Form = "review" | "edit" | "report" | null;
-
-const SAVE_LISTS = [
-  { key: "favorites", label: "Favorites" },
-  { key: "want_to_go", label: "Want to go" },
-  { key: "travel_plans", label: "Travel plans" },
-] as const;
 
 function palette(dark: boolean) {
   return {
@@ -153,8 +147,10 @@ export default function StopDetailsSheet({
   const snapIdx = useRef(0);
 
   const { user } = useAuthStore();
-  const { places, addPlace, removePlace, customLists } = useSavedStore();
-  const savedEntry = places.find((p) => p.place_id === stop.id && p.pin === null);
+  const places = useSavedStore((st) => st.places);
+  // Saved in any list: the stop's rows (one per list), not Home/Work pins.
+  const savedLists = places.filter((p) => p.place_id === stop.id && p.pin === null && p.list !== null);
+  const [saveTarget, setSaveTarget] = useState<SaveTarget | null>(null);
 
   const [tab, setTab] = useState<Tab>(initialTab);
   const [form, setForm] = useState<Form>(null);
@@ -354,24 +350,11 @@ export default function StopDetailsSheet({
     if (t !== "arrivals" && snapIdx.current === 0) sheet.current?.snapTo(1);
   };
 
-  const toggleSave = () => {
+  // The same "Save to list" sheet as places: every list, ticked where it's
+  // saved, a new list on the spot (components/saved/SaveToListSheet).
+  const openSave = () => {
     Haptics.selectionAsync();
-    if (savedEntry) {
-      removePlace(savedEntry.id);
-      return;
-    }
-    const lists = [...SAVE_LISTS, ...customLists.map((l) => ({ key: l, label: l }))];
-    Alert.alert("Save to list", stop.name, [
-      ...lists.map((l) => ({
-        text: l.label,
-        onPress: () =>
-          addPlace({
-            name: stop.name, lat: stop.lat, lng: stop.lng, type: "stop", place_id: stop.id,
-            pin: null, list: l.key, category: typeLabel, note: null,
-          }).catch(() => Alert.alert("Couldn't save", "Please try again.")),
-      })),
-      { text: "Cancel", style: "cancel" as const },
-    ]);
+    setSaveTarget({ name: stop.name, lat: Number(stop.lat), lng: Number(stop.lng), type: "stop", place_id: stop.id, category: typeLabel });
   };
 
   const share = () =>
@@ -458,7 +441,7 @@ export default function StopDetailsSheet({
       </View>
 
       <View style={s.actions}>
-        <Action icon={savedEntry ? "bookmark" : "bookmark-outline"} label={savedEntry ? "Saved" : "Save"} fg={savedEntry ? ORANGE : C.text} C={C} onPress={toggleSave} />
+        <Action icon={savedLists.length ? "bookmark" : "bookmark-outline"} label={savedLists.length ? "Saved" : "Save"} fg={savedLists.length ? ORANGE : C.text} C={C} onPress={openSave} />
         <Action icon="share-outline" label="Share" C={C} onPress={share} />
         <Action icon="alert-circle-outline" label="Report" fg={RED} C={C} onPress={() => openReport()} />
         <Action icon="create-outline" label="Edit" fg={BLUE} C={C} onPress={() => setForm("edit")} />
@@ -587,6 +570,7 @@ export default function StopDetailsSheet({
           lines={routes.map((r) => ({ id: r.id, short_name: r.short_name }))}
         />
       )}
+      <SaveToListSheet target={saveTarget} onClose={() => setSaveTarget(null)} />
       {form === "report" && (
         <StopReportForm visible onClose={() => setForm(null)} stop={stop} lines={reportLines} initialRouteId={reportRouteId} />
       )}

@@ -63,7 +63,7 @@ import { usePrefsStore }  from "@/store/prefsStore";
 import { legProfile, roleSwitchable, type Role } from "@/services/navProfile";
 import { useAuthStore }   from "@/store/authStore";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Dimensions, Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
+import { ActivityIndicator, Alert, AppState, Dimensions, Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
 import {
   MapView as MapboxMapView,
   Camera as MapboxCamera,
@@ -102,6 +102,9 @@ import {
 } from "@/components/map/RouteCorridorOverlay";
 import type { RouteCorridorResponse } from "@/services/stop";
 import { MapService } from "@/services/map";
+
+/** Live reports refresh this often while the layer is on and the map sits still. */
+const REPORTS_REFRESH_MS = 45_000;
 
 const NativeUserLocation  = UserLocation  as unknown as React.ComponentType<any>;
 const NativeCircleLayer   = CircleLayer   as unknown as React.ComponentType<any>;
@@ -1137,6 +1140,25 @@ export default function MapScreen() {
     []
   );
 
+  /**
+   * Reads what's on screen now and fetches its reports (after a short
+   * pause, so a burst of camera moves makes one request).
+   */
+  const refreshReportsInView = useCallback((delayMs = 400) => {
+    if (reportFetchTimer.current) clearTimeout(reportFetchTimer.current);
+    reportFetchTimer.current = setTimeout(async () => {
+      try {
+        const bounds = await mapRef.current?.getVisibleBounds();
+        if (bounds) {
+          const [[maxLng, maxLat], [minLng, minLat]] = bounds;
+          lastBoundsRef.current = { north: maxLat, south: minLat, east: maxLng, west: minLng };
+        }
+      } catch {}
+      const b = lastBoundsRef.current;
+      if (b) fetchReportsForBounds(b.north, b.south, b.east, b.west);
+    }, delayMs);
+  }, [fetchReportsForBounds]);
+
   const prevJourneyRouteRef = useRef<any>(null);
   useEffect(() => {
     if (!activeJourney) { prevJourneyRouteRef.current = null; return; }
@@ -1186,7 +1208,9 @@ export default function MapScreen() {
   }, [cancelFlyThrough]);
 
   const onRegionChangeComplete = useCallback(async (feature: any) => {
-    if (isProgrammaticFlightRef.current) return;
+    // The camera's own moves skip the follow bookkeeping below, but the
+    // reports where it landed still load.
+    if (isProgrammaticFlightRef.current) { refreshReportsInView(1200); return; }
 
     const [lng, lat] = (feature?.geometry?.coordinates as [number, number]) ?? [DEFAULT_REGION.longitude, DEFAULT_REGION.latitude];
     const newZoom   = feature?.properties?.zoomLevel    ?? 13;
@@ -1204,19 +1228,8 @@ export default function MapScreen() {
     setViewCenter({ lat, lng });
     reportLayerRef.current?.project();
 
-    try {
-      const bounds = await mapRef.current?.getVisibleBounds();
-      if (bounds) {
-        const [[maxLng, maxLat], [minLng, minLat]] = bounds;
-        lastBoundsRef.current = { north: maxLat, south: minLat, east: maxLng, west: minLng };
-        if (reportFetchTimer.current) clearTimeout(reportFetchTimer.current);
-        reportFetchTimer.current = setTimeout(
-          () => fetchReportsForBounds(maxLat, minLat, maxLng, minLng),
-          400
-        );
-      }
-    } catch { }
-  }, [navigating, fetchReportsForBounds]);
+    refreshReportsInView();
+  }, [navigating, refreshReportsInView]);
 
   const handleSelectCorridorRoute = useCallback(
     async (routeId: string) => {
@@ -1257,11 +1270,19 @@ export default function MapScreen() {
     }
   }, [mapIntent, handleSelectStop, handleSelectCorridorRoute]);
 
+  // Live while the layer is on: right away (and once the map has loaded,
+  // before anyone touches it), every 45 s while the map sits still (new
+  // reports come, expired ones go), and on coming back to the app.
   useEffect(() => {
     if (!layers.reports && !layers.traffic) return;
-    const b = lastBoundsRef.current;
-    if (b) fetchReportsForBounds(b.north, b.south, b.east, b.west);
-  }, [layers.reports, layers.traffic, fetchReportsForBounds]);
+    if (!styleLoaded) return;
+    refreshReportsInView(0);
+    const tick = setInterval(() => {
+      if (AppState.currentState === "active") refreshReportsInView(0);
+    }, REPORTS_REFRESH_MS);
+    const sub = AppState.addEventListener("change", (st) => { if (st === "active") refreshReportsInView(0); });
+    return () => { clearInterval(tick); sub.remove(); };
+  }, [layers.reports, layers.traffic, styleLoaded, refreshReportsInView]);
 
   // Engine steps are one per leg; the overlay's steps are two per ride (board,
   // alight). Index them by leg, or after the first ride the banner ran a step

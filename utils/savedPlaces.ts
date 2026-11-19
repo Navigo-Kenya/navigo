@@ -16,7 +16,7 @@ export interface PlaceItem {
 }
 
 export const placeKey = (p: Pick<SavedPlace, "place_id" | "lat" | "lng">) =>
-  p.place_id ?? `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`;
+  p.place_id ?? `${Number(p.lat).toFixed(5)},${Number(p.lng).toFixed(5)}`;
 
 /** One item per place, newest first; `list` narrows to one list. */
 export function groupPlaces(rows: SavedPlace[], custom: SavedListMeta[], list: string | null): PlaceItem[] {
@@ -75,7 +75,10 @@ export function listMapUrl(
   token: string,
   size = { w: 640, h: 280 }
 ): string | null {
-  const pts = places.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)).slice(0, MAP_PINS_MAX);
+  const pts = places
+    .map((p) => ({ ...p, lat: Number(p.lat), lng: Number(p.lng) }))
+    .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng))
+    .slice(0, MAP_PINS_MAX);
   if (!pts.length) return null;
   const hex = color.replace("#", "").toLowerCase();
   const pins = pts
