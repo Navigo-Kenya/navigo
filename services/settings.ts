@@ -12,6 +12,8 @@ export interface UserSettings {
     turn_by_turn:     boolean;
     nearby_contrib:   boolean;
     points_earned:    boolean;
+    /** "Reports on my roads" (newer APIs). */
+    route_reports?:   boolean;
     tips:             boolean;
     app_news:         boolean;
   };

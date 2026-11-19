@@ -354,6 +354,7 @@ export default function Profile() {
         <Row C={C} icon="home" title="Home" value={home?.name ?? "Set"} onPress={() => router.push({ pathname: "/(account)/pick-place", params: { pin: "home" } } as any)} />
         <Row C={C} icon="business" title="Work" value={work?.name ?? "Set"} onPress={() => router.push({ pathname: "/(account)/pick-place", params: { pin: "work" } } as any)} />
         <Row C={C} icon="bookmark" title="Saved places" value={savedCount ? String(savedCount) : "None yet"} onPress={() => router.push("/(account)/saved-places" as any)} />
+        <Row C={C} icon="trail-sign" title="Your roads" value="Reports on them" onPress={() => router.push("/(account)/your-roads" as any)} />
       </Section>
 
       <Section title="ACCOUNT" C={C}>

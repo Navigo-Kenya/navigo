@@ -24,6 +24,7 @@ import {
   Alert,
   AppState,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
@@ -54,15 +55,22 @@ type Key = keyof N;
 const DEFAULTS: N = {
   master: true, sound: true, route_changes: true, disruptions: true, stop_updates: false,
   bus_arriving: true, journey_reminder: true, turn_by_turn: false, nearby_contrib: true,
-  points_earned: true, tips: false, app_news: false,
+  points_earned: true, route_reports: true, tips: false, app_news: false,
 };
 
 /** The switches, each with what sends it. */
-const GROUPS: { title: string; rows: { key: Key; icon: IconName; label: string; desc: string }[] }[] = [
+const GROUPS: { title: string; rows: { key: Key; icon: IconName; label: string; desc: string; link?: { label: string; href: string } }[] }[] = [
   {
     title: "YOUR TRIPS",
     rows: [
       { key: "journey_reminder", icon: "time", label: "Morning briefing", desc: "At 6 a.m.: your usual trip, how the roads look and when to leave." },
+      {
+        key: "route_reports",
+        icon: "trail-sign",
+        label: "Reports on my roads",
+        desc: "A confirmed accident, flood or blocked road on a road you use, around the time you use it. At most 3 a day, never at night.",
+        link: { label: "See your roads", href: "/(account)/your-roads" },
+      },
       { key: "disruptions", icon: "warning", label: "Service alerts", desc: "Disruptions announced on the network: closures, suspended lines, emergencies." },
     ],
   },
@@ -197,8 +205,14 @@ export default function NotificationsScreen() {
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <Text style={[s.rowLabel, { color: C.text }]}>{r.label}</Text>
                       <Text style={[s.rowDesc, { color: C.sub }]}>{r.desc}</Text>
+                      {r.link ? (
+                        <Pressable onPress={() => router.push(r.link!.href as any)} hitSlop={6} style={s.rowLink} accessibilityRole="link">
+                          <Text style={s.rowLinkText}>{r.link.label}</Text>
+                          <Icon name="chevron-forward" size={13} color={ORANGE} />
+                        </Pressable>
+                      ) : null}
                     </View>
-                    <Switch value={n[r.key]} onValueChange={(v) => set(r.key, v)} trackColor={{ true: ORANGE, false: undefined }} thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined} />
+                    <Switch value={n[r.key] ?? true} onValueChange={(v) => set(r.key, v)} trackColor={{ true: ORANGE, false: undefined }} thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined} />
                   </View>
                 </View>
               ))}
@@ -249,6 +263,8 @@ const s = StyleSheet.create({
   rowIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   rowLabel: { fontSize: 15.5, fontWeight: "600" },
   rowDesc: { fontSize: 12.5, marginTop: 2, lineHeight: 17 },
+  rowLink: { flexDirection: "row", alignItems: "center", gap: 2, alignSelf: "flex-start", marginTop: 6 },
+  rowLinkText: { color: ORANGE, fontSize: 13, fontWeight: "700" },
   sep: { height: StyleSheet.hairlineWidth, marginLeft: 56 },
   info: { flexDirection: "row", gap: 10, borderRadius: 18, padding: 14, alignItems: "flex-start" },
   infoText: { flex: 1, fontSize: 13, lineHeight: 19 },
