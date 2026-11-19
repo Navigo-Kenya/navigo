@@ -59,6 +59,9 @@ interface ExploreSearchState {
   clearSearch: () => void;
 }
 
+/** Coordinates as numbers, whatever handed the place over (saved places came as strings). */
+const asItem = (p: ExplorePlaceItem): ExplorePlaceItem => ({ ...p, lat: Number(p.lat), lng: Number(p.lng) });
+
 export const useExploreSearchStore = create<ExploreSearchState>((set) => ({
   active: false,
   query: "",
@@ -88,17 +91,17 @@ export const useExploreSearchStore = create<ExploreSearchState>((set) => ({
       query,
       activeTab,
       minimizedToMap: false,
-      places,
+      places: places.map(asItem),
       stops,
       routes,
-      selectedPlace,
+      selectedPlace: selectedPlace ? asItem(selectedPlace) : null,
       poiCategory,
       searchCenter,
     }),
 
   setResults: ({ places, stops, routes }) =>
     set((s) => ({
-      places: places ?? s.places,
+      places: places ? places.map(asItem) : s.places,
       stops: stops ?? s.stops,
       routes: routes ?? s.routes,
       loading: false,
@@ -108,7 +111,7 @@ export const useExploreSearchStore = create<ExploreSearchState>((set) => ({
   setSortBy: (sortBy) => set({ sortBy }),
   setMinimizedToMap: (minimizedToMap) => set({ minimizedToMap }),
   selectPlace: (selectedPlace) =>
-    set({ selectedPlace, minimizedToMap: false }),
+    set({ selectedPlace: selectedPlace ? asItem(selectedPlace) : null, minimizedToMap: false }),
   setLoading: (loading) => set({ loading }),
   clearSearch: () =>
     set({

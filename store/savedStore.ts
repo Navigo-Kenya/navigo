@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { UserService, SavedPlace, SavedJourney } from "@/services/user";
+import { UserService, SavedPlace, SavedJourney, num } from "@/services/user";
 import { syncWidgetData } from "@/services/widgetBridge";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -201,6 +201,18 @@ export const useSavedStore = create<SavedStore>()(
         journeys:      state.journeys,
         lastFetchedAt: state.lastFetchedAt,
       }),
+      // Places cached before coordinates were made numbers had strings.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<SavedStore>;
+        return {
+          ...current,
+          ...p,
+          places: (p.places ?? current.places).map((x) => ({ ...x, lat: num(x.lat), lng: num(x.lng) })),
+          journeys: (p.journeys ?? current.journeys).map((j) => ({
+            ...j, from_lat: num(j.from_lat), from_lng: num(j.from_lng), to_lat: num(j.to_lat), to_lng: num(j.to_lng),
+          })),
+        };
+      },
     },
   ),
 );

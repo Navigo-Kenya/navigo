@@ -16,6 +16,21 @@ export interface SavedPlace {
   created_at: string;
 }
 
+/**
+ * The API keeps coordinates in decimal columns, which reach the app as
+ * strings ("-1.2614000"). Numbers from here on: the map's camera called
+ * .toFixed on a saved place's latitude and crashed.
+ */
+export const num = (v: unknown): number => (typeof v === "number" ? v : Number(v));
+const asPlace = (p: SavedPlace): SavedPlace => ({ ...p, lat: num(p.lat), lng: num(p.lng) });
+const asJourney = (j: SavedJourney): SavedJourney => ({
+  ...j,
+  from_lat: num(j.from_lat),
+  from_lng: num(j.from_lng),
+  to_lat: num(j.to_lat),
+  to_lng: num(j.to_lng),
+});
+
 export interface SavedJourney {
   id: number;
   label: string | null;
@@ -53,12 +68,12 @@ export const UserService = {
 
   async getSavedPlaces(): Promise<SavedPlace[]> {
     const res = await api.get("/user/saved-places");
-    return res.data;
+    return (res.data ?? []).map(asPlace);
   },
 
   async savePlace(data: Omit<SavedPlace, "id" | "created_at">): Promise<SavedPlace> {
     const res = await api.post("/user/saved-places", data);
-    return res.data;
+    return asPlace(res.data);
   },
 
   async deletePlace(id: number): Promise<void> {
@@ -68,19 +83,19 @@ export const UserService = {
   /** Sets a saved place's note; a blank note clears it. */
   async setPlaceNote(id: number, note: string): Promise<SavedPlace> {
     const res = await api.patch(`/user/saved-places/${id}`, { note });
-    return res.data;
+    return asPlace(res.data);
   },
 
   async getSavedJourneys(): Promise<SavedJourney[]> {
     const res = await api.get("/user/saved-journeys");
-    return res.data;
+    return (res.data ?? []).map(asJourney);
   },
 
   async saveJourney(
     data: Omit<SavedJourney, "id" | "created_at">
   ): Promise<SavedJourney> {
     const res = await api.post("/user/saved-journeys", data);
-    return res.data;
+    return asJourney(res.data);
   },
 
   async deleteJourney(id: number): Promise<void> {

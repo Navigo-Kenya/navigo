@@ -127,6 +127,17 @@ export const useInAppBannerStore = create<BannerState>((set) => ({
 
 const TRIP_LIVE = new Set(["WAITING_FOR_BUS", "IN_TRANSIT", "PAUSED"]);
 
+/** Set by navigation (useNavigation start/stop): a trip is being guided. */
+let tripActive = false;
+
+/**
+ * Navigation's manners, like a car's driving mode: while a trip is guided,
+ * only trip updates get the card; the rest wait in the inbox, silently.
+ */
+export function setTripActive(on: boolean): void {
+  tripActive = on;
+}
+
 /**
  * How a notification that arrives while the app is open is shown
  * (Notifications.setNotificationHandler): our own card, never the system
@@ -147,7 +158,7 @@ export async function foregroundPresentation(
     st.setUnreadCount(st.unreadCount + 1);
   }
 
-  const onTrip = TRIP_LIVE.has(useNavStateStore.getState().snapshot.tripStatus);
+  const onTrip = tripActive || TRIP_LIVE.has(useNavStateStore.getState().snapshot.tripStatus);
   if (content.title && (!onTrip || kind === "trip")) {
     useInAppBannerStore.getState().push({
       id: n.request.identifier,
