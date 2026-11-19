@@ -1,7 +1,7 @@
 // utils/leaderboard.ts
 //
 // The words the leaderboard puts around your rank.
-import type { Standing } from "@/services/contribution";
+import type { League, Standing } from "@/services/contribution";
 
 /** First name only, as a board says it ("Wanjiru", not "Wanjiru Kamau"). */
 export const firstName = (name: string) => name.trim().split(/\s+/)[0] || name;
@@ -28,4 +28,14 @@ export function resetsIn(iso: string | null | undefined, now = Date.now()): stri
   if (h >= 48) return `Resets in ${Math.floor(h / 24)} days`;
   if (h >= 1) return `Resets in ${h} h`;
   return `Resets in ${Math.max(1, Math.floor(ms / 60_000))} min`;
+}
+
+/** What your week in the league comes to: hold on, climb, or get out of the drop zone. */
+export function leagueLine(league: Pick<League, "me" | "next" | "joined">): string {
+  const me = league.me;
+  if (!league.joined || !me) return "Score this week to join a group.";
+  if (me.zone === "up") return league.next ? `In the promotion zone: hold on to move up to ${league.next}.` : "You're at the top.";
+  if (me.zone === "down") return `${me.to_safe ?? 1} point${me.to_safe === 1 ? "" : "s"} to get out of the drop zone.`;
+  if (me.to_up) return `${me.to_up} point${me.to_up === 1 ? "" : "s"} to reach the promotion zone.`;
+  return league.next ? "Safe this week. Climb into the top to move up." : "Nyota, the top league: stay out of the drop zone.";
 }

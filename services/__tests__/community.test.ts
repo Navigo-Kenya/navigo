@@ -64,3 +64,15 @@ describe("the leaderboard's words", () => {
     expect(resetsIn(null, now)).toBeNull();
   });
 });
+
+describe("your week in the league", () => {
+  const { leagueLine } = require("@/utils/leaderboard");
+  const me = (zone: string, to_up: number | null, to_safe: number | null) => ({ rank: 5, points: 50, zone, to_up, to_safe });
+  it("says what it comes to", () => {
+    expect(leagueLine({ joined: false, me: null, next: "Fedha" })).toBe("Score this week to join a group.");
+    expect(leagueLine({ joined: true, me: me("up", null, null), next: "Dhahabu" })).toBe("In the promotion zone: hold on to move up to Dhahabu.");
+    expect(leagueLine({ joined: true, me: me("safe", 21, null), next: "Dhahabu" })).toBe("21 points to reach the promotion zone.");
+    expect(leagueLine({ joined: true, me: me("down", null, 1), next: "Dhahabu" })).toBe("1 point to get out of the drop zone.");
+    expect(leagueLine({ joined: true, me: me("safe", null, null), next: null })).toBe("Nyota, the top league: stay out of the drop zone.");
+  });
+});

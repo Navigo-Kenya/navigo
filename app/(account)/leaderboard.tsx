@@ -13,11 +13,12 @@ import { TIERS } from "@/components/badges/NavigoBadge";
 import { LEVELS, levelFor } from "@/components/badges/levels";
 import { Icon } from "@/components/icons/Icon";
 import { PressableScale } from "@/components/ui/PressableScale";
+import { Avatar } from "@/components/leaderboard/Avatar";
+import { LeagueView } from "@/components/leaderboard/LeagueView";
 import { ContributionService, type Leaderboard, type LeaderboardEntry, type Standing } from "@/services/contribution";
 import { useAuthStore } from "@/store/authStore";
 import { useContributionStore } from "@/store/contributionStore";
 import { firstName, nextStep, resetsIn } from "@/utils/leaderboard";
-import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { useCallback, useEffect, useState } from "react";
@@ -26,6 +27,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const ORANGE = "#FF6F00";
 type Period = "weekly" | "all";
+/** The league first: the race you can win; the boards beside it. */
+type Tab = "league" | Period;
 
 function makeC(dark: boolean) {
   return {
@@ -45,27 +48,9 @@ type Palette = ReturnType<typeof makeC>;
 const METAL = { 1: TIERS[2].metal, 2: TIERS[1].metal, 3: TIERS[0].metal } as const;
 const METAL_NAME = { 1: TIERS[2].name, 2: TIERS[1].name, 3: TIERS[0].name } as const;
 
-const initials = (name: string) =>
-  name.split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "?";
-
 function levelOf(e: LeaderboardEntry, period: Period) {
   if (e.level) return LEVELS[Math.min(LEVELS.length, Math.max(1, e.level)) - 1];
   return levelFor(period === "all" ? e.points : e.total_points ?? 0);
-}
-
-function Avatar({ e, size, ring }: { e: LeaderboardEntry; size: number; ring: string }) {
-  const img = e.avatar && !e.avatar.startsWith("data:") ? e.avatar : null;
-  return (
-    <View style={{ width: size + 6, height: size + 6, borderRadius: (size + 6) / 2, borderWidth: 3, borderColor: ring, alignItems: "center", justifyContent: "center" }}>
-      {img ? (
-        <Image source={{ uri: img }} style={{ width: size - 2, height: size - 2, borderRadius: size / 2 }} contentFit="cover" />
-      ) : (
-        <View style={{ width: size - 2, height: size - 2, borderRadius: size / 2, backgroundColor: ring, alignItems: "center", justifyContent: "center" }}>
-          <Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: size * 0.36 }}>{initials(e.name)}</Text>
-        </View>
-      )}
-    </View>
-  );
 }
 
 function Podium({ top, period, meId, C }: { top: LeaderboardEntry[]; period: Period; meId?: number; C: Palette }) {
@@ -80,7 +65,7 @@ function Podium({ top, period, meId, C }: { top: LeaderboardEntry[]; period: Per
         return (
           <View key={rank} style={s.podItem}>
             {big ? <Icon name="trophy" size={20} color={metal[1]} style={{ marginBottom: 4 }} /> : null}
-            <Avatar e={e} size={big ? 62 : 50} ring={metal[1]} />
+            <Avatar person={e} size={big ? 62 : 50} ring={metal[1]} />
             <Text style={[s.podName, { color: C.text }]} numberOfLines={1}>{e.id === meId ? "You" : firstName(e.name)}</Text>
             {period === "all" || e.level || e.total_points ? (
               <Text style={[s.podLevel, { color: levelOf(e, period).color }]} numberOfLines={1}>{levelOf(e, period).name}</Text>
@@ -102,7 +87,7 @@ function RankRow({ e, rank, mine, period, C }: { e: LeaderboardEntry; rank: numb
   return (
     <View style={[s.row, mine && { backgroundColor: C.mine }]}>
       <Text style={[s.rank, { color: mine ? ORANGE : C.sub }]}>{rank}</Text>
-      <Avatar e={e} size={34} ring={lvl.color} />
+      <Avatar person={e} size={34} ring={lvl.color} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={[s.name, { color: mine ? ORANGE : C.text }]} numberOfLines={1}>{mine ? `${e.name} (you)` : e.name}</Text>
         <Text style={[s.level, { color: C.sub }]} numberOfLines={1}>{lvl.name}</Text>
@@ -119,7 +104,8 @@ export default function LeaderboardScreen() {
   const user = useAuthStore((st) => st.user);
   const stats = useContributionStore((st) => st.stats);
 
-  const [period, setPeriod] = useState<Period>("weekly");
+  const [tab, setTab] = useState<Tab>(user ? "league" : "weekly");
+  const period: Period = tab === "all" ? "all" : "weekly";
   const [boards, setBoards] = useState<Partial<Record<Period, Leaderboard>>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -136,10 +122,10 @@ export default function LeaderboardScreen() {
   }, []);
 
   useEffect(() => {
-    if (boards[period]) return;
+    if (tab === "league" || boards[period]) return;
     setLoading(true);
     load(period).finally(() => setLoading(false));
-  }, [period, boards, load]);
+  }, [tab, period, boards, load]);
 
   const refresh = async () => {
     setRefreshing(true);
@@ -164,28 +150,30 @@ export default function LeaderboardScreen() {
       <ScreenHeader title="Leaderboard" C={{ bg: C.bg, text: C.text, hairline: C.line }} />
 
       <View style={[s.seg, { backgroundColor: C.seg }]}>
-        {(["weekly", "all"] as Period[]).map((p) => {
-          const on = p === period;
+        {((user ? ["league", "weekly", "all"] : ["weekly", "all"]) as Tab[]).map((p) => {
+          const on = p === tab;
           return (
             <Pressable
               key={p}
-              onPress={() => { Haptics.selectionAsync(); setPeriod(p); }}
+              onPress={() => { Haptics.selectionAsync(); setTab(p); }}
               style={[s.segBtn, on && { backgroundColor: C.card }]}
               accessibilityRole="tab"
               accessibilityState={{ selected: on }}
             >
-              <Text style={[s.segText, { color: on ? C.text : C.sub }]}>{p === "weekly" ? "This week" : "All time"}</Text>
+              <Text style={[s.segText, { color: on ? C.text : C.sub }]}>{p === "league" ? "League" : p === "weekly" ? "This week" : "All time"}</Text>
             </Pressable>
           );
         })}
       </View>
-      {reset ? (
+      {tab === "league" ? <LeagueView C={C} /> : null}
+      {tab !== "league" && reset ? (
         <View style={s.resetRow}>
           <Icon name="time-outline" size={13} color={C.sub} />
           <Text style={[s.resetText, { color: C.sub }]}>{reset} · Monday 00:00</Text>
         </View>
       ) : null}
 
+      {tab !== "league" ? (
       <ScrollView
         contentContainerStyle={{ paddingBottom: insets.bottom + (user ? 110 : 24), flexGrow: 1 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={ORANGE} />}
@@ -234,8 +222,10 @@ export default function LeaderboardScreen() {
         )}
       </ScrollView>
 
+      ) : null}
+
       {/* You, wherever you are on the board */}
-      {user && board ? (
+      {tab !== "league" && user && board ? (
         <View style={[s.meBar, { backgroundColor: C.card, paddingBottom: insets.bottom + 12 }]}>
           <View style={[s.meRank, { backgroundColor: ORANGE }]}>
             <Text style={s.meRankText}>{me?.rank ? `#${me.rank}` : "–"}</Text>
