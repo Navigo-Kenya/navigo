@@ -1,496 +1,559 @@
 // app/(account)/privacy.tsx
+//
+// Privacy & security, every row real:
+//   - sessions: the sign-ins on the account, each signed out on its own, or
+//     all but this phone (api: /auth/sessions);
+//   - location: the phone's actual permissions (not app-side switches that
+//     nothing read), with the way to change them;
+//   - your data: a JSON copy of the account (/auth/export), saved where you
+//     choose; what Kwame remembers;
+//   - sharing: navigation quality data (NavMetrics stops sending when off)
+//     and anonymous road reports (the API hides your name);
+//   - deleting the account, for good (/auth/account), with your password or,
+//     for Google and Apple accounts, by typing DELETE.
 import { ScreenHeader } from "@/components/app/ScreenHeader";
+import { AccountService, type AccountSession } from "@/services/account";
 import { SettingsService, UserSettings } from "@/services/settings";
+import { NavMetrics } from "@/services/navMetrics";
 import { useAuthStore } from "@/store/authStore";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Ionicons } from "@expo/vector-icons";
+import { useSavedStore } from "@/store/savedStore";
+import { useContributionStore } from "@/store/contributionStore";
+import { usePrefsStore } from "@/store/prefsStore";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Location from "expo-location";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
+  AppState,
+  KeyboardAvoidingView,
   Linking,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
   useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Icon } from "@/components/icons/Icon";
+import { Icon, type IconName } from "@/components/icons/Icon";
+import { PressableScale } from "@/components/ui/PressableScale";
 
 const ORANGE = "#FF6F00";
-const GREY   = "#8E8E93";
-const DANGER = "#FF3B30";
-
-// AsyncStorage keys for device-local settings
-const SK_SCREEN_LOCK = "navigo_screen_lock";
-const SK_BG_LOCATION = "navigo_bg_location";
-const SK_PRECISE     = "navigo_precise_location";
+const DANGER = "#EF4444";
+const GREEN = "#16A34A";
 
 function makeC(dark: boolean) {
   return {
-    bg:        dark ? "#0F0F0F" : "#F6F7F8",
-    card:      dark ? "#1C1C1E" : "#FFFFFF",
-    text:      dark ? "#FFFFFF" : "#1C1C1E",
-    subText:   dark ? GREY      : "#4B5563",
-    hairline:  dark ? "#2C2C2E" : "#E5E7EB",
-    icon:      dark ? "#EBEBF5" : "#1C1C1E",
-    pressed:   dark ? "#2C2C2E" : "#F2F2F7",
-    switchOff: dark ? "#3A3A3C" : "#D1D5DB",
-    softRed:   dark ? "rgba(255,59,48,0.12)"  : "#FFF5F5",
-    softOrange:dark ? "rgba(255,111,0,0.15)"  : "#FFF3E0",
+    bg:      dark ? "#0F0F10" : "#F6F7F8",
+    card:    dark ? "#1C1C1F" : "#FFFFFF",
+    text:    dark ? "#F4F4F5" : "#111827",
+    sub:     dark ? "#A1A1AA" : "#6B7280",
+    line:    dark ? "#2A2A2F" : "#EEF0F3",
+    icon:    dark ? "#E4E4E7" : "#374151",
+    pressed: dark ? "#27272A" : "#F3F4F6",
+    field:   dark ? "#27272A" : "#F3F4F6",
+    softRed: dark ? "rgba(239,68,68,0.12)" : "#FEF2F2",
   };
 }
+type P = ReturnType<typeof makeC>;
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+function ago(iso: string | null): string {
+  if (!iso) return "never used";
+  const m = Math.round((Date.now() - Date.parse(iso)) / 60_000);
+  if (m < 2) return "active now";
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} h ago`;
+  const d = Math.round(h / 24);
+  return d === 1 ? "yesterday" : `${d} days ago`;
+}
 
-function Section({ title, C, children }: {
-  title: string;
-  C: ReturnType<typeof makeC>;
-  children: React.ReactNode;
-}) {
+// ─── Rows ────────────────────────────────────────────────────────────────────
+
+function Section({ title, note, C, children }: { title: string; note?: string; C: P; children: React.ReactNode }) {
   return (
-    <View style={[s.section, { backgroundColor: C.card }]}>
-      <Text style={[s.sectionTitle, { color: C.subText }]}>{title}</Text>
-      {children}
+    <View style={{ gap: 6 }}>
+      <Text style={[s.sectionTitle, { color: C.sub }]}>{title}</Text>
+      <View style={[s.card, { backgroundColor: C.card }]}>{children}</View>
+      {note ? <Text style={[s.note, { color: C.sub }]}>{note}</Text> : null}
     </View>
   );
 }
 
-function Divider({ C }: { C: ReturnType<typeof makeC> }) {
-  return <View style={[s.divider, { backgroundColor: C.hairline }]} />;
-}
-
-function NavRow({ icon, label, description, value, onPress, C, danger }: {
-  icon: keyof typeof Ionicons.glyphMap;
+function Row({ icon, label, desc, value, onPress, C, danger, busy }: {
+  icon: IconName;
   label: string;
-  description?: string;
-  value?: string | React.ReactNode;
+  desc?: string;
+  value?: React.ReactNode;
   onPress?: () => void;
-  C: ReturnType<typeof makeC>;
+  C: P;
   danger?: boolean;
+  busy?: boolean;
 }) {
   return (
     <Pressable
       onPress={onPress}
-      disabled={!onPress}
-      style={({ pressed }) => [
-        s.row,
-        pressed && onPress ? { backgroundColor: C.pressed, marginHorizontal: -14, paddingHorizontal: 14 } : null,
-      ]}
+      disabled={!onPress || busy}
+      style={({ pressed }) => [s.row, pressed && onPress ? { backgroundColor: C.pressed } : null]}
+      accessibilityRole={onPress ? "button" : undefined}
     >
-      <Icon name={icon} size={18} color={danger ? DANGER : C.icon} />
+      <View style={[s.rowIcon, { backgroundColor: danger ? C.softRed : C.field }]}>
+        <Icon name={icon} size={17} color={danger ? DANGER : C.icon} />
+      </View>
       <View style={s.rowBody}>
         <Text style={[s.rowLabel, { color: danger ? DANGER : C.text }]}>{label}</Text>
-        {description ? <Text style={[s.rowDesc, { color: C.subText }]}>{description}</Text> : null}
+        {desc ? <Text style={[s.rowDesc, { color: C.sub }]}>{desc}</Text> : null}
       </View>
-      {value ? (
-        typeof value === "string"
-          ? <Text style={[s.rowValue, { color: C.subText }]}>{value}</Text>
-          : value
-      ) : null}
-      {onPress ? <Icon name="chevron-forward" size={16} color={danger ? DANGER : C.subText} style={{ marginLeft: 4 }} /> : null}
+      {busy ? <ActivityIndicator size="small" color={C.sub} /> : value}
+      {onPress && !busy ? <Icon name="chevron-forward" size={16} color={danger ? DANGER : C.sub} /> : null}
     </Pressable>
   );
 }
 
-function ToggleRow({ icon, label, description, value, onChange, C }: {
-  icon: keyof typeof Ionicons.glyphMap;
+function Toggle({ icon, label, desc, value, onChange, C }: {
+  icon: IconName;
   label: string;
-  description?: string;
+  desc: string;
   value: boolean;
   onChange: (v: boolean) => void;
-  C: ReturnType<typeof makeC>;
+  C: P;
 }) {
   return (
     <View style={s.row}>
-      <Icon name={icon} size={18} color={C.icon} style={{ marginTop: description ? 2 : 0 }} />
+      <View style={[s.rowIcon, { backgroundColor: C.field }]}>
+        <Icon name={icon} size={17} color={C.icon} />
+      </View>
       <View style={s.rowBody}>
         <Text style={[s.rowLabel, { color: C.text }]}>{label}</Text>
-        {description ? <Text style={[s.rowDesc, { color: C.subText }]}>{description}</Text> : null}
+        <Text style={[s.rowDesc, { color: C.sub }]}>{desc}</Text>
       </View>
-      <Switch
-        value={value}
-        onValueChange={onChange}
-        trackColor={{ false: C.switchOff, true: ORANGE }}
-        thumbColor="#FFFFFF"
-        ios_backgroundColor={C.switchOff}
-      />
+      <Switch value={value} onValueChange={onChange} trackColor={{ true: ORANGE, false: undefined }} thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined} />
     </View>
   );
 }
 
-function SessionBadge({ count, C }: { count: number; C: ReturnType<typeof makeC> }) {
+function Pill({ ok, text }: { ok: boolean | null; text: string }) {
+  const color = ok == null ? "#9CA3AF" : ok ? GREEN : ORANGE;
   return (
-    <View style={[s.sessionBadge, { backgroundColor: C.softOrange }]}>
-      <Text style={s.sessionBadgeText}>{count}</Text>
+    <View style={[s.pill, { backgroundColor: color + "1F" }]}>
+      <Text style={[s.pillText, { color }]}>{text}</Text>
     </View>
   );
 }
 
-// ─── Main Screen ──────────────────────────────────────────────────────────────
+const Sep = ({ C }: { C: P }) => <View style={[s.sep, { backgroundColor: C.line }]} />;
+
+// ─── Screen ──────────────────────────────────────────────────────────────────
+
+interface Perms {
+  fg: boolean | null;
+  precise: boolean | null;
+  bg: boolean | null;
+}
 
 export default function Privacy() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const dark   = useColorScheme() === "dark";
-  const C      = makeC(dark);
-
+  const dark = useColorScheme() === "dark";
+  const C = makeC(dark);
   const { user, logout } = useAuthStore();
-  const hasPassword = !user?.oauth_provider;
+  const devTraces = usePrefsStore((st) => st.prefs.devTraces);
+  const isOAuth = !!user?.oauth_provider;
 
-  // Server-persisted settings
-  const [twoFA,            setTwoFA]            = useState(false);
-  const [analytics,        setAnalytics]        = useState(true);
-  const [anonymousReports, setAnonymousReports] = useState(false);
+  const [analytics, setAnalytics] = useState(NavMetrics.isEnabled());
+  const [anonymous, setAnonymous] = useState(false);
+  const [perms, setPerms] = useState<Perms>({ fg: null, precise: null, bg: null });
+  const [sessions, setSessions] = useState<AccountSession[] | null>(null);
+  const [sessionsError, setSessionsError] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
-  // Device-local settings (AsyncStorage)
-  const [screenLock, setScreenLock] = useState(false);
-  const [bgLocation, setBgLocation] = useState(true);
-  const [precise,    setPrecise]    = useState(true);
-
-  // Actual OS-level location permission status (null = still checking)
-  const [fgPermGranted, setFgPermGranted] = useState<boolean | null>(null);
-
+  // Server-saved switches.
   useEffect(() => {
-    Location.getForegroundPermissionsAsync()
-      .then(({ status }) => setFgPermGranted(status === "granted"))
-      .catch(() => setFgPermGranted(null));
-  }, []);
-
-  useEffect(() => {
-    // Load server settings
     SettingsService.get()
-      .then((s) => {
-        setTwoFA(s.privacy.two_fa);
-        setAnalytics(s.privacy.analytics);
-        setAnonymousReports(s.privacy.anonymous_reports ?? false);
+      .then((st) => {
+        setAnonymous(st.privacy.anonymous_reports ?? false);
+        setAnalytics(st.privacy.analytics !== false);
+        NavMetrics.setEnabled(st.privacy.analytics !== false);
       })
       .catch(() => {});
-
-    // Load device-local settings
-    AsyncStorage.multiGet([SK_SCREEN_LOCK, SK_BG_LOCATION, SK_PRECISE])
-      .then(([[, sl], [, bl], [, p]]) => {
-        if (sl !== null) setScreenLock(sl === "true");
-        if (bl !== null) setBgLocation(bl === "true");
-        if (p  !== null) setPrecise(p === "true");
-      });
   }, []);
 
-  // Optimistic server save with revert on failure
-  const savePrivacy = (
-    key: keyof UserSettings['privacy'],
-    value: boolean,
-    revert: () => void,
-  ) => {
-    SettingsService.update({ privacy: { [key]: value } as Partial<UserSettings['privacy']> })
-      .catch(() => {
-        revert();
-        Alert.alert("Save failed", "Could not update your setting. Please try again.");
-      });
+  // The phone's permissions, re-read when coming back from Settings.
+  const readPerms = useCallback(async () => {
+    const fg = await Location.getForegroundPermissionsAsync().catch(() => null);
+    const bg = await Location.getBackgroundPermissionsAsync().catch(() => null);
+    // Android says fine or coarse; iOS doesn't tell apps, so it's left to Settings.
+    const acc = fg?.android?.accuracy;
+    setPerms({
+      fg: fg ? fg.granted : null,
+      precise: !fg?.granted ? null : acc == null ? null : acc === "fine",
+      bg: bg ? bg.granted : null,
+    });
+  }, []);
+  useEffect(() => {
+    readPerms();
+    const sub = AppState.addEventListener("change", (st) => { if (st === "active") readPerms(); });
+    return () => sub.remove();
+  }, [readPerms]);
+
+  const loadSessions = useCallback(() => {
+    setSessionsError(false);
+    AccountService.sessions()
+      .then(setSessions)
+      .catch(() => { setSessions(null); setSessionsError(true); });
+  }, []);
+  useEffect(() => { loadSessions(); }, [loadSessions]);
+
+  const savePrivacy = (key: keyof UserSettings["privacy"], value: boolean, revert: () => void) => {
+    SettingsService.update({ privacy: { [key]: value } as Partial<UserSettings["privacy"]> }).catch(() => {
+      revert();
+      Alert.alert("Couldn't save", "Check your connection and try again.");
+    });
   };
 
-  const handleExportData = () => {
+  const signOutSession = (sess: AccountSession) => {
     Alert.alert(
-      "Download your data",
-      "We'll prepare a file with all your account data and send it to your email address. This may take up to 24 hours.",
+      sess.current ? "Sign out of this phone?" : "Sign out that session?",
+      sess.current ? "You'll need to sign in again." : "That phone will need to sign in again.",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Request export",
-          onPress: () => Alert.alert(
-            "Request sent",
-            "You'll receive an email at " + (user?.email ?? "your address") + " when it's ready."
-          ),
-        },
-      ]
-    );
-  };
-
-  const handleDeleteAccount = () => {
-    Alert.alert(
-      "Delete Account",
-      "This will permanently erase your account, travel history, and all saved data. This action cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete permanently",
+          text: "Sign out",
           style: "destructive",
           onPress: async () => {
+            setBusy(`s${sess.id}`);
             try {
-              // DELETE /auth/account, endpoint to be implemented on backend
-            } catch {}
-            await logout();
-            router.replace("/(auth)/get-started" as any);
+              await AccountService.revokeSession(sess.id);
+              if (sess.current) { await logout(); router.replace("/(auth)/login" as any); return; }
+              loadSessions();
+            } catch {
+              Alert.alert("Couldn't sign it out", "Check your connection and try again.");
+            } finally {
+              setBusy(null);
+            }
           },
         },
       ]
     );
   };
 
+  const signOutOthers = () => {
+    Alert.alert("Sign out everywhere else?", "Every other phone signed in to your account will need to sign in again.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Sign out others",
+        style: "destructive",
+        onPress: async () => {
+          setBusy("others");
+          try {
+            const n = await AccountService.revokeOtherSessions();
+            loadSessions();
+            Alert.alert(n ? "Signed out" : "Nothing to sign out", n ? `${n} other session${n === 1 ? " was" : "s were"} signed out.` : "This phone is the only one signed in.");
+          } catch {
+            Alert.alert("Couldn't sign them out", "Check your connection and try again.");
+          } finally {
+            setBusy(null);
+          }
+        },
+      },
+    ]);
+  };
+
+  // A JSON copy of the account, saved where the user chooses.
+  const exportData = async () => {
+    setBusy("export");
+    try {
+      const json = await AccountService.exportData();
+      const name = `navigo-data-${new Date().toISOString().slice(0, 10)}.json`;
+      if (Platform.OS === "android") {
+        const SAF = FileSystem.StorageAccessFramework;
+        const dir = await SAF.requestDirectoryPermissionsAsync();
+        if (!dir.granted) return;
+        const uri = await SAF.createFileAsync(dir.directoryUri, name.replace(/\.json$/, ""), "application/json");
+        await FileSystem.writeAsStringAsync(uri, json, { encoding: FileSystem.EncodingType.UTF8 });
+        Alert.alert("Saved", `Your data is in the folder you chose, as ${name}.`);
+      } else {
+        const uri = `${FileSystem.documentDirectory}${name}`;
+        await FileSystem.writeAsStringAsync(uri, json, { encoding: FileSystem.EncodingType.UTF8 });
+        await Share.share({ url: uri, title: name });
+      }
+    } catch (e: any) {
+      Alert.alert(
+        "Couldn't download your data",
+        e?.response?.status === 404 ? "Your Navigo server doesn't offer data downloads yet." : "Check your connection and try again."
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const openSettings = () => { Linking.openSettings().catch(() => {}); };
+  const others = (sessions ?? []).filter((x) => !x.current).length;
+
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <ScreenHeader title="Privacy & Security" C={C} />
+      <ScreenHeader title="Privacy & security" C={{ bg: C.bg, text: C.text, hairline: C.line }} />
+      <ScrollView contentContainerStyle={[s.body, { paddingBottom: insets.bottom + 32 }]} showsVerticalScrollIndicator={false}>
 
-      <ScrollView
-        style={{ backgroundColor: C.bg }}
-        contentContainerStyle={[s.body, { paddingBottom: insets.bottom + 32 }]}
-        showsVerticalScrollIndicator={false}
-      >
-
-        {/* ── Security ─────────────────────────────────────────────────────── */}
-        <Section title="SECURITY" C={C}>
-          {hasPassword && (
-            <>
-              <NavRow
-                C={C}
-                icon="lock-closed-outline"
-                label="Change password"
-                description="Last changed: never"
-                onPress={() => router.push("/(auth)/forgot-password" as any)}
-              />
-              <Divider C={C} />
-            </>
+        <Section title="SIGNING IN" C={C}>
+          {isOAuth ? (
+            <Row C={C} icon="lock-closed" label={`Signed in with ${user?.oauth_provider === "apple" ? "Apple" : "Google"}`} desc="Your password is managed there." />
+          ) : (
+            <Row
+              C={C}
+              icon="lock-closed"
+              label="Change password"
+              desc={user?.phone_number ? `A code is sent to ${user.phone_number}.` : "Add a phone number first: the code is sent by SMS."}
+              onPress={() => router.push("/(auth)/forgot-password" as any)}
+            />
           )}
-          <ToggleRow
-            C={C}
-            icon="shield-outline"
-            label="Two-factor authentication"
-            description="Require a code from your phone when signing in"
-            value={twoFA}
-            onChange={(v) => {
-              setTwoFA(v);
-              savePrivacy("two_fa", v, () => setTwoFA(!v));
-            }}
-          />
-          <Divider C={C} />
-          <ToggleRow
-            C={C}
-            icon="phone-portrait-outline"
-            label="Screen lock"
-            description="Require biometrics or PIN to open Navigo"
-            value={screenLock}
-            onChange={(v) => {
-              setScreenLock(v);
-              AsyncStorage.setItem(SK_SCREEN_LOCK, String(v));
-            }}
-          />
-          <Divider C={C} />
-          <NavRow
-            C={C}
-            icon="desktop-outline"
-            label="Active sessions"
-            description="Devices signed in to your account"
-            value={<SessionBadge count={1} C={C} />}
-            onPress={() => Alert.alert("Active sessions", "Session management coming soon.")}
-          />
         </Section>
 
-        {/* ── Location ─────────────────────────────────────────────────────── */}
-        <Section title="LOCATION" C={C}>
-          {fgPermGranted === false && (
-            <Pressable
-              style={[s.permBanner, { backgroundColor: C.softOrange }]}
-              onPress={() => Linking.openSettings()}
-            >
-              <Icon name="warning-outline" size={16} color={ORANGE} />
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text style={[s.permBannerTitle, { color: ORANGE }]}>
-                  Location access not granted
-                </Text>
-                <Text style={[s.permBannerDesc, { color: C.subText }]}>
-                  Navigo can't show your position or nearby stops. Tap to open Settings and enable location.
-                </Text>
-              </View>
-              <Icon name="chevron-forward" size={15} color={ORANGE} />
-            </Pressable>
+        <Section
+          title="SESSIONS"
+          note="A session lasts 30 days from sign-in. Signing one out ends it at once."
+          C={C}
+        >
+          {sessions == null && !sessionsError ? (
+            <View style={s.loading}><ActivityIndicator color={C.sub} /></View>
+          ) : sessionsError ? (
+            <Row C={C} icon="refresh" label="Couldn't load your sessions" desc="Tap to try again." onPress={loadSessions} />
+          ) : (
+            <>
+              {(sessions ?? []).map((sess, i) => (
+                <View key={sess.id}>
+                  {i > 0 ? <Sep C={C} /> : null}
+                  <Row
+                    C={C}
+                    icon={sess.current ? "phone-portrait" : "globe"}
+                    label={sess.current ? "This phone" : "Another sign-in"}
+                    desc={[
+                      sess.current ? "active now" : `last used ${ago(sess.last_used_at)}`,
+                      sess.created_at ? `since ${new Date(sess.created_at).toLocaleDateString([], { day: "numeric", month: "short" })}` : null,
+                    ].filter(Boolean).join(" · ")}
+                    value={sess.current ? <Pill ok text="Current" /> : undefined}
+                    busy={busy === `s${sess.id}`}
+                    onPress={() => signOutSession(sess)}
+                  />
+                </View>
+              ))}
+              {others > 0 ? (
+                <>
+                  <Sep C={C} />
+                  <Row C={C} icon="log-out" label={`Sign out ${others} other session${others === 1 ? "" : "s"}`} danger busy={busy === "others"} onPress={signOutOthers} />
+                </>
+              ) : null}
+            </>
           )}
-          <ToggleRow
+        </Section>
+
+        <Section title="LOCATION" note="These are your phone's settings: change them there." C={C}>
+          <Row
             C={C}
-            icon="location-outline"
-            label="Background location"
-            description="Track your position for live navigation when the app is in the background"
-            value={bgLocation}
-            onChange={(v) => {
-              if (!v) {
-                Alert.alert(
-                  "Disable background location?",
-                  "Live turn-by-turn navigation will stop working when the app is minimized.",
-                  [
-                    { text: "Keep enabled", style: "cancel" },
-                    {
-                      text: "Disable",
-                      style: "destructive",
-                      onPress: () => {
-                        setBgLocation(false);
-                        AsyncStorage.setItem(SK_BG_LOCATION, "false");
-                      },
-                    },
-                  ]
-                );
-              } else {
-                setBgLocation(true);
-                AsyncStorage.setItem(SK_BG_LOCATION, "true");
-              }
-            }}
+            icon="location"
+            label="While using Navigo"
+            desc="Needed to find you, stages near you and your trips."
+            value={<Pill ok={perms.fg} text={perms.fg == null ? "…" : perms.fg ? "Allowed" : "Off"} />}
+            onPress={openSettings}
           />
-          <Divider C={C} />
-          <ToggleRow
+          <Sep C={C} />
+          <Row
             C={C}
-            icon="navigate-outline"
+            icon="locate"
             label="Precise location"
-            description="Required for accurate stop detection and routing"
-            value={precise}
-            onChange={(v) => {
-              setPrecise(v);
-              AsyncStorage.setItem(SK_PRECISE, String(v));
-            }}
+            desc="For the right stage and the exact turn; approximate is a few hundred metres off."
+            value={<Pill ok={perms.precise} text={perms.precise == null ? (Platform.OS === "ios" && perms.fg ? "In Settings" : "—") : perms.precise ? "Precise" : "Approximate"} />}
+            onPress={openSettings}
+          />
+          <Sep C={C} />
+          <Row
+            C={C}
+            icon="navigate"
+            label="In the background"
+            desc="Lets navigation guide you with the screen off. Used only during a trip."
+            value={<Pill ok={perms.bg} text={perms.bg == null ? "…" : perms.bg ? "Allowed" : "Off"} />}
+            onPress={openSettings}
           />
         </Section>
 
-        {/* ── Your Data ────────────────────────────────────────────────────── */}
         <Section title="YOUR DATA" C={C}>
-          <NavRow
+          <Row
             C={C}
-            icon="cloud-download-outline"
-            label="Download my data"
-            description="Get a copy of everything Navigo has stored"
-            onPress={handleExportData}
+            icon="download"
+            label="Download your data"
+            desc="A file with your profile, settings, saved places and routes, contributions, reports and badges."
+            busy={busy === "export"}
+            onPress={exportData}
           />
-          <Divider C={C} />
-          <NavRow
-            C={C}
-            icon="sparkles-outline"
-            label="Kwame memory"
-            description="See and delete what the assistant remembers about you"
-            onPress={() => router.push("/(account)/kwame-memory" as any)}
-          />
-          {__DEV__ && (
+          <Sep C={C} />
+          <Row C={C} icon="sparkles" label="What Kwame remembers" desc="See and delete the assistant's memories about you." onPress={() => router.push("/(account)/kwame-memory" as any)} />
+          {devTraces ? (
             <>
-              <Divider C={C} />
-              <NavRow
-                C={C}
-                icon="analytics-outline"
-                label="Dev: navigation traces"
-                description="Replay recorded nav sessions through the engine"
-                onPress={() => router.push("/(account)/dev-replay" as any)}
-              />
+              <Sep C={C} />
+              <Row C={C} icon="play" label="Dev: navigation traces" desc="Replay recorded trips through the engine." onPress={() => router.push("/(account)/dev-replay" as any)} />
             </>
-          )}
-          <Divider C={C} />
-          <ToggleRow
+          ) : null}
+        </Section>
+
+        <Section title="SHARING" C={C}>
+          <Toggle
             C={C}
-            icon="bar-chart-outline"
-            label="Share usage analytics"
-            description="Help improve Navigo with anonymous crash reports and feature usage"
+            icon="map"
+            label="Share navigation quality data"
+            desc="How often routes are recalculated, GPS drops, how close you arrive: it's how we tune navigation. No names or places you save."
             value={analytics}
             onChange={(v) => {
               setAnalytics(v);
-              savePrivacy("analytics", v, () => setAnalytics(!v));
+              NavMetrics.setEnabled(v);
+              savePrivacy("analytics", v, () => { setAnalytics(!v); NavMetrics.setEnabled(!v); });
             }}
           />
-          <Divider C={C} />
-          <ToggleRow
+          <Sep C={C} />
+          <Toggle
             C={C}
-            icon="eye-off-outline"
-            label="Anonymous incident reports"
-            description="Hide your name and level from reports you submit. Your contributions are still tracked."
-            value={anonymousReports}
-            onChange={(v) => {
-              setAnonymousReports(v);
-              savePrivacy("anonymous_reports" as any, v, () => setAnonymousReports(!v));
-            }}
+            icon="person"
+            label="Anonymous road reports"
+            desc="Hide your name and level on the reports you post. They still count for your points and badges."
+            value={anonymous}
+            onChange={(v) => { setAnonymous(v); savePrivacy("anonymous_reports", v, () => setAnonymous(!v)); }}
           />
         </Section>
 
-        {/* ── Danger Zone ──────────────────────────────────────────────────── */}
-        <View style={[s.section, { backgroundColor: C.card }]}>
-          <Text style={[s.sectionTitle, { color: C.subText }]}>DANGER ZONE</Text>
-          <NavRow
+        <Section title="DELETE ACCOUNT" C={C}>
+          <Row
             C={C}
-            icon="trash-outline"
-            label="Delete account"
-            description="Permanently erase all your data from Navigo and associated services"
-            onPress={handleDeleteAccount}
+            icon="trash"
+            label="Delete your account"
+            desc="For good: your profile, saved places, contributions and badges."
             danger
+            onPress={() => setDeleting(true)}
           />
-        </View>
-
-        {/* ── Privacy note ─────────────────────────────────────────────────── */}
-        <View style={s.legalNote}>
-          <Icon name="information-circle-outline" size={14} color={C.subText} />
-          <Text style={[s.legalText, { color: C.subText }]}>
-            Your data is processed in accordance with our Privacy Policy. Location data is never sold to third parties.
-          </Text>
-        </View>
-
+        </Section>
       </ScrollView>
+
+      <DeleteAccountModal visible={deleting} isOAuth={isOAuth} C={C} onClose={() => setDeleting(false)} />
     </View>
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// ─── Deleting the account ────────────────────────────────────────────────────
+
+function DeleteAccountModal({ visible, isOAuth, C, onClose }: { visible: boolean; isOAuth: boolean; C: P; onClose: () => void }) {
+  const router = useRouter();
+  const { logout } = useAuthStore();
+  const resetSaved = useSavedStore((st) => st.reset);
+  const resetContrib = useContributionStore((st) => st.reset);
+  const [proof, setProof] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [working, setWorking] = useState(false);
+
+  useEffect(() => { if (!visible) { setProof(""); setError(null); } }, [visible]);
+  const ready = isOAuth ? proof.trim() === "DELETE" : proof.length > 0;
+
+  const submit = async () => {
+    if (!ready || working) return;
+    setWorking(true);
+    setError(null);
+    try {
+      await AccountService.deleteAccount(isOAuth ? { confirm: "DELETE" } : { password: proof });
+      resetSaved();
+      resetContrib();
+      await logout();
+      onClose();
+      router.replace("/(auth)/get-started" as any);
+      Alert.alert("Account deleted", "Your account and its data are gone. Thank you for riding with Navigo.");
+    } catch (e: any) {
+      const status = e?.response?.status;
+      setError(
+        status === 422 ? (isOAuth ? "Type DELETE in capitals." : "That password isn't right.")
+        : status === 409 ? e?.response?.data?.message ?? "This account is managed by an administrator."
+        : status === 404 ? "Your Navigo server doesn't offer account deletion yet."
+        : "Couldn't delete the account. Check your connection and try again."
+      );
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={s.modalWrap}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={[s.modalCard, { backgroundColor: C.card }]}>
+          <View style={[s.modalIcon, { backgroundColor: C.softRed }]}>
+            <Icon name="trash" size={24} color={DANGER} />
+          </View>
+          <Text style={[s.modalTitle, { color: C.text }]}>Delete your account?</Text>
+          <View style={{ gap: 6, alignSelf: "stretch" }}>
+            <Text style={[s.modalLine, { color: C.text }]}>
+              <Text style={{ fontWeight: "800" }}>Deleted: </Text>your profile, saved places and routes, contributions, badges and points, notifications, and what Kwame remembers.
+            </Text>
+            <Text style={[s.modalLine, { color: C.sub }]}>
+              <Text style={{ fontWeight: "800" }}>Kept, without your name: </Text>{"road reports you posted, so the people relying on them aren’t left without."}
+            </Text>
+            <Text style={[s.modalLine, { color: C.sub }]}>{"This can’t be undone."}</Text>
+          </View>
+          <TextInput
+            value={proof}
+            onChangeText={setProof}
+            placeholder={isOAuth ? "Type DELETE" : "Your password"}
+            placeholderTextColor={C.sub}
+            secureTextEntry={!isOAuth}
+            autoCapitalize={isOAuth ? "characters" : "none"}
+            autoCorrect={false}
+            style={[s.input, { backgroundColor: C.field, color: C.text }]}
+            accessibilityLabel={isOAuth ? "Type DELETE to confirm" : "Your password"}
+          />
+          {error ? <Text style={s.error}>{error}</Text> : null}
+          <View style={s.modalButtons}>
+            <PressableScale onPress={onClose} containerStyle={{ flex: 1 }} style={[s.btn, { backgroundColor: C.field }]}>
+              <Text style={[s.btnText, { color: C.text }]}>Keep it</Text>
+            </PressableScale>
+            <PressableScale
+              onPress={submit}
+              containerStyle={{ flex: 1.3 }}
+              style={[s.btn, { backgroundColor: ready ? DANGER : C.field }]}
+              accessibilityState={{ disabled: !ready, busy: working }}
+            >
+              {working ? <ActivityIndicator color="#FFFFFF" /> : <Text style={[s.btnText, { color: ready ? "#FFFFFF" : C.sub }]}>Delete for good</Text>}
+            </PressableScale>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
 
 const s = StyleSheet.create({
-  body: {
-    paddingHorizontal: 16,
-    paddingTop:        20,
-    gap:               16,
-  },
-
-  section: {
-    borderRadius:      14,
-    paddingHorizontal: 14,
-    paddingTop:        12,
-    paddingBottom:      4,
-  },
-  sectionTitle: {
-    fontSize:      11,
-    fontWeight:    "700",
-    letterSpacing:  0.5,
-    marginBottom:   8,
-  },
-  divider: { height: StyleSheet.hairlineWidth, marginLeft: 28 },
-
-  row: {
-    flexDirection:  "row",
-    alignItems:     "center",
-    gap:             12,
-    paddingVertical: 13,
-  },
-  rowBody:  { flex: 1, gap: 2 },
-  rowLabel: { fontSize: 15 },
-  rowDesc:  { fontSize: 12, lineHeight: 17 },
-  rowValue: { fontSize: 14 },
-
-  sessionBadge: {
-    paddingHorizontal: 8,
-    paddingVertical:   3,
-    borderRadius:      99,
-    marginRight:       2,
-  },
-  sessionBadgeText: { fontSize: 12, fontWeight: "700", color: ORANGE },
-
-  legalNote: {
-    flexDirection: "row",
-    alignItems:    "flex-start",
-    gap:            6,
-    paddingHorizontal: 4,
-    paddingBottom:  8,
-  },
-  legalText: { flex: 1, fontSize: 12, lineHeight: 18 },
-
-  permBanner: {
-    flexDirection:   "row",
-    alignItems:      "center",
-    gap:              10,
-    borderRadius:     10,
-    padding:          12,
-    marginBottom:     10,
-  },
-  permBannerTitle: { fontSize: 13, fontWeight: "600" },
-  permBannerDesc:  { fontSize: 12, lineHeight: 17 },
+  body: { padding: 14, gap: 16 },
+  sectionTitle: { fontSize: 11, fontWeight: "700", letterSpacing: 0.6, paddingHorizontal: 4 },
+  note: { fontSize: 12, paddingHorizontal: 6, lineHeight: 17 },
+  card: { borderRadius: 18, overflow: "hidden" },
+  row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 12, paddingVertical: 12 },
+  rowIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  rowBody: { flex: 1, minWidth: 0 },
+  rowLabel: { fontSize: 15.5, fontWeight: "600" },
+  rowDesc: { fontSize: 12.5, marginTop: 2, lineHeight: 17 },
+  sep: { height: StyleSheet.hairlineWidth, marginLeft: 56 },
+  pill: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 10 },
+  pillText: { fontSize: 12, fontWeight: "800" },
+  loading: { padding: 18, alignItems: "center" },
+  modalWrap: { flex: 1, justifyContent: "center", padding: 22, backgroundColor: "rgba(0,0,0,0.5)" },
+  modalCard: { borderRadius: 24, padding: 20, alignItems: "center", gap: 12 },
+  modalIcon: { width: 56, height: 56, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  modalTitle: { fontSize: 20, fontWeight: "900" },
+  modalLine: { fontSize: 14, lineHeight: 20 },
+  input: { alignSelf: "stretch", height: 48, borderRadius: 14, paddingHorizontal: 14, fontSize: 16 },
+  error: { color: DANGER, fontSize: 13.5, fontWeight: "600", alignSelf: "stretch" },
+  modalButtons: { flexDirection: "row", gap: 10, alignSelf: "stretch" },
+  btn: { height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center" },
+  btnText: { fontSize: 15, fontWeight: "800" },
 });

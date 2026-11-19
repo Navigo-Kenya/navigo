@@ -18,6 +18,8 @@ export interface AuthUser {
   phone_verified_at: string | null;
   avatar: string | null;
   oauth_provider: string | null;
+  /** When the account was made (the API's users.created_at). */
+  created_at?: string | null;
 }
 
 interface AuthState {

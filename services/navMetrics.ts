@@ -5,8 +5,20 @@
 // drops on network failure. This data is how thresholds like ARRIVE_M,
 // SNAP_WALK_M and the boarding radius get tuned from real rides.
 import { Platform } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Sentry from "@sentry/react-native";
 import api from "./apiClient";
+
+/**
+ * The "Share navigation quality data" setting (Privacy & security), kept on
+ * the phone so it applies at once and offline; also saved on the account
+ * (settings.privacy.analytics). Off: trips are measured but never sent.
+ */
+const ANALYTICS_KEY = "navigo:analytics";
+let enabled = true;
+AsyncStorage.getItem(ANALYTICS_KEY)
+  .then((v) => { if (v === "false") enabled = false; })
+  .catch(() => {});
 
 interface MetricEvent {
   event: string;
@@ -31,6 +43,13 @@ let updates = 0;
 let snappedUpdates = 0;
 
 export const NavMetrics = {
+  /** Whether trip measurements are sent (the user's analytics setting). */
+  isEnabled: () => enabled,
+  setEnabled(on: boolean) {
+    enabled = on;
+    AsyncStorage.setItem(ANALYTICS_KEY, on ? "true" : "false").catch(() => {});
+  },
+
   beginSession() {
     sessionId = uuid();
     buffer = [];
@@ -79,7 +98,7 @@ export const NavMetrics = {
 
     const events = buffer.slice(0, 100);
     buffer = [];
-    if (events.length === 0) return;
+    if (events.length === 0 || !enabled) return;
 
     try {
       await api.post(

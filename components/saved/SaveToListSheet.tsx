@@ -8,6 +8,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -18,7 +19,7 @@ import {
   View,
   useColorScheme,
 } from "react-native";
-import Reanimated, { FadeIn, FadeOut, SlideInDown, SlideOutDown } from "react-native-reanimated";
+import { useDraggableSheet } from "@/hooks/useDraggableSheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
@@ -42,6 +43,8 @@ export function SaveToListSheet({
 }) {
   const dark = useColorScheme() === "dark";
   const insets = useSafeAreaInsets();
+  // A plain draggable sheet: slides up, drags down by its handle to close.
+  const { translateY, backdrop, panHandlers, close } = useDraggableSheet(!!target, onClose);
   const router = useRouter();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const { places, customLists, toggleInList, addPlace, removePlace, fetch } = useSavedStore();
@@ -118,31 +121,34 @@ export function SaveToListSheet({
   const savedSomewhere = mine.length > 0;
 
   return (
-    <Modal visible={!!target} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible={!!target} transparent animationType="none" onRequestClose={() => close()} statusBarTranslucent>
       {target ? (
         <View style={StyleSheet.absoluteFill}>
-          <Reanimated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(160)} style={[StyleSheet.absoluteFill, s.backdrop]}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close" />
-          </Reanimated.View>
+          <Animated.View style={[StyleSheet.absoluteFill, s.backdrop, { opacity: backdrop }]}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => close()} accessibilityLabel="Close" />
+          </Animated.View>
 
           <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={s.bottom} pointerEvents="box-none">
-            <Reanimated.View
-              entering={SlideInDown.springify().damping(22).stiffness(240)}
-              exiting={SlideOutDown.duration(180)}
-              style={[s.sheet, { backgroundColor: C.sheet, paddingBottom: Math.max(insets.bottom, 14) }]}
+            <Animated.View
+              style={[s.sheet, { backgroundColor: C.sheet, paddingBottom: Math.max(insets.bottom, 14), transform: [{ translateY }] }]}
             >
-              <View style={[s.handle, { backgroundColor: C.handle }]} />
-
-              <View style={s.head}>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={[s.title, { color: C.text }]}>Save to list</Text>
-                  <Text style={[s.sub, { color: C.sub }]} numberOfLines={1}>
-                    {[target.name, target.category].filter(Boolean).join(" · ")}
-                  </Text>
+              {/* Drag by the handle and the header; the lists below scroll. */}
+              <View {...panHandlers}>
+                <View style={s.handleArea}>
+                  <View style={[s.handle, { backgroundColor: C.handle }]} />
                 </View>
-                <PressableScale onPress={onClose} style={[s.done, { backgroundColor: savedSomewhere ? ORANGE : C.chip }]}>
-                  <Text style={[s.doneText, { color: savedSomewhere ? "#FFFFFF" : C.text }]}>Done</Text>
-                </PressableScale>
+
+                <View style={s.head}>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[s.title, { color: C.text }]}>Save to list</Text>
+                    <Text style={[s.sub, { color: C.sub }]} numberOfLines={1}>
+                      {[target.name, target.category].filter(Boolean).join(" · ")}
+                    </Text>
+                  </View>
+                  <PressableScale onPress={() => close()} style={[s.done, { backgroundColor: savedSomewhere ? ORANGE : C.chip }]}>
+                    <Text style={[s.doneText, { color: savedSomewhere ? "#FFFFFF" : C.text }]}>Done</Text>
+                  </PressableScale>
+                </View>
               </View>
 
               {!isAuthenticated ? (
@@ -153,7 +159,7 @@ export function SaveToListSheet({
                     Sign in to save places to your lists, set Home and Work, and find them on every phone.
                   </Text>
                   <PressableScale
-                    onPress={() => { onClose(); router.push("/(auth)/login" as any); }}
+                    onPress={() => close(() => router.push("/(auth)/login" as any))}
                     style={[s.signIn, { backgroundColor: ORANGE }]}
                   >
                     <Text style={s.signInText}>Sign in</Text>
@@ -236,7 +242,7 @@ export function SaveToListSheet({
                   )}
                 </ScrollView>
               )}
-            </Reanimated.View>
+            </Animated.View>
           </KeyboardAvoidingView>
         </View>
       ) : null}
@@ -251,14 +257,16 @@ const s = StyleSheet.create({
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
     paddingHorizontal: 18,
-    paddingTop: 8,
+    paddingTop: 0,
     shadowColor: "#000",
     shadowOpacity: 0.18,
     shadowRadius: 20,
     shadowOffset: { width: 0, height: -4 },
     elevation: 20,
   },
-  handle: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, marginBottom: 10 },
+  // The same handle as the tab sheets (app/(tabs)/_layout.tsx).
+  handleArea: { paddingTop: 14, paddingBottom: 10, alignItems: "center" },
+  handle: { width: 42, height: 4, borderRadius: 2 },
   head: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 },
   title: { fontSize: 20, fontWeight: "800", letterSpacing: -0.4 },
   sub: { fontSize: 13, marginTop: 2 },
