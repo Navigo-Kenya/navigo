@@ -48,11 +48,16 @@ export function setupNotificationTapHandler(): () => void {
   return () => sub.remove();
 }
 
-// ── Local navigation notifications (fired when app is backgrounded) ──────────
-// High-importance channel + time-sensitive level: paired watches mirror these
-// with vibration, which is exactly what the alight moment needs.
+// ── The trip's alert, when the app is in the background ──────────────────────
+// One notification for the whole trip, replaced as it goes ("Get off in 2
+// stops" becomes "Get off at the next stop"): never a stack in the shade.
+// High-importance channel + time-sensitive level: paired watches mirror it
+// with vibration, which is exactly what the alight moment needs. Only the
+// moments that need you are sent; turn cues stay spoken, and "wrong way" is
+// never pushed (a reroute or the screen says it).
 
 export const NAV_ALERTS_CHANNEL = "nav-alerts";
+const TRIP_ALERT_ID = "navigo-trip";
 let navChannelReady = false;
 
 async function ensureNavAlertsChannel(): Promise<void> {
@@ -73,52 +78,28 @@ function navAlertTrigger(): Notifications.NotificationTriggerInput {
     : null;
 }
 
-const NAV_ALERT_CONTENT = {
-  sound: "default",
-  categoryIdentifier: "nav",
-  // iOS: break through Focus modes for the alight moment.
-  interruptionLevel: "timeSensitive",
-} as const;
-
-export async function scheduleAlightWarning(minutesAway: number, stopName: string): Promise<string> {
+/**
+ * Shows (or replaces) the trip's notification. `urgent` breaks through
+ * Focus modes on iOS: only for the moment to get off.
+ */
+export async function showTripAlert(title: string, body: string, urgent = false): Promise<void> {
   await ensureNavAlertsChannel();
-  return Notifications.scheduleNotificationAsync({
+  await Notifications.scheduleNotificationAsync({
+    identifier: TRIP_ALERT_ID,
     content: {
-      title: "Time to get off soon",
-      body: `Alight at ${stopName} in ~${minutesAway} min`,
-      data: { type: "alight_warning" },
-      ...NAV_ALERT_CONTENT,
+      title,
+      body,
+      data: { type: "trip_alert" },
+      sound: "default",
+      categoryIdentifier: "nav",
+      ...(urgent ? { interruptionLevel: "timeSensitive" as const } : {}),
     },
     trigger: navAlertTrigger(),
   });
 }
 
-export async function scheduleArrivalNotification(stopName: string): Promise<string> {
-  await ensureNavAlertsChannel();
-  return Notifications.scheduleNotificationAsync({
-    content: {
-      title: "You've arrived",
-      body: `You've reached ${stopName}`,
-      data: { type: "arrival" },
-      ...NAV_ALERT_CONTENT,
-    },
-    trigger: navAlertTrigger(),
-  });
-}
-
-export async function scheduleWrongDirectionAlert(): Promise<string> {
-  await ensureNavAlertsChannel();
-  return Notifications.scheduleNotificationAsync({
-    content: {
-      title: "Wrong direction",
-      body: "Turn around to get back on route",
-      data: { type: "wrong_direction" },
-      ...NAV_ALERT_CONTENT,
-    },
-    trigger: navAlertTrigger(),
-  });
-}
-
-export async function cancelNotification(id: string): Promise<void> {
-  await Notifications.cancelScheduledNotificationAsync(id);
+/** Takes the trip's notification away (the trip ended, or you're back in the app). */
+export async function clearTripAlert(): Promise<void> {
+  await Notifications.dismissNotificationAsync(TRIP_ALERT_ID).catch(() => {});
+  await Notifications.cancelScheduledNotificationAsync(TRIP_ALERT_ID).catch(() => {});
 }

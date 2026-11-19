@@ -6,6 +6,7 @@ import { Platform } from "react-native";
 import * as Speech from "expo-speech";
 import { usePrefsStore } from "@/store/prefsStore";
 import type { ApproachPhase, NavStep } from "./navigationEngine";
+import { P, VoiceQueue, type SpokenAlert, type Speaker } from "./navAlerts";
 
 type NavHints = "off" | "concise" | "detailed";
 
@@ -51,20 +52,32 @@ function prepareAudio(): Promise<void> {
   return _audioPromise ?? Promise.resolve();
 }
 
-// Speech serialization — prevents Speech.stop() from cutting off in-flight announcements.
-// At most one announcement plays at a time; a second one waits in _pending (replacing
-// any earlier pending item so the queue never piles up).
-let _speaking = false;
-let _pending: string | null = null;
+// expo-speech behind the queue's Speaker. A line stopped before its audio
+// mode was ready is never started (the queue has moved on by then).
+let _speechGen = 0;
+const speaker: Speaker = {
+  speak(text, onDone) {
+    const gen = ++_speechGen;
+    let finished = false;
+    const done = () => { if (!finished) { finished = true; onDone(); } };
+    prepareAudio()
+      .catch(() => {})
+      .then(() => {
+        if (gen !== _speechGen) return;
+        Speech.speak(text, { language: "en", rate: 1.05, pitch: 1.0, onDone: done, onStopped: done, onError: done });
+      });
+  },
+  stop() {
+    _speechGen++;
+    Speech.stop();
+  },
+};
 
-function _play(text: string) {
-  _speaking = true;
-  Speech.speak(text, {
-    language: "en", rate: 1.05, pitch: 1.0,
-    onDone:  () => { _speaking = false; if (_pending) { const t = _pending; _pending = null; _play(t); } },
-    onError: () => { _speaking = false; _pending = null; },
-  });
-}
+/**
+ * The one queue every navigation line goes through: priorities, expiry,
+ * each key once, chatter only in quiet gaps (services/navAlerts).
+ */
+export const NavVoice = new VoiceQueue(speaker);
 
 function niceDistance(m: number): string {
   if (m < 1000) return `${Math.round(m / 10) * 10} metres`;
@@ -72,24 +85,23 @@ function niceDistance(m: number): string {
 }
 
 export const VoiceGuide = {
-  /** Speak a navigation cue, letting the current announcement finish first. */
-  announce(text: string) {
-    prepareAudio()
-      .then(() => { _speaking ? (_pending = text) : _play(text); })
-      .catch(() => { _speaking ? (_pending = text) : _play(text); });
+  /** A cue with its priority, key and expiry (see services/navAlerts). */
+  say(alert: SpokenAlert): boolean {
+    return NavVoice.say(alert);
   },
 
-  /** Interrupt any in-flight speech and speak immediately (for step changes). */
+  /** Speak a line after what's playing (the same sentence at most every 20 s). */
+  announce(text: string) {
+    NavVoice.say({ key: `say:${text}:${Math.floor(Date.now() / 20_000)}`, text, priority: P.normal });
+  },
+
+  /** Cut in over chatter and speak now (a step change). */
   urgentAnnounce(text: string) {
-    prepareAudio()
-      .then(() => { Speech.stop(); _pending = null; _speaking = false; _play(text); })
-      .catch(() => { Speech.stop(); _pending = null; _speaking = false; _play(text); });
+    NavVoice.say({ key: `urgent:${text}:${Math.floor(Date.now() / 20_000)}`, text, priority: P.high });
   },
 
   stop() {
-    Speech.stop();
-    _pending  = null;
-    _speaking = false;
+    NavVoice.clear();
   },
 
   /**

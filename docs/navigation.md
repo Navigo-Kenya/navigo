@@ -218,6 +218,40 @@ The original plan, kept for reference: use the plan as the prior and confirm it 
 
 A small **state machine per leg** (`approaching → waiting → on board → arriving → alighted`) combines these with hysteresis (e.g. "on board" needs in-vehicle activity *or* sustained speed *and* being on the route, for 15 s). The manual **I'm on board** button stays as the override. This also fixes the cyclist-becomes-a-bus problem: on a bicycle leg, speed means cycling.
 
+### Alerts and the banner during a trip
+
+Calm, like Google Maps, with Waze's road reports. One voice, `NavVoice` (`services/navAlerts`), says everything:
+
+| Rule | What it means |
+|---|---|
+| Priorities | "Turn now" and "get off at the next stop" cut into a landmark. A landmark never cuts into anything. |
+| Expiry | A turn cue that waited until its turn is close is dropped, not said late. |
+| Once | Each cue has a key, which carries the route's generation, so a new route says its own cues. |
+| Quiet gaps | Chatter (stops and landmarks passed, in Detailed hints) only fills 6 s of silence, and never waits in line. |
+| One buzz | One buzz per alert, never two within 1.5 s, except critical ones. |
+
+What changed from before:
+- **Street legs** are guided by their turns only. The step announcement that repeated them is gone.
+- **Getting off** gets two warnings: "in 2 stops", then "at the next stop". "Get off here" only comes after a long stretch since the last warning.
+- **Wrong way** is distance travelled against the route (25 m on foot, 40 m on a bike, 80 m driving), not compass noise.
+  - On foot or a bike, it shows a quiet note and gives one buzz, and says "Turn around" only if it goes on.
+  - At the wheel it replans from where you are, as Google does. The new route's first instruction is the U-turn.
+- **"Route recalculated" isn't spoken any more.** A "New route" note shows on screen instead.
+- **Arrival** says which side the place is on: "You've arrived. Sarit Centre is on your right."
+- **In the background,** the trip has one notification, replaced as it goes ("Get off in 2 stops", then "Get off at the next stop"). It's time-sensitive only for the moment to get off. Wrong way and arrival aren't pushed.
+- **While a trip is guided,** other notifications go to the notification list silently.
+
+**Road reports ahead** (`services/hazardsAhead`):
+- Reports within 40 m of the route are placed along it. They're refreshed every 3 min for the next 15 km.
+- Drivers hear accidents, blocked roads, police checks, floods, stopped vehicles and jams, about 30 s ahead. People on foot hear about floods and security a block ahead. Passengers only see them.
+- Once you've passed a community report, "Still there?" asks for a vote, so the map stays honest.
+
+**The banner** (`components/app/NavBanner.tsx`) follows Google Maps:
+- The arrow and the distance are large on the left.
+- The street is the main text, with the verb small above it and the landmark under it.
+- A "Then" tab sits under it when the next turn is close.
+- It's Navigo orange while you're in control, and calm dark when you're carried (on a matatu, as a passenger, or waiting).
+
 ### Trains (`navigo-otp` and the API)
 
 The data is mostly there: 11 Kenya Railways routes (Madaraka Express day / inter-county / night, Suswa, five Nairobi commuter lines, Nanyuki and Kisumu safari trains), 23 trips, 49 stations. To route on them:

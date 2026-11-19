@@ -18,15 +18,15 @@ import {
   ReportIcon,
   type PlaceCategoryKey,
   type PoiCategory,
-  PoiCategoryGlyph,
 } from "@/components/icons/NavigoIcons";
-import { poiCategoryMeta } from "@/components/icons/poiCategories";
 import type { RideCue } from "@/utils/landmarks";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import type { Step } from "@/utils/mapHelpers";
 import { maneuverIcon, mToNice } from "@/utils/mapHelpers";
-import type { NavTurn, PhaseNotice } from "@/hooks/useNavigation";
+import type { NavHazard, NavToast, NavTurn, PhaseNotice } from "@/hooks/useNavigation";
+import { NavBanner } from "./NavBanner";
+import { usePrefsStore } from "@/store/prefsStore";
 import type { NavPhase } from "@/services/legPhase";
 import type { LegKind, Role } from "@/services/navProfile";
 import type { ApproachPhase, EngineStatus } from "@/services/navigationEngine";
@@ -146,6 +146,11 @@ export interface MapFloatingUIProps {
   /** The last automatic phase change, shown for a few seconds with Undo. */
   phaseNotice?: PhaseNotice | null;
   onUndoPhase?: () => void;
+  /** A road report ahead, or just passed ("Still there?"). */
+  hazard?: NavHazard | null;
+  onHazardVote?: (id: string, stillThere: boolean) => void;
+  /** A short note: "New route", "Thanks". */
+  toast?: NavToast | null;
   /** Waiting at the stage: the line, the stop, the next departure. */
   waitInfo?: { line: string | null; stop: string | null; next: string | null; mode: string } | null;
   /** Waiting for a boda or taxi: where to, and the usual fare. */
@@ -201,6 +206,9 @@ export default function MapFloatingUI({
   phase = null,
   phaseNotice = null,
   onUndoPhase,
+  hazard = null,
+  onHazardVote,
+  toast = null,
   waitInfo = null,
   pickupInfo = null,
   canAlight = false,
@@ -223,6 +231,7 @@ export default function MapFloatingUI({
 
   // Waiting at the stage or for the ride, the card says so; the turns come once moving.
   const showTurn = turn && phase !== "wait" && phase !== "pickup" ? turn : null;
+  const units = usePrefsStore((s) => s.prefs.units);
 
   // The phase notice ("On board the 45K · Undo") shows for 8 s.
   const [noticeShown, setNoticeShown] = useState(false);
@@ -821,151 +830,34 @@ export default function MapFloatingUI({
               )}
             </View>
           ) : (
-          <View style={styles.navBanner}>
-            <View style={styles.navBannerMain}>
-              <View style={[styles.navIconBox, showTurn && legRole === "driver" && styles.navIconBoxTurn]}>
-                {showTurn && legRole === "driver" ? (
-                  <MaterialIcons name={maneuverIcon(showTurn.maneuver) as any} size={34} color="#FFFFFF" />
-                ) : (
-                  <Icon
-                    name={(phase === "wait" && waitInfo
-                      ? bannerIcon("transit", { type: "arrive", mode: waitInfo.mode } as any)
-                      : bannerIcon(legKind, nextStep)) as any}
-                    size={24}
-                    color="#FFFFFF"
-                  />
-                )}
-              </View>
-              <View style={{ flex: 1 }}>
-                {showTurn && legRole === "driver" ? (
-                  <Text style={styles.navTurnDistance}>{turnDistanceLabel(showTurn.distanceM)}</Text>
-                ) : null}
-                <Text
-                  style={[styles.navPrimaryText, showTurn && legRole === "passenger" && styles.navPrimaryQuiet]}
-                  numberOfLines={2}
-                >
-                  {phase === "wait" && waitInfo
-                    ? `Wait for ${waitInfo.line ? `the ${waitInfo.line}` : "your ride"}`
-                    : phase === "pickup"
-                    ? "Waiting for your ride"
-                    : showTurn
-                    ? (legRole === "passenger" ? `Next: ${showTurn.instruction}` : showTurn.instruction)
-                    : nextPreview ?? "Follow highlighted route"}
-                </Text>
-                <View style={styles.navMetaRow}>
-                  {phase === "wait" && waitInfo ? (
-                    <Text style={styles.navSubText} numberOfLines={1}>
-                      {waitInfo.stop ? `At ${waitInfo.stop}` : "At the stop"}
-                      {waitInfo.next ? ` · next ${waitInfo.next}` : ""}
-                    </Text>
-                  ) : phase === "pickup" ? (
-                    <Text style={styles.navSubText} numberOfLines={1}>
-                      {destinationName ? `To ${destinationName}` : ""}
-                      {pickupInfo?.fare ? ` · ${pickupInfo.fare}` : ""}
-                    </Text>
-                  ) : showTurn ? (
-                    legRole === "passenger" ? (
-                      <Text style={styles.navSubText} numberOfLines={1}>
-                        In {mToNice(showTurn.distanceM)}
-                        {destinationName ? ` · To ${destinationName}` : ""}
-                      </Text>
-                    ) : null
-                  ) : distanceToNextStepM != null && (
-                    <Text style={styles.navSubText}>
-                      In {mToNice(distanceToNextStepM)}
-                    </Text>
-                  )}
-                  {stopsRemaining != null && stopsRemaining > 0 && (
-                    <Text style={styles.navSubBadge}>
-                      {stopsRemaining} stop{stopsRemaining === 1 ? "" : "s"} left
-                    </Text>
-                  )}
-                  {walkDestination && (
-                    <Text style={styles.navSubText} numberOfLines={1}>
-                      · To {walkDestination}
-                    </Text>
-                  )}
-                </View>
-              </View>
-              <PressableScale
-                onPress={onClearJourney}
-                hitSlop={10}
-                style={styles.navCloseBtn}
-              >
-                <Icon name="close" size={20} color="#FFFFFF" />
-              </PressableScale>
-            </View>
-
-            {/* Live ride feed: "Passing Naivas" → "Next: Meditest Hospital · 400 m";
-                two stops out it becomes the alight cue with its landmark. */}
-            {rideCue && (rideCue.alight || rideCue.passing || rideCue.next) && (
-              <View style={[styles.rideStrip, rideCue.alight && styles.rideStripAlight]}>
-                {rideCue.alight ? (
-                  <Icon name="notifications" size={15} color="#FFFFFF" />
-                ) : (
-                  <View
-                    style={[
-                      styles.rideBadge,
-                      { backgroundColor: poiCategoryMeta((rideCue.passing ?? rideCue.next!.landmark).category).color },
-                    ]}
-                  >
-                    <PoiCategoryGlyph
-                      category={(rideCue.passing ?? rideCue.next!.landmark).category as PoiCategory}
-                      size={11}
-                    />
-                  </View>
-                )}
-                <Text style={styles.rideText} numberOfLines={1}>
-                  {rideCue.alight
-                    ? rideCue.alight
-                    : rideCue.passing
-                    ? `Passing ${rideCue.passing.name} · on your ${rideCue.passing.side}`
-                    : `Next: ${rideCue.next!.landmark.name} · ${mToNice(rideCue.next!.inM)}`}
-                </Text>
-              </View>
-            )}
-
-            {phase !== "wait" && phase !== "pickup" && (showTurn ? showTurn.then : nextNextPreview) && (
-              <View style={styles.navThenStrip}>
-                <Text style={styles.navThenText} numberOfLines={1}>
-                  Then: {showTurn ? showTurn.then : nextNextPreview}
-                </Text>
-              </View>
-            )}
-
-            {onSwitchRole ? <RoleStrip kind={legKind ?? null} role={legRole ?? null} onPress={onSwitchRole} /> : null}
-
-            {(wrongDirection ||
-              headingAway ||
-              gpsLost ||
-              navStatus === "rerouting" ||
-              isIndoor ||
-              paused) && (
-              <View style={styles.statusAlertStrip}>
-                <Icon name="alert-circle" size={16} color="#FEF08A" />
-                <Text style={styles.statusAlertText}>
-                  {paused
-                    ? "Navigation paused"
-                    : wrongDirection
-                    ? (legRole === "driver" && (legKind === "car" || legKind === "motorbike")
-                        ? "Wrong way · make a U-turn when it's safe"
-                        : "Wrong direction — turn around")
-                    : headingAway
-                    ? `Heading away from ${destinationName ?? "your destination"}`
-                    : navStatus === "rerouting"
-                    ? (legRole === "passenger" ? "Following your driver's way…" : "Recalculating best route…")
-                    : gpsLost
-                    ? "Weak GPS signal — dead-reckoning"
-                    : "Indoor signal — head outside for lock"}
-                </Text>
-                {paused && (
-                  <PressableScale onPress={onResume} style={styles.resumePill}>
-                    <Text style={styles.resumePillText}>Resume</Text>
-                  </PressableScale>
-                )}
-              </View>
-            )}
-          </View>
+          <NavBanner
+            turn={showTurn}
+            legKind={legKind}
+            legRole={legRole}
+            phase={phase}
+            stepMode={(nextStep as any)?.mode ?? null}
+            waitInfo={waitInfo}
+            pickupInfo={pickupInfo}
+            nextPreview={nextPreview}
+            nextNextPreview={phase !== "wait" && phase !== "pickup" ? nextNextPreview : null}
+            distanceToNextStepM={distanceToNextStepM}
+            stopsRemaining={stopsRemaining}
+            walkDestination={walkDestination}
+            destinationName={destinationName}
+            rideCue={rideCue}
+            wrongDirection={wrongDirection}
+            headingAway={headingAway}
+            gpsLost={gpsLost}
+            rerouting={navStatus === "rerouting"}
+            isIndoor={isIndoor}
+            paused={paused}
+            onResume={onResume}
+            roleStrip={onSwitchRole ? <RoleStrip kind={legKind ?? null} role={legRole ?? null} onPress={onSwitchRole} /> : null}
+            hazard={hazard}
+            onHazardVote={onHazardVote}
+            toast={toast}
+            units={units}
+          />
           )}
           {noticeShown && phaseNotice ? (
             <View style={styles.phaseNotice}>
@@ -1144,22 +1036,6 @@ function turnDistanceLabel(m: number): string {
   return m < 15 ? "Now" : mToNice(m);
 }
 
-/** The banner's icon when there's no turn arrow: the leg's own mode. */
-function bannerIcon(kind: LegKind | null | undefined, step?: Step): string {
-  switch (kind) {
-    case "walk": return "walk";
-    case "bicycle": return "bicycle";
-    case "car": return "car";
-    case "motorbike": return "motorbike";
-    default: {
-      const mode = String((step as any)?.mode ?? "").toUpperCase();
-      if (["RAIL", "SUBWAY", "TRAM", "MONORAIL"].includes(mode)) return "train";
-      if (mode === "FERRY") return "boat";
-      if (step?.type === "walk") return "walk";
-      return "bus";
-    }
-  }
-}
 
 const ROLE_TEXT: Record<"car" | "motorbike", Record<Role, { now: string; other: string; icon: string }>> = {
   car: {
@@ -1360,52 +1236,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     opacity: 0.8,
   },
-  navBanner: {
-    backgroundColor: "#111827",
-    borderRadius: 18,
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOpacity: 0.28,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 14,
-  },
-  navBannerMain: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 14,
-    gap: 12,
-  },
-  navIconBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: ORANGE,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  navPrimaryText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  /** A passenger's banner informs, it doesn't command. */
-  navPrimaryQuiet: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#E5E7EB",
-  },
-  navIconBoxTurn: {
-    width: 56,
-    height: 56,
-    borderRadius: 14,
-  },
-  navTurnDistance: {
-    color: "#FFFFFF",
-    fontSize: 24,
-    fontWeight: "800",
-    letterSpacing: -0.3,
-  },
   phaseNotice: {
     marginTop: 8,
     alignSelf: "center",
@@ -1474,58 +1304,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     paddingHorizontal: 16,
     paddingBottom: 12,
-  },
-  navMetaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginTop: 3,
-  },
-  navSubText: {
-    color: "#9CA3AF",
-    fontSize: 13,
-    fontWeight: "500",
-  },
-  navSubBadge: {
-    backgroundColor: "rgba(255, 111, 0, 0.25)",
-    color: "#FDBA74",
-    fontSize: 11,
-    fontWeight: "700",
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  navCloseBtn: {
-    padding: 6,
-    borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.12)",
-  },
-  rideStrip: {
-    backgroundColor: "#1E293B",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  rideStripAlight: { backgroundColor: ORANGE },
-  rideBadge: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  rideText: { flex: 1, color: "#F8FAFC", fontSize: 12.5, fontWeight: "600" },
-  navThenStrip: {
-    backgroundColor: "#1F2937",
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-  },
-  navThenText: {
-    color: "#D1D5DB",
-    fontSize: 12,
-    fontWeight: "500",
   },
   statusAlertStrip: {
     backgroundColor: "#991B1B",

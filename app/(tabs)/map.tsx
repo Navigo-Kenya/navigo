@@ -180,7 +180,7 @@ export default function MapScreen() {
   const dark = useColorScheme() === "dark";
   const BG = dark ? "#0F0F0F" : "#F6F7F8";
 
-  const { location: me, navState, locationPermissionDenied, openLocationSettings, gpsLost, wrongDirection, startNavigation, stopNavigation, pauseNavigation, resumeNavigation, isIndoor, canBoardTransit, boardTransit, turn, headingAway, phase, phaseNotice, undoPhase, canAlight, alightTransit, startRide } = useNavigation();
+  const { location: me, navState, locationPermissionDenied, openLocationSettings, gpsLost, wrongDirection, startNavigation, stopNavigation, pauseNavigation, resumeNavigation, isIndoor, canBoardTransit, boardTransit, turn, headingAway, phase, phaseNotice, undoPhase, canAlight, alightTransit, startRide, hazard, voteHazard, toast } = useNavigation();
   const { visible: rateVisible, onJourneyComplete, onRate, onLater } = useRatePrompt();
   const [showPostJourney, setShowPostJourney] = useState(false);
   // Snapshot of the finished journey — PostJourneySheet must not read
@@ -1796,6 +1796,9 @@ export default function MapScreen() {
         phase={isNavigationMode ? phase : null}
         phaseNotice={isNavigationMode ? phaseNotice : null}
         onUndoPhase={undoPhase}
+        hazard={isNavigationMode ? hazard : null}
+        onHazardVote={voteHazard}
+        toast={isNavigationMode ? toast : null}
         waitInfo={waitInfo}
         pickupInfo={pickupInfo}
         canAlight={canAlight && isNavigationMode}
