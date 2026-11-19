@@ -77,7 +77,7 @@ export default function AddPhotoScreen() {
     }
     setLoading(true);
     try {
-      await submit({
+      const res = await submit({
         type: "stop_photo",
         stop_id: params.stopId ?? undefined,
         title: stopName.trim() ? `Photo: ${stopName.trim()}` : "Stop photo",
@@ -87,7 +87,7 @@ export default function AddPhotoScreen() {
         },
       });
       router.back();
-      showReward({ points: 0, title: "Photo sent for review", pendingPoints: CONTRIBUTION_POINTS.stop_photo });
+      showReward({ points: 0, title: "Photo sent for review", pendingPoints: CONTRIBUTION_POINTS.stop_photo, quests: res.quests_done, streak: res.streak_days });
     } catch {
       Alert.alert("Error", "Could not submit your photo. Please try again.");
     } finally {

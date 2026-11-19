@@ -75,8 +75,8 @@ export default function ReportSheet({ onClose, userLat, userLng, initialType = n
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setDone(true);
       useContributionStore.getState().noteReport(r);
-      if (r.points_awarded > 0 || r.new_badges.length) {
-        showReward({ points: r.points_awarded, badges: r.new_badges, streak: r.streak_days, title: "Alert pinned" });
+      if (r.points_awarded > 0 || r.new_badges.length || r.quests_done.length) {
+        showReward({ points: r.points_awarded, badges: r.new_badges, streak: r.streak_days, title: "Alert pinned", quests: r.quests_done });
       }
       setTimeout(() => sheet.current?.close(), 1500);
     } catch (e: any) {

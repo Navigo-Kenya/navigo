@@ -16,6 +16,17 @@ export interface Reward {
   pendingPoints?: number;
   /** What was done ("Review posted"). */
   title?: string;
+  /** Daily quests this completed (their points come on top). */
+  quests?: { key?: string; title: string; points: number }[];
+}
+
+/** "Quest done: Review a stage +5", or "2 quests done +8". */
+export function questsLine(quests: Reward["quests"]): string | null {
+  if (!quests?.length) return null;
+  const pts = quests.reduce((n, q) => n + q.points, 0);
+  const named = quests.filter((q) => q.key !== "all");
+  if (named.length === 1) return `Quest done: ${named[0].title} +${pts}`;
+  return `${named.length || quests.length} quests done +${pts}`;
 }
 
 interface RewardState {
@@ -40,6 +51,12 @@ export function humanizeSlug(slug: string): string {
 
 /** The toast's two lines. */
 export function rewardLines(r: Reward, badgeName?: string | null): { title: string; sub: string | null } {
+  const lines = rewardLinesBase(r, badgeName);
+  const q = questsLine(r.quests);
+  return q ? { title: lines.title, sub: [lines.sub, q].filter(Boolean).join(" · ") } : lines;
+}
+
+function rewardLinesBase(r: Reward, badgeName?: string | null): { title: string; sub: string | null } {
   const streak = r.streak && r.streak > 1 ? `${r.streak}-day streak` : null;
   const pts = r.points > 0 ? `+${r.points} Safiri Points` : null;
   const badge = r.badges?.[0];

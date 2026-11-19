@@ -76,3 +76,26 @@ describe("your week in the league", () => {
     expect(leagueLine({ joined: true, me: me("safe", null, null), next: null })).toBe("Nyota, the top league: stay out of the drop zone.");
   });
 });
+
+describe("quests in the thanks", () => {
+  const { questsLine } = require("@/store/rewardStore");
+  it("names one quest, counts several", () => {
+    expect(questsLine([{ key: "review", title: "Review a stage", points: 5 }])).toBe("Quest done: Review a stage +5");
+    expect(questsLine([{ key: "vote", title: "Confirm a report", points: 3 }, { key: "all", title: "All three today", points: 5 }]))
+      .toBe("Quest done: Confirm a report +8");
+    expect(questsLine([{ key: "trip", title: "Ride", points: 5 }, { key: "vote", title: "Vote", points: 3 }])).toBe("2 quests done +8");
+    expect(questsLine([])).toBeNull();
+  });
+  it("rides along with the points", () => {
+    expect(rewardLines({ points: 10, title: "Review posted", quests: [{ key: "review", title: "Review a stage", points: 5 }] }))
+      .toEqual({ title: "+10 Safiri Points", sub: "Review posted · Quest done: Review a stage +5" });
+  });
+});
+
+describe("no nudge on a weekend that can't break the streak", () => {
+  const sat = new Date(2026, 10, 21, 9, 0, 0);
+  it("waits for Monday unless weekends count", () => {
+    expect(streakReminderAt({ streakDays: 5, contributedToday: false, allowed: true, now: sat })).toBeNull();
+    expect(streakReminderAt({ streakDays: 5, contributedToday: false, allowed: true, now: sat, weekends: true })?.getHours()).toBe(19);
+  });
+});

@@ -97,6 +97,7 @@ export function StopReviewForm({
         badges: res.new_badges,
         streak: res.streak_days,
         title: existing ? "Review updated" : "Review posted",
+        quests: res.quests_done,
       });
     } catch {
       Alert.alert("Couldn't send your review", "Please try again.");

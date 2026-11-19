@@ -1,5 +1,7 @@
 // services/report.ts
 import api from "./apiClient";
+import { showReward } from "@/store/rewardStore";
+import { useContributionStore } from "@/store/contributionStore";
 import type { ReportType } from "@/components/icons/reportIcons";
 
 /** Report types. Labels, colours and icons live in components/icons/reportIcons. */
@@ -95,13 +97,14 @@ export const ReportService = {
     lat: number,
     lng: number,
     type: ReportCategory
-  ): Promise<{ points_awarded: number; new_badges: string[]; streak_days: number | null }> {
+  ): Promise<{ points_awarded: number; new_badges: string[]; streak_days: number | null; quests_done: { key: string; title: string; points: number }[] }> {
     const res = await api.post("/reports", { lat, lng, type });
     const d = res.data?.data ?? {};
     return {
       points_awarded: Number(d.points_awarded ?? 0),
       new_badges: Array.isArray(d.new_badges) ? d.new_badges : [],
       streak_days: typeof d.streak_days === "number" ? d.streak_days : null,
+      quests_done: Array.isArray(d.quests_done) ? d.quests_done : [],
     };
   },
 
@@ -110,10 +113,15 @@ export const ReportService = {
    * re-sending the current vote changes nothing.
    */
   async voteReport(id: string, vote: ReportVote | "clear"): Promise<ReportVoteResult> {
-    const { data } = await api.post<{ data: ReportVoteResult }>(
+    const { data } = await api.post<{ data: ReportVoteResult & { quests_done?: { key: string; title: string; points: number }[]; streak_days?: number } }>(
       `/reports/${id}/vote`,
       { vote }
     );
+    // A vote keeps the streak and can finish a quest: say so.
+    if (data.data.quests_done?.length) {
+      showReward({ points: 0, title: "Thanks for keeping the map honest", streak: data.data.streak_days ?? null, quests: data.data.quests_done });
+      useContributionStore.getState().refresh().catch(() => {});
+    }
     return {
       upvotes:   data.data.upvotes,
       downvotes: data.data.downvotes,
