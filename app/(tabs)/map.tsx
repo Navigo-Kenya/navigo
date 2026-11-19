@@ -4,6 +4,7 @@ import { MapLayersSheet }        from "@/components/map/MapLayersSheet";
 import { PoiLayer, type TappedPoi } from "@/components/map/PoiLayer";
 import { poiCategoryMeta }       from "@/components/icons/poiCategories";
 import { useExploreSearchStore, type ExplorePlaceItem } from "@/store/exploreSearchStore";
+import { useMapIntentStore }     from "@/store/mapIntentStore";
 import { PoiResultsLayer }       from "@/components/map/PoiResultsLayer";
 import { SelectedPlaceLayer }    from "@/components/map/SelectedPlaceLayer";
 import { JourneyLandmarksLayer, journeyLandmarkIds } from "@/components/map/JourneyLandmarksLayer";
@@ -1238,6 +1239,17 @@ export default function MapScreen() {
     },
     [camera]
   );
+
+  // A stop or a line asked for from outside the map (the Transit tab):
+  // shown as if tapped here.
+  const mapIntent = useMapIntentStore((s) => s.intent);
+  useEffect(() => {
+    if (!mapIntent) return;
+    const i = useMapIntentStore.getState().consume();
+    if (!i) return;
+    if (i.kind === "stop") handleSelectStop(i.stop);
+    else handleSelectCorridorRoute(i.routeId);
+  }, [mapIntent, handleSelectStop, handleSelectCorridorRoute]);
 
   useEffect(() => {
     if (!layers.reports && !layers.traffic) return;

@@ -5,6 +5,22 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 const CUSTOM_LISTS_KEY = "navigo:custom_lists";
+
+/** What can be saved: a place or a stop, as the place sheet and the stop sheet know it. */
+export interface SaveTarget {
+  name: string;
+  lat: number;
+  lng: number;
+  type: "stop" | "location";
+  /** Google place id, "poi:<id>" for ours, or the stop id. */
+  place_id: string;
+  category?: string | null;
+}
+
+/** The rows that save this target (one per list, plus Home/Work pins). */
+export function rowsFor(places: SavedPlace[], placeId: string): SavedPlace[] {
+  return places.filter((p) => p.place_id === placeId);
+}
 const STALE_MS = 5 * 60 * 1000; // 5 minutes
 
 interface SavedStore {
@@ -22,6 +38,12 @@ interface SavedStore {
   removeJourney:     (id: number) => Promise<void>;
   addCustomList:     (name: string) => Promise<void>;
   removeCustomList:  (name: string) => Promise<void>;
+  /** Adds the target to the list, or takes it out if it's there. Resolves to "in the list now". */
+  toggleInList:      (target: SaveTarget, list: string) => Promise<boolean>;
+  /** Moves every place of a list to another name (the API keys custom lists by name). */
+  renameList:        (from: string, to: string) => Promise<void>;
+  /** Deletes a list's places (a list is its places on the API). */
+  deleteListPlaces:  (list: string) => Promise<void>;
 }
 
 export const useSavedStore = create<SavedStore>()(
@@ -117,6 +139,44 @@ export const useSavedStore = create<SavedStore>()(
         const next = get().customLists.filter((l) => l !== name);
         set({ customLists: next });
         await AsyncStorage.setItem(CUSTOM_LISTS_KEY, JSON.stringify(next));
+      },
+
+      async toggleInList(target, list) {
+        const row = get().places.find((p) => p.place_id === target.place_id && p.list === list && p.pin === null);
+        if (row) {
+          await get().removePlace(row.id);
+          return false;
+        }
+        await get().addPlace({
+          name: target.name,
+          lat: target.lat,
+          lng: target.lng,
+          type: target.type,
+          place_id: target.place_id,
+          pin: null,
+          list,
+          category: target.category ?? null,
+          note: null,
+        });
+        return true;
+      },
+
+      async renameList(from, to) {
+        // One at a time, adding before removing: an error midway leaves the
+        // place in a list (old or new), never in none.
+        const rows = get().places.filter((p) => p.list === from && p.pin === null);
+        for (const p of rows) {
+          await get().addPlace({
+            name: p.name, lat: p.lat, lng: p.lng, type: p.type, place_id: p.place_id,
+            pin: null, list: to, category: p.category, note: p.note,
+          });
+          await get().removePlace(p.id);
+        }
+      },
+
+      async deleteListPlaces(list) {
+        const rows = get().places.filter((p) => p.list === list && p.pin === null);
+        for (const p of rows) await get().removePlace(p.id);
       },
     }),
     {

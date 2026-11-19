@@ -26,7 +26,8 @@ import {
   useExploreSearchStore,
   type ExplorePlaceItem,
 } from "@/store/exploreSearchStore";
-import { useSavedStore } from "@/store/savedStore";
+import { useSavedStore, type SaveTarget } from "@/store/savedStore";
+import { SaveToListSheet } from "@/components/saved/SaveToListSheet";
 import type { MobilitySearchRouteItem } from "@/services/stop";
 import type { Stop } from "@/utils/mapHelpers";
 import { distanceM, formatDistance } from "@/services/exploreSearch";
@@ -108,7 +109,8 @@ function ResultsSheet({
     selectPlace,
     clearSearch,
   } = useExploreSearchStore();
-  const { addPlace } = useSavedStore();
+  const { places: savedPlaces } = useSavedStore();
+  const [saveTarget, setSaveTarget] = useState<SaveTarget | null>(null);
 
   const hasUser = userLat != null && userLng != null;
   const distOf = (lat: number, lng: number, known?: number | null) =>
@@ -189,6 +191,8 @@ function ResultsSheet({
   );
 
   return (
+    <>
+    <SaveToListSheet target={saveTarget} onClose={() => setSaveTarget(null)} />
     <MapSheet
       ref={sheet}
       snapPoints={[150, SH * 0.5, SH * 0.88]}
@@ -244,11 +248,19 @@ function ResultsSheet({
                     {[dist, pl.address].filter(Boolean).join(" · ")}
                   </Text>
                   <View style={[s.actions, { marginTop: 6 }]}>
-                    <RoundAction icon="bookmark-outline" label="Save" bg={C.chip} onPress={() =>
-                      addPlace({
-                        name: pl.name, lat: pl.lat, lng: pl.lng, type: "location", place_id: pl.id,
-                        pin: null, list: "favorites", category: pl.category, note: null,
-                      }).catch(() => {})} />
+                    <RoundAction
+                      icon={savedPlaces.some((p) => p.place_id === pl.id) ? "bookmark" : "bookmark-outline"}
+                      label="Save"
+                      bg={C.chip}
+                      fg={savedPlaces.some((p) => p.place_id === pl.id) ? ORANGE : BLUE}
+                      onPress={() => {
+                        Haptics.selectionAsync();
+                        setSaveTarget({
+                          name: pl.name, lat: pl.lat, lng: pl.lng, type: "location",
+                          place_id: pl.id, category: pl.category,
+                        });
+                      }}
+                    />
                     <RoundAction icon="share-outline" label="Share" bg={C.chip} onPress={() =>
                       Share.share({ message: `${pl.name} · ${pl.address}` }).catch(() => {})} />
                     <RoundAction icon="navigate" label="Directions" bg={BLUE} fg="#FFFFFF"
@@ -329,6 +341,7 @@ function ResultsSheet({
         })
       )}
     </MapSheet>
+    </>
   );
 }
 
@@ -340,8 +353,9 @@ function PlaceSheet({ place: base, onFocusCoords, userLat, userLng }: Props & { 
   const router = useRouter();
   const sheet = useRef<MapSheetHandle>(null);
   const { selectPlace, active: overResults } = useExploreSearchStore();
-  const { places: saved, addPlace } = useSavedStore();
+  const { places: saved } = useSavedStore();
   const isSaved = saved.some((p) => p.place_id === base.id);
+  const [saveOpen, setSaveOpen] = useState(false);
 
   // One of our POIs (tapped on the map): fetch our data + live Google details.
   const poiId = base.id.startsWith("poi:") ? base.id.slice(4) : null;
@@ -422,6 +436,7 @@ function PlaceSheet({ place: base, onFocusCoords, userLat, userLng }: Props & { 
   );
 
   return (
+    <>
     <MapSheet
       ref={sheet}
       snapPoints={[330, SH * 0.66]}
@@ -444,13 +459,11 @@ function PlaceSheet({ place: base, onFocusCoords, userLat, userLng }: Props & { 
           bg={C.chip}
           fg={isSaved ? ORANGE : C.text}
           withLabel
+          // Opens "Save to list" (several lists, Home, Work, a new list),
+          // saved or not: that's also where a place comes out of a list.
           onPress={() => {
-            if (isSaved) return;
             Haptics.selectionAsync();
-            addPlace({
-              name: place.name, lat: place.lat, lng: place.lng, type: "location", place_id: place.id,
-              pin: null, list: "favorites", category: place.category, note: null,
-            }).catch(() => {});
+            setSaveOpen(true);
           }}
         />
         <RoundAction
@@ -525,6 +538,11 @@ function PlaceSheet({ place: base, onFocusCoords, userLat, userLng }: Props & { 
         </View>
       )}
     </MapSheet>
+    <SaveToListSheet
+      target={saveOpen ? { name: place.name, lat: place.lat, lng: place.lng, type: "location", place_id: place.id, category: place.category } : null}
+      onClose={() => setSaveOpen(false)}
+    />
+    </>
   );
 }
 
