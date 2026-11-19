@@ -1,10 +1,27 @@
+// app/(account)/pick-place.tsx
+//
+// Set Home or Work, the way Google Maps does it:
+//   1. Find it: search a place or a stage, use where you are now, choose on
+//      the map, or pick one you've saved or searched before.
+//   2. Confirm it on the map: the pin sits on the place and can be nudged
+//      onto the gate (it keeps the place's name while it stays close; moved
+//      further, it takes the street address under it). "Set as Home".
+// Mapbox, like every other map in the app.
 import { MapService } from "@/services/map";
+import { distanceM, formatDistance } from "@/services/exploreSearch";
+import { hereWithoutAsking, type LatLng } from "@/services/here";
 import { useSavedStore } from "@/store/savedStore";
-import { UnifiedLocation } from "@/store/journeyStore";
+import type { UnifiedLocation } from "@/store/journeyStore";
 import { useStopSearch } from "@/hooks/useStopSearch";
-import { Image } from "expo-image";
+import { pinName, placeKey } from "@/utils/savedPlaces";
+import { StopTypeBadge } from "@/components/app/StopTypeBadge";
+import { PressableScale } from "@/components/ui/PressableScale";
+import { Icon, type IconName } from "@/components/icons/Icon";
+import { Camera as MapboxCamera, MapView as MapboxMapView } from "@rnmapbox/maps";
+import * as Haptics from "expo-haptics";
+import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -16,47 +33,60 @@ import {
   View,
   useColorScheme,
 } from "react-native";
-import MapView, { MapPressEvent, PROVIDER_GOOGLE, Region } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Icon } from "@/components/icons/Icon";
-import { StopTypeBadge } from "@/components/app/StopTypeBadge";
 
 const ORANGE = "#FF6F00";
-const BLACK  = "#1C1C1E";
-const GREY   = "#8E8E93";
-
-const DEFAULT_REGION: Region = {
-  latitude:      -1.2921,
-  longitude:      36.8219,
-  latitudeDelta:  0.06,
-  longitudeDelta: 0.06,
-};
+const BLUE = "#2563EB";
+/** Kencom, when nothing better is known. */
+const NAIROBI: LatLng = { lat: -1.2864, lng: 36.8252 };
 
 function makeC(dark: boolean) {
   return {
-    bg:       dark ? "#0F0F0F" : "#FFFFFF",
-    card:     dark ? "#1C1C1E" : "#FFFFFF",
-    text:     dark ? "#FFFFFF" : BLACK,
-    sub:      dark ? GREY      : "#6B7280",
-    hairline: dark ? "#2C2C2E" : "#E5E7EB",
-    input:    dark ? "#1C1C1E" : "#FFFFFF",
-    border:   dark ? "#3A3A3C" : "#E5E7EB",
-    pressed:  dark ? "#2C2C2E" : "#F2F2F7",
+    bg: dark ? "#0F0F10" : "#FFFFFF",
+    card: dark ? "#1C1C1F" : "#FFFFFF",
+    text: dark ? "#F4F4F5" : "#111827",
+    sub: dark ? "#A1A1AA" : "#6B7280",
+    line: dark ? "#232326" : "#EEF0F3",
+    input: dark ? "#232326" : "#F3F4F6",
+    pressed: dark ? "#1C1C1F" : "#F7F7F8",
   };
 }
+type Palette = ReturnType<typeof makeC>;
 
-function mapboxThumb(lng: number, lat: number, w = 600, h = 300): string {
-  const token = process.env.EXPO_PUBLIC_MAPBOX_TOKEN ?? "";
-  return `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/${lng},${lat},15/${w}x${h}@2x?access_token=${token}`;
-}
-
-interface PlacePreview {
-  name:     string;
-  lat:      number;
-  lng:      number;
-  type:     "stop" | "location";
+/** What was picked, before it's confirmed on the map. */
+interface Chosen {
+  name: string;
+  lat: number;
+  lng: number;
+  type: "stop" | "location";
   place_id: string | null;
   category: string | null;
+}
+
+function Row({ C, icon, color, tile, title, sub, right, onPress }: {
+  C: Palette;
+  icon?: IconName;
+  color?: string;
+  tile?: React.ReactNode;
+  title: string;
+  sub?: string | null;
+  right?: string | null;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : "transparent" }]} accessibilityRole="button" accessibilityLabel={title}>
+      {tile ?? (
+        <View style={[s.rowIcon, { backgroundColor: (color ?? C.sub) + "1A" }]}>
+          <Icon name={icon ?? "location"} size={18} color={color ?? C.sub} />
+        </View>
+      )}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[s.rowTitle, { color: C.text }]} numberOfLines={1}>{title}</Text>
+        {sub ? <Text style={[s.rowSub, { color: C.sub }]} numberOfLines={1}>{sub}</Text> : null}
+      </View>
+      {right ? <Text style={[s.rowRight, { color: C.sub }]}>{right}</Text> : null}
+    </Pressable>
+  );
 }
 
 export default function PickPlaceScreen() {
@@ -64,509 +94,390 @@ export default function PickPlaceScreen() {
   const router = useRouter();
   const dark = useColorScheme() === "dark";
   const C = makeC(dark);
+  const { pin: pinParam } = useLocalSearchParams<{ pin: "home" | "work" }>();
+  const pin = pinParam === "work" ? "work" : "home";
+  const label = pin === "work" ? "Work" : "Home";
+  const pinIcon: IconName = pin === "work" ? "business" : "home";
 
-  const { pin } = useLocalSearchParams<{ pin: "home" | "work" }>();
-  const title = pin === "work" ? "Set Work" : "Set Home";
-  const icon  = pin === "work" ? "briefcase-outline" : "home-outline";
+  const { places: saved, addPlace, removePlace } = useSavedStore();
+  const existing = saved.find((p) => p.pin === pin);
 
-  const { places: savedPlaces, addPlace, removePlace } = useSavedStore();
-  const existing = savedPlaces.find((p) => p.pin === pin);
+  const [here, setHere] = useState<LatLng | null>(null);
+  useEffect(() => { hereWithoutAsking().then(setHere); }, []);
 
-  // ── Search mode ────────────────────────────────────────────────────────────
   const [query, setQuery] = useState("");
-  const [saving, setSaving] = useState(false);
-  const { stops, places: placeResults, isSearchingStops, isSearchingPlaces } = useStopSearch(query, null);
-  const loading = isSearchingStops || isSearchingPlaces;
+  const me = useMemo(() => (here ? { latitude: here.lat, longitude: here.lng } : null), [here]);
+  const { recents, stops, places, isSearchingStops, isSearchingPlaces } = useStopSearch(query, me);
+  const searching = isSearchingStops || isSearchingPlaces;
+  const [fetching, setFetching] = useState(false);
 
-  // ── Preview (after search selection) ──────────────────────────────────────
-  const [preview, setPreview] = useState<PlacePreview | null>(null);
-
-  // ── Map picker mode ────────────────────────────────────────────────────────
-  const [mapMode, setMapMode] = useState(false);
-  const [mapRegion, setMapRegion] = useState<Region>(DEFAULT_REGION);
-  const [pinAddress, setPinAddress] = useState<string>("");
+  // ── Confirm on the map ─────────────────────────────────────────────────────
+  const [confirm, setConfirm] = useState<{ chosen: Chosen | null; start: LatLng } | null>(null);
+  const [center, setCenter] = useState<LatLng>(NAIROBI);
+  const [address, setAddress] = useState<string | null>(null);
   const [geocoding, setGeocoding] = useState(false);
-  const geocodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mapRef = useRef<MapView>(null);
+  const [saving, setSaving] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const cameraRef = useRef<MapboxCamera>(null);
+  const geoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!mapMode) return;
-    if (geocodeTimer.current) clearTimeout(geocodeTimer.current);
-    geocodeTimer.current = setTimeout(async () => {
-      setGeocoding(true);
-      const name = await MapService.reverseGeocode(mapRegion.latitude, mapRegion.longitude);
-      setPinAddress(name);
+    if (!confirm) return;
+    if (geoTimer.current) clearTimeout(geoTimer.current);
+    setGeocoding(true);
+    geoTimer.current = setTimeout(async () => {
+      const name = await MapService.reverseGeocode(center.lat, center.lng).catch(() => "");
+      setAddress(name || null);
       setGeocoding(false);
-    }, 600);
-    return () => { if (geocodeTimer.current) clearTimeout(geocodeTimer.current); };
-  }, [mapRegion.latitude, mapRegion.longitude, mapMode]);
+    }, 500);
+    return () => { if (geoTimer.current) clearTimeout(geoTimer.current); };
+  }, [center.lat, center.lng, confirm]);
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  const openConfirm = (chosen: Chosen | null, start: LatLng) => {
+    Haptics.selectionAsync();
+    setAddress(null);
+    setCenter(start);
+    setConfirm({ chosen, start });
+  };
 
-  const save = async (
-    name: string, lat: number, lng: number,
-    type: "stop" | "location", place_id: string | null, category: string | null,
-  ) => {
-    if (saving) return;
+  const chooseStop = (loc: UnifiedLocation) =>
+    openConfirm(
+      { name: loc.name, lat: loc.lat, lng: loc.lng, type: loc._type, place_id: loc.id ?? null, category: loc._type === "stop" ? "Stage" : (loc as any).category ?? null },
+      { lat: loc.lat, lng: loc.lng }
+    );
+
+  const choosePrediction = async (placeId: string, main: string, secondary: string) => {
+    setFetching(true);
+    try {
+      const d = await MapService.getPlaceDetails(placeId);
+      if (!d) throw new Error("no details");
+      openConfirm(
+        { name: d.name || main, lat: d.lat, lng: d.lng, type: "location", place_id: placeId, category: d.category || secondary || null },
+        { lat: d.lat, lng: d.lng }
+      );
+    } catch {
+      Alert.alert("Couldn't open that place", "Check your connection and try again.");
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  const locateMe = async () => {
+    setLocating(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Location is off", "Allow location access to use where you are, or choose on the map.");
+        return;
+      }
+      const p = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      openConfirm(null, { lat: p.coords.latitude, lng: p.coords.longitude });
+    } catch {
+      Alert.alert("Couldn't find you", "Try again outside, or choose on the map.");
+    } finally {
+      setLocating(false);
+    }
+  };
+
+  const chooseOnMap = () =>
+    openConfirm(null, existing ? { lat: existing.lat, lng: existing.lng } : here ?? NAIROBI);
+
+  const save = async () => {
+    if (!confirm || saving) return;
+    const chosen = confirm.chosen;
+    const name = pinName(chosen, center, address);
+    const keepsPlace = chosen && name === chosen.name;
     setSaving(true);
     try {
-      await addPlace({ name, lat, lng, type, place_id, pin, list: null, category, note: null });
+      await addPlace({
+        name,
+        lat: center.lat,
+        lng: center.lng,
+        type: keepsPlace ? chosen.type : "location",
+        place_id: keepsPlace ? chosen.place_id : null,
+        category: keepsPlace ? chosen.category : "Pin on map",
+        pin,
+        list: null,
+        note: null,
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();
     } catch {
-      Alert.alert("Error", "Could not save this place. Please try again.");
+      Alert.alert("Couldn't save it", "Check your connection and try again.");
     } finally {
       setSaving(false);
     }
   };
 
-  const selectStop = (loc: UnifiedLocation) => {
-    setQuery("");
-    setPreview({
-      name:     loc.name,
-      lat:      loc.lat,
-      lng:      loc.lng,
-      type:     loc._type,
-      place_id: loc.id ?? null,
-      category: loc.route_nams ? "Transit stop" : null,
-    });
-  };
-
-  const selectPlace = async (placeId: string, description: string) => {
-    if (saving) return;
-    setSaving(true);
-    try {
-      const details = await MapService.getPlaceDetails(placeId);
-      if (!details) throw new Error("No details");
-      setQuery("");
-      setPreview({
-        name:     details.name || description.split(",")[0],
-        lat:      details.lat,
-        lng:      details.lng,
-        type:     "location",
-        place_id: placeId,
-        category: description,
-      });
-    } catch {
-      Alert.alert("Error", "Could not get place details. Please try again.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const confirmMapPin = () =>
-    save(
-      pinAddress || `${mapRegion.latitude.toFixed(5)}, ${mapRegion.longitude.toFixed(5)}`,
-      mapRegion.latitude, mapRegion.longitude,
-      "location", null, "Pin on map",
-    );
-
-  const handleRemove = () => {
+  const remove = () => {
     if (!existing) return;
-    Alert.alert(
-      `Remove ${pin === "work" ? "Work" : "Home"}`,
-      `Remove "${existing.name}" as your ${pin} address?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Remove", style: "destructive", onPress: async () => {
-            await removePlace(existing.id);
-            router.back();
-          }
-        },
-      ]
-    );
+    Alert.alert(`Remove ${label}?`, `"${existing.name}" will no longer be your ${label.toLowerCase()}.`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Remove", style: "destructive", onPress: async () => { await removePlace(existing.id).catch(() => {}); router.back(); } },
+    ]);
   };
 
-  const showStops  = stops.length > 0;
-  const showPlaces = placeResults.length > 0;
-  const showEmpty  = query.trim().length >= 2 && !loading && !showStops && !showPlaces;
+  // Suggestions while nothing is typed: your saved places, then recent searches.
+  const suggestions = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { key: string; chosen: Chosen; icon: IconName; color: string; sub: string }[] = [];
+    for (const p of saved) {
+      if (p.pin === pin) continue;
+      const k = placeKey(p);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({
+        key: `s${p.id}`,
+        chosen: { name: p.name, lat: p.lat, lng: p.lng, type: p.type, place_id: p.place_id, category: p.category },
+        icon: p.pin === "home" ? "home" : p.pin === "work" ? "business" : p.type === "stop" ? "bus" : "bookmark",
+        color: p.pin ? ORANGE : p.type === "stop" ? BLUE : "#10B981",
+        sub: p.pin ? (p.pin === "home" ? "Home" : "Work") : p.category ?? "Saved",
+      });
+      if (out.length >= 5) break;
+    }
+    for (const r of recents) {
+      const k = placeKey({ place_id: r.id ?? null, lat: r.lat, lng: r.lng });
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({
+        key: `r${r.id}`,
+        chosen: { name: r.name, lat: r.lat, lng: r.lng, type: r._type, place_id: r.id ?? null, category: (r as any).category ?? null },
+        icon: "time",
+        color: "#6B7280",
+        sub: "Recent search",
+      });
+      if (out.length >= 9) break;
+    }
+    return out;
+  }, [saved, recents, pin]);
 
-  // ── Preview screen (after search selection) ────────────────────────────────
-  if (preview) {
+  const dist = (lat: number, lng: number) => (here ? formatDistance(distanceM(here.lat, here.lng, lat, lng)) : null);
+  const typed = query.trim().length >= 2;
+
+  // ── The map step ───────────────────────────────────────────────────────────
+  if (confirm) {
+    const chosen = confirm.chosen;
+    const name = pinName(chosen, center, address);
+    const movedAway = chosen && name !== chosen.name;
+    const sub = chosen && !movedAway ? address ?? chosen.category : null;
     return (
-      <View style={[s.root, { backgroundColor: C.bg, paddingTop: insets.top }]}>
-        {/* Header */}
-        <View style={s.header}>
-          <Pressable onPress={() => setPreview(null)} hitSlop={12} style={[s.backBtn, { backgroundColor: C.card }]}>
-            <Icon name="arrow-back" size={20} color={C.text} />
-          </Pressable>
-          <View style={s.headerCenter}>
-            <Icon name={icon} size={18} color={ORANGE} />
-            <Text style={[s.headerTitle, { color: C.text }]}>{title}</Text>
-          </View>
-          <View style={{ width: 38 }} />
-        </View>
-
-        {/* Mapbox snapshot */}
-        <Image
-          source={{ uri: mapboxThumb(preview.lng, preview.lat) }}
-          style={s.previewThumb}
-          contentFit="cover"
-        />
-
-        {/* Place info card */}
-        <View style={[s.previewCard, { backgroundColor: C.card }]}>
-          <View style={[s.previewIconBox, { backgroundColor: preview.type === "stop" ? "#FFF3E0" : "#EFF6FF" }]}>
-            <Icon
-              name={preview.type === "stop" ? "bus-outline" : "location-outline"}
-              size={20}
-              color={preview.type === "stop" ? ORANGE : "#3B82F6"}
-            />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[s.previewName, { color: C.text }]} numberOfLines={2}>{preview.name}</Text>
-            {preview.category ? (
-              <Text style={[s.previewSub, { color: C.sub }]} numberOfLines={1}>{preview.category}</Text>
-            ) : null}
-          </View>
-        </View>
-
-        {/* Pin label */}
-        <View style={[s.pinLabel, { backgroundColor: C.hairline }]}>
-          <Icon name={icon} size={14} color={GREY} />
-          <Text style={[s.pinLabelText, { color: C.sub }]}>
-            Will be set as your <Text style={{ fontWeight: "700", color: C.text }}>{pin === "work" ? "Work" : "Home"}</Text> location
-          </Text>
-        </View>
-
-        {/* Confirm button */}
-        <View style={[s.previewBottom, { paddingBottom: insets.bottom + 20 }]}>
-          <Pressable
-            style={({ pressed }) => [s.confirmBtn, { opacity: pressed ? 0.88 : 1, backgroundColor: ORANGE }]}
-            onPress={() => save(preview.name, preview.lat, preview.lng, preview.type, preview.place_id, preview.category)}
-            disabled={saving}
-          >
-            {saving
-              ? <ActivityIndicator size="small" color="#FFF" />
-              : <Text style={s.confirmBtnText}>Set as {pin === "work" ? "Work" : "Home"}</Text>
-            }
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [s.cancelBtn, { opacity: pressed ? 0.6 : 1 }]}
-            onPress={() => setPreview(null)}
-          >
-            <Text style={[s.cancelBtnText, { color: C.sub }]}>Choose a different place</Text>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
-
-  // ── Map picker ─────────────────────────────────────────────────────────────
-  if (mapMode) {
-    return (
-      <View style={StyleSheet.absoluteFill}>
-        <MapView
-          ref={mapRef}
-          provider={PROVIDER_GOOGLE}
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: C.bg }]}>
+        <MapboxMapView
           style={StyleSheet.absoluteFill}
-          initialRegion={mapRegion}
-          onRegionChangeComplete={(r) => setMapRegion(r)}
-          showsUserLocation
-          showsMyLocationButton={false}
-        />
+          styleURL={dark ? "mapbox://styles/mapbox/dark-v11" : process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL ?? "mapbox://styles/mapbox/streets-v12"}
+          logoEnabled={false}
+          attributionEnabled={false}
+          scaleBarEnabled={false}
+          compassEnabled={false}
+          pitchEnabled={false}
+          onRegionDidChange={(f: any) => {
+            const [lng, lat] = f?.geometry?.coordinates ?? [];
+            if (Number.isFinite(lat) && Number.isFinite(lng)) setCenter({ lat, lng });
+          }}
+        >
+          <MapboxCamera ref={cameraRef} defaultSettings={{ centerCoordinate: [confirm.start.lng, confirm.start.lat], zoomLevel: 17.5 }} />
+        </MapboxMapView>
 
-        {/* Centered pin */}
+        {/* The pin: the map moves under it. */}
         <View pointerEvents="none" style={s.pinWrap}>
-          <Icon name="location" size={44} color={ORANGE} style={s.pinIcon} />
+          <View style={s.pinHead}>
+            <Icon name={pinIcon} size={18} color="#FFFFFF" />
+          </View>
+          <View style={s.pinStem} />
           <View style={s.pinShadow} />
         </View>
 
-        {/* Top bar */}
-        <View style={[s.mapTopBar, { paddingTop: insets.top + 8 }]}>
-          <Pressable
-            style={[s.mapBtn, { backgroundColor: dark ? "#1C1C1E" : "#FFFFFF" }]}
-            onPress={() => setMapMode(false)}
-          >
+        <View style={[s.mapTop, { paddingTop: insets.top + 8 }]}>
+          <PressableScale onPress={() => setConfirm(null)} style={[s.roundBtn, { backgroundColor: C.card }]} accessibilityRole="button" accessibilityLabel="Back">
             <Icon name="arrow-back" size={20} color={C.text} />
-          </Pressable>
-          <View style={[s.addressPill, { backgroundColor: dark ? "#1C1C1E" : "#FFFFFF" }]}>
-            {geocoding
-              ? <ActivityIndicator size="small" color={ORANGE} />
-              : <Text style={[s.addressText, { color: C.text }]} numberOfLines={1}>{pinAddress || "Move map to choose location"}</Text>
-            }
+          </PressableScale>
+          <View style={[s.mapTitle, { backgroundColor: C.card }]}>
+            <Icon name={pinIcon} size={15} color={ORANGE} />
+            <Text style={[s.mapTitleText, { color: C.text }]}>Set {label}</Text>
           </View>
+          <View style={{ width: 42 }} />
         </View>
 
-        {/* Bottom confirm bar */}
-        <View style={[s.mapBottomBar, { paddingBottom: insets.bottom + 16, backgroundColor: dark ? "#1C1C1E" : "#FFFFFF" }]}>
-          <View style={s.mapConfirmInfo}>
-            <Icon name={icon} size={18} color={ORANGE} />
-            <Text style={[s.mapConfirmLabel, { color: C.sub }]}>
-              Setting as <Text style={{ color: C.text, fontWeight: "700" }}>{pin === "work" ? "Work" : "Home"}</Text>
-            </Text>
+        <View style={[s.sheet, { backgroundColor: C.card, paddingBottom: insets.bottom + 16 }]}>
+          <View style={s.sheetTop}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[s.sheetName, { color: C.text }]} numberOfLines={2}>
+                {geocoding && !chosen ? "Finding the address…" : name}
+              </Text>
+              {sub ? <Text style={[s.sheetSub, { color: C.sub }]} numberOfLines={1}>{sub}</Text> : null}
+            </View>
+            <PressableScale
+              onPress={async () => {
+                const p = await hereWithoutAsking();
+                if (p) cameraRef.current?.setCamera({ centerCoordinate: [p.lng, p.lat], zoomLevel: 17.5, animationDuration: 450 });
+                else locateMe();
+              }}
+              style={[s.roundBtn, { backgroundColor: C.input }]}
+              accessibilityRole="button"
+              accessibilityLabel="Where I am"
+            >
+              <Icon name="locate" size={18} color={BLUE} />
+            </PressableScale>
           </View>
-          <Text style={[s.mapConfirmAddress, { color: C.text }]} numberOfLines={2}>
-            {pinAddress || "Move the map to position the pin"}
+          <Text style={[s.hint, { color: C.sub }]}>
+            {movedAway
+              ? `Moved ${formatDistance(distanceM(chosen!.lat, chosen!.lng, center.lat, center.lng))} from ${chosen!.name}.`
+              : "Move the map to put the pin on your gate or entrance."}
           </Text>
-          <Pressable
-            style={({ pressed }) => [s.confirmBtn, { opacity: pressed ? 0.85 : 1, backgroundColor: ORANGE }]}
-            onPress={confirmMapPin}
-            disabled={saving || geocoding}
-          >
-            {saving
-              ? <ActivityIndicator size="small" color="#FFF" />
-              : <Text style={s.confirmBtnText}>Confirm location</Text>
-            }
-          </Pressable>
+          {movedAway ? (
+            <Pressable
+              onPress={() => cameraRef.current?.setCamera({ centerCoordinate: [chosen!.lng, chosen!.lat], zoomLevel: 17.5, animationDuration: 400 })}
+              hitSlop={6}
+            >
+              <Text style={s.link}>Back to {chosen!.name}</Text>
+            </Pressable>
+          ) : null}
+          <PressableScale onPress={save} disabled={saving || (geocoding && !chosen)} style={[s.cta, { opacity: saving ? 0.7 : 1 }]} accessibilityRole="button">
+            {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={s.ctaText}>Set as {label}</Text>}
+          </PressableScale>
         </View>
       </View>
     );
   }
 
-  // ── Search / default view ──────────────────────────────────────────────────
+  // ── The find step ──────────────────────────────────────────────────────────
   return (
     <View style={[s.root, { backgroundColor: C.bg, paddingTop: insets.top }]}>
-      {/* Header */}
       <View style={s.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={[s.backBtn, { backgroundColor: C.card }]}>
+        <PressableScale onPress={() => router.back()} style={[s.roundBtn, { backgroundColor: C.input }]} accessibilityRole="button" accessibilityLabel="Back">
           <Icon name="arrow-back" size={20} color={C.text} />
-        </Pressable>
-        <View style={s.headerCenter}>
-          <Icon name={icon} size={18} color={ORANGE} />
-          <Text style={[s.headerTitle, { color: C.text }]}>{title}</Text>
+        </PressableScale>
+        <View style={s.headerMid}>
+          <Text style={[s.headerTitle, { color: C.text }]}>Set {label}</Text>
+          {existing ? <Text style={[s.headerSub, { color: C.sub }]} numberOfLines={1}>Now: {existing.name}</Text> : null}
         </View>
-        <View style={{ width: 38 }} />
+        <View style={{ width: 42 }} />
       </View>
 
-      {/* Search input */}
-      <View style={[s.inputWrap, { backgroundColor: C.input, borderColor: C.border }]}>
-        <Icon name="search-outline" size={18} color={C.sub} />
+      <View style={[s.search, { backgroundColor: C.input }]}>
+        <Icon name="search" size={18} color={C.sub} />
         <TextInput
-          style={[s.input, { color: C.text }]}
-          placeholder="Search stops or places…"
-          placeholderTextColor={C.sub}
           value={query}
           onChangeText={setQuery}
+          placeholder={`Search your ${label.toLowerCase()} address or stage`}
+          placeholderTextColor={C.sub}
+          style={[s.searchInput, { color: C.text }]}
           autoFocus
           returnKeyType="search"
         />
-        {loading && <ActivityIndicator size="small" color={ORANGE} />}
-        {!loading && query.length > 0 && (
-          <Pressable onPress={() => setQuery("")} hitSlop={8}>
+        {searching || fetching ? <ActivityIndicator size="small" color={ORANGE} /> : null}
+        {!searching && !fetching && query ? (
+          <Pressable onPress={() => setQuery("")} hitSlop={8} accessibilityLabel="Clear">
             <Icon name="close-circle" size={18} color={C.sub} />
           </Pressable>
-        )}
+        ) : null}
       </View>
 
-      <ScrollView
-        style={{ flex: 1 }}
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-      >
-        {/* Set on map */}
-        <Pressable
-          style={({ pressed }) => [s.row, s.mapRow, { backgroundColor: pressed ? C.pressed : C.card, borderColor: ORANGE + "44" }]}
-          onPress={() => { setQuery(""); setMapMode(true); setPinAddress(""); }}
-        >
-          <View style={[s.rowIcon, { backgroundColor: ORANGE + "18" }]}>
-            <Icon name="map-outline" size={18} color={ORANGE} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[s.rowTitle, { color: ORANGE }]}>Set on map</Text>
-            <Text style={[s.rowSub, { color: C.sub }]}>Drop a pin anywhere on the map</Text>
-          </View>
-          <Icon name="chevron-forward" size={16} color={ORANGE} />
-        </Pressable>
-
-        {/* Remove existing pin row */}
-        {existing && (
-          <Pressable
-            style={({ pressed }) => [s.row, s.removeRow, { backgroundColor: pressed ? C.pressed : C.card }]}
-            onPress={handleRemove}
-          >
-            <View style={[s.rowIcon, { backgroundColor: "#FF3B3018" }]}>
-              <Icon name="trash-outline" size={18} color="#FF3B30" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[s.rowTitle, { color: "#FF3B30" }]}>Remove {pin === "work" ? "Work" : "Home"}</Text>
-              <Text style={[s.rowSub, { color: C.sub }]}>{existing.name}</Text>
-            </View>
-          </Pressable>
-        )}
-
-        {/* Stop results */}
-        {showStops && (
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
+        {!typed ? (
           <>
-            <Text style={[s.section, { color: C.sub }]}>STOPS</Text>
+            <Row C={C} icon="locate" color={BLUE} title="Use where I am now" sub={locating ? "Finding you…" : "Your current location"} onPress={locateMe} />
+            <Row C={C} icon="map" color={ORANGE} title="Choose on the map" sub="Put the pin on it yourself" onPress={chooseOnMap} />
+            {suggestions.length ? <Text style={[s.section, { color: C.sub }]}>SUGGESTIONS</Text> : null}
+            {suggestions.map((x) => (
+              <Row
+                key={x.key}
+                C={C}
+                icon={x.icon}
+                color={x.color}
+                title={x.chosen.name}
+                sub={x.sub}
+                right={dist(x.chosen.lat, x.chosen.lng)}
+                onPress={() => openConfirm(x.chosen, { lat: x.chosen.lat, lng: x.chosen.lng })}
+              />
+            ))}
+          </>
+        ) : (
+          <>
+            {stops.length ? <Text style={[s.section, { color: C.sub }]}>STAGES</Text> : null}
             {stops.map((loc) => (
-              <Pressable
-                key={loc.id}
-                style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : C.card }]}
-                onPress={() => selectStop(loc)}
-                disabled={saving}
-              >
-                <StopTypeBadge stop={loc as any} size={34} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[s.rowTitle, { color: C.text }]} numberOfLines={1}>{loc.name}</Text>
-                  {loc.route_nams ? (
-                    <Text style={[s.rowSub, { color: C.sub }]} numberOfLines={1}>{loc.route_nams}</Text>
-                  ) : null}
-                </View>
-              </Pressable>
+              <Row
+                key={`st${loc.id}`}
+                C={C}
+                tile={<StopTypeBadge stop={loc as any} size={36} />}
+                title={loc.name}
+                sub={loc.route_nams ?? "Stage"}
+                right={dist(loc.lat, loc.lng)}
+                onPress={() => chooseStop(loc)}
+              />
             ))}
+            {places.length ? <Text style={[s.section, { color: C.sub }]}>PLACES</Text> : null}
+            {places.map((p) => (
+              <Row
+                key={`pl${p.place_id}`}
+                C={C}
+                icon="location"
+                color="#EF4444"
+                title={p.main_text}
+                sub={p.secondary_text}
+                onPress={() => choosePrediction(p.place_id, p.main_text, p.secondary_text)}
+              />
+            ))}
+            {!searching && !stops.length && !places.length ? (
+              <View style={s.none}>
+                <Text style={[s.noneText, { color: C.sub }]}>{`Nothing found for "${query.trim()}".`}</Text>
+                <Pressable onPress={chooseOnMap} hitSlop={6}>
+                  <Text style={s.link}>Choose on the map instead</Text>
+                </Pressable>
+              </View>
+            ) : null}
           </>
         )}
 
-        {/* Place results */}
-        {showPlaces && (
-          <>
-            <Text style={[s.section, { color: C.sub }]}>PLACES</Text>
-            {placeResults.map((place) => (
-              <Pressable
-                key={place.place_id}
-                style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : C.card }]}
-                onPress={() => selectPlace(place.place_id, place.description)}
-                disabled={saving}
-              >
-                <View style={[s.rowIcon, { backgroundColor: C.hairline }]}>
-                  <Icon name="location-outline" size={16} color={C.sub} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[s.rowTitle, { color: C.text }]} numberOfLines={1}>{place.main_text}</Text>
-                  <Text style={[s.rowSub, { color: C.sub }]} numberOfLines={1}>{place.secondary_text}</Text>
-                </View>
-              </Pressable>
-            ))}
-          </>
-        )}
-
-        {/* Empty state */}
-        {showEmpty && (
-          <View style={s.empty}>
-            <Icon name="search-outline" size={40} color={C.sub} />
-            <Text style={[s.emptyText, { color: C.sub }]}>No results for "{query}"</Text>
-          </View>
-        )}
-
-        {/* Idle hint */}
-        {query.trim().length < 2 && (
-          <View style={s.empty}>
-            <Icon name={icon} size={44} color={C.sub} />
-            <Text style={[s.emptyText, { color: C.sub }]}>
-              Search for a stop or place, or drop a pin on the map.
-            </Text>
-          </View>
-        )}
+        {existing && !typed ? (
+          <Pressable onPress={remove} style={s.remove} accessibilityRole="button">
+            <Icon name="trash-outline" size={16} color="#DC2626" />
+            <Text style={s.removeText}>Remove {label}</Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
-
-      {/* Saving overlay */}
-      {saving && (
-        <View style={s.savingOverlay}>
-          <ActivityIndicator size="large" color={ORANGE} />
-        </View>
-      )}
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  root:    { flex: 1 },
-  header:  { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12 },
-  backBtn: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
-  headerCenter: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
-  headerTitle: { fontSize: 17, fontWeight: "700" },
+  root: { flex: 1 },
+  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 8 },
+  headerMid: { flex: 1, alignItems: "center" },
+  headerTitle: { fontSize: 17, fontWeight: "800" },
+  headerSub: { fontSize: 12, marginTop: 1, maxWidth: 240 },
+  roundBtn: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center" },
 
-  inputWrap: { flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 14, borderWidth: 1 },
-  input:     { flex: 1, fontSize: 15 },
+  search: { flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 14, marginTop: 4, marginBottom: 6, paddingHorizontal: 14, height: 50, borderRadius: 16 },
+  searchInput: { flex: 1, fontSize: 15.5 },
 
-  section:   { fontSize: 11, fontWeight: "700", letterSpacing: 0.5, marginHorizontal: 16, marginTop: 16, marginBottom: 4 },
-  mapRow:    { marginHorizontal: 16, marginBottom: 10, borderRadius: 14, borderWidth: 1.5 },
-  removeRow: { marginBottom: 8 },
-  row:       { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
-  rowIcon:   { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  rowTitle:  { fontSize: 15, fontWeight: "500" },
-  rowSub:    { fontSize: 12, marginTop: 1 },
+  section: { fontSize: 11, fontWeight: "800", letterSpacing: 0.6, paddingHorizontal: 18, paddingTop: 18, paddingBottom: 4 },
+  row: { flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 18, paddingVertical: 11 },
+  rowIcon: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  rowTitle: { fontSize: 15.5, fontWeight: "600" },
+  rowSub: { fontSize: 12.5, marginTop: 1 },
+  rowRight: { fontSize: 12.5, fontWeight: "600" },
 
-  empty:     { alignItems: "center", paddingTop: 60, gap: 12, paddingHorizontal: 32 },
-  emptyText: { fontSize: 14, textAlign: "center" },
+  none: { alignItems: "center", gap: 8, paddingTop: 30 },
+  noneText: { fontSize: 14 },
+  link: { color: ORANGE, fontSize: 14, fontWeight: "700" },
+  remove: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 22 },
+  removeText: { color: "#DC2626", fontSize: 14.5, fontWeight: "700" },
 
-  savingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.3)", alignItems: "center", justifyContent: "center" },
+  pinWrap: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  pinHead: { width: 40, height: 40, borderRadius: 20, backgroundColor: ORANGE, alignItems: "center", justifyContent: "center", borderWidth: 3, borderColor: "#FFFFFF", marginTop: -58, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 6, elevation: 6 },
+  pinStem: { width: 3, height: 14, backgroundColor: ORANGE, borderRadius: 2 },
+  pinShadow: { width: 12, height: 4, borderRadius: 6, backgroundColor: "rgba(0,0,0,0.28)" },
 
-  // Preview
-  previewThumb: { width: "100%", height: 220 },
-  previewCard: {
-    flexDirection:    "row",
-    alignItems:       "center",
-    gap:              12,
-    marginHorizontal: 16,
-    marginTop:        -20,
-    borderRadius:     16,
-    padding:          14,
-    shadowColor:      "#000",
-    shadowOpacity:    0.10,
-    shadowRadius:     12,
-    shadowOffset:     { width: 0, height: 4 },
-    elevation:        6,
-  },
-  previewIconBox: {
-    width:          44,
-    height:         44,
-    borderRadius:   12,
-    alignItems:     "center",
-    justifyContent: "center",
-    flexShrink:     0,
-  },
-  previewName: { fontSize: 16, fontWeight: "700" },
-  previewSub:  { fontSize: 13, marginTop: 2 },
-  pinLabel: {
-    flexDirection:    "row",
-    alignItems:       "center",
-    gap:              6,
-    marginHorizontal: 16,
-    marginTop:        12,
-    paddingHorizontal: 12,
-    paddingVertical:  8,
-    borderRadius:     10,
-  },
-  pinLabelText: { fontSize: 13 },
-  previewBottom: {
-    position:         "absolute",
-    bottom:           0,
-    left:             0,
-    right:            0,
-    paddingHorizontal: 20,
-    paddingTop:       16,
-    gap:              10,
-  },
-  confirmBtn:     { paddingVertical: 16, borderRadius: 99, alignItems: "center", justifyContent: "center" },
-  confirmBtnText: { color: "#FFF", fontSize: 16, fontWeight: "700" },
-  cancelBtn:      { alignItems: "center", paddingVertical: 4 },
-  cancelBtnText:  { fontSize: 14 },
+  mapTop: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14 },
+  mapTitle: { flexDirection: "row", alignItems: "center", gap: 6, height: 38, paddingHorizontal: 14, borderRadius: 19, shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 8, elevation: 4 },
+  mapTitleText: { fontSize: 14.5, fontWeight: "800" },
 
-  // Map picker
-  pinWrap: {
-    position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
-    alignItems: "center", justifyContent: "center",
-  },
-  pinIcon:   { marginBottom: -8 },
-  pinShadow: { width: 12, height: 4, borderRadius: 6, backgroundColor: "rgba(0,0,0,0.25)" },
-
-  mapTopBar: {
-    position: "absolute", top: 0, left: 0, right: 0,
-    flexDirection: "row", alignItems: "center", gap: 10,
-    paddingHorizontal: 16, paddingBottom: 12,
-  },
-  mapBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: "center", justifyContent: "center",
-    shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 4,
-    flexShrink: 0,
-  },
-  addressPill: {
-    flex: 1, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 14,
-    shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 4,
-    flexDirection: "row", alignItems: "center", gap: 6,
-  },
-  addressText: { fontSize: 14, fontWeight: "500", flex: 1 },
-
-  mapBottomBar: {
-    position: "absolute", bottom: 0, left: 0, right: 0,
-    paddingHorizontal: 20, paddingTop: 20, gap: 6,
-    shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 16, shadowOffset: { width: 0, height: -4 }, elevation: 8,
-    borderTopLeftRadius: 24, borderTopRightRadius: 24,
-  },
-  mapConfirmInfo:    { flexDirection: "row", alignItems: "center", gap: 6 },
-  mapConfirmLabel:   { fontSize: 13 },
-  mapConfirmAddress: { fontSize: 16, fontWeight: "600", marginBottom: 8 },
+  sheet: { position: "absolute", left: 0, right: 0, bottom: 0, borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: 18, paddingTop: 18, gap: 8, shadowColor: "#000", shadowOpacity: 0.14, shadowRadius: 18, shadowOffset: { width: 0, height: -4 }, elevation: 12 },
+  sheetTop: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  sheetName: { fontSize: 19, fontWeight: "800", letterSpacing: -0.3 },
+  sheetSub: { fontSize: 13.5, marginTop: 2 },
+  hint: { fontSize: 13, lineHeight: 18 },
+  cta: { height: 52, borderRadius: 16, backgroundColor: ORANGE, alignItems: "center", justifyContent: "center", marginTop: 6 },
+  ctaText: { color: "#FFFFFF", fontSize: 16, fontWeight: "800" },
 });

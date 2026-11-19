@@ -8,6 +8,8 @@ import { REPORT_TYPES, REPORT_TYPE_ORDER } from "@/components/icons/reportIcons"
 import { ReportTypeIcon } from "@/components/icons/ReportTypeIcon";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { useAuthStore } from "@/store/authStore";
+import { useContributionStore } from "@/store/contributionStore";
+import { showReward } from "@/store/rewardStore";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import React, { useRef, useState } from "react";
@@ -34,15 +36,17 @@ interface Props {
   onClose:  () => void;
   userLat?: number | null;
   userLng?: number | null;
+  /** Picked already (from the Contribute tab's "On the road"). */
+  initialType?: ReportCategory | null;
 }
 
-export default function ReportSheet({ onClose, userLat, userLng }: Props) {
+export default function ReportSheet({ onClose, userLat, userLng, initialType = null }: Props) {
   const dark = useColorScheme() === "dark";
   const router = useRouter();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const sheet = useRef<MapSheetHandle>(null);
 
-  const [selectedCat, setSelectedCat] = useState<ReportCategory | null>(null);
+  const [selectedCat, setSelectedCat] = useState<ReportCategory | null>(initialType);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [showAuthWall, setShowAuthWall] = useState(false);
@@ -67,12 +71,20 @@ export default function ReportSheet({ onClose, userLat, userLng }: Props) {
     }
     setBusy(true);
     try {
-      await ReportService.createReport(userLat!, userLng!, selectedCat);
+      const r = await ReportService.createReport(userLat!, userLng!, selectedCat);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setDone(true);
+      useContributionStore.getState().noteReport(r);
+      if (r.points_awarded > 0 || r.new_badges.length) {
+        showReward({ points: r.points_awarded, badges: r.new_badges, streak: r.streak_days, title: "Alert pinned" });
+      }
       setTimeout(() => sheet.current?.close(), 1500);
-    } catch {
-      Alert.alert("Couldn't submit", "Check your connection and try again.");
+    } catch (e: any) {
+      if (e?.response?.status === 409) {
+        Alert.alert("Already on the map", "The same alert is pinned right here. Tap it on the map to confirm it's still there.");
+      } else {
+        Alert.alert("Couldn't submit", "Check your connection and try again.");
+      }
     } finally {
       setBusy(false);
     }

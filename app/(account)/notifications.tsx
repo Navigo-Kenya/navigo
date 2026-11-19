@@ -69,7 +69,7 @@ const GROUPS: { title: string; rows: { key: Key; icon: IconName; label: string; 
   {
     title: "COMMUNITY",
     rows: [
-      { key: "points_earned", icon: "trophy", label: "Points and contributions", desc: "When a contribution is approved or not, and when people confirm your report." },
+      { key: "points_earned", icon: "trophy", label: "Points and contributions", desc: "When a contribution is approved or not, when people confirm your report, and at 7 p.m. if your streak is about to end." },
     ],
   },
   {

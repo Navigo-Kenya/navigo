@@ -9,6 +9,7 @@ import {
   CreateContributionPayload,
 } from "@/services/contribution";
 import { syncWidgetData } from "@/services/widgetBridge";
+import { cancelStreakReminder } from "@/services/streakReminder";
 
 const STALE_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -22,6 +23,8 @@ interface ContributionStore {
   refresh:        () => Promise<void>;
   reset:          () => void;
   submit:         (payload: CreateContributionPayload) => Promise<{ points_awarded: number; new_badges: string[]; streak_days: number }>;
+  /** A road report sent from the map: its points and streak count here too. */
+  noteReport:     (r: { points_awarded: number; new_badges: string[]; streak_days: number | null }) => void;
   removeContribution: (id: number) => Promise<void>;
 }
 
@@ -71,9 +74,13 @@ export const useContributionStore = create<ContributionStore>()(
                 ...s.stats,
                 points: s.stats.points + result.points_awarded,
                 submissions_count: s.stats.submissions_count + 1,
+                streak_days: result.streak_days ?? s.stats.streak_days,
+                contributed_today: true,
               }
             : null,
         }));
+        // The streak is safe for today: no 7 p.m. reminder.
+        cancelStreakReminder().catch(() => {});
         if (result.new_badges.length > 0) {
           const [badges, stats] = await Promise.all([
             ContributionService.getBadges(),
@@ -84,6 +91,22 @@ export const useContributionStore = create<ContributionStore>()(
         // Sync streak to widget bridge so home-screen widget reflects current streak.
         syncWidgetData({ streakDays: result.streak_days }).catch(() => {});
         return { points_awarded: result.points_awarded, new_badges: result.new_badges, streak_days: result.streak_days };
+      },
+
+      noteReport(r) {
+        set((s) => ({
+          stats: s.stats
+            ? {
+                ...s.stats,
+                points: s.stats.points + (r.points_awarded || 0),
+                streak_days: r.streak_days ?? s.stats.streak_days,
+                contributed_today: r.streak_days != null ? true : s.stats.contributed_today,
+              }
+            : null,
+        }));
+        if (r.streak_days != null) cancelStreakReminder().catch(() => {});
+        // A new badge: the badges (names, art) come from the server.
+        if (r.new_badges.length) get().refresh().catch(() => {});
       },
 
       async removeContribution(id) {

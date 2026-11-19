@@ -1,5 +1,7 @@
 import { ScreenHeader } from "@/components/app/ScreenHeader";
 import { useContributionStore } from "@/store/contributionStore";
+import { showReward } from "@/store/rewardStore";
+import { CONTRIBUTION_POINTS, FIRST_PHOTO_BONUS } from "@/services/contribution";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -84,11 +86,8 @@ export default function AddPhotoScreen() {
           mime_type: mimeType,
         },
       });
-      Alert.alert(
-        "Photo submitted",
-        "Your photo has been submitted for review. You'll earn +5 Safiri Points once it's approved.",
-        [{ text: "Done", onPress: () => router.back() }],
-      );
+      router.back();
+      showReward({ points: 0, title: "Photo sent for review", pendingPoints: CONTRIBUTION_POINTS.stop_photo });
     } catch {
       Alert.alert("Error", "Could not submit your photo. Please try again.");
     } finally {
@@ -161,8 +160,8 @@ export default function AddPhotoScreen() {
 
         <Text style={[s.hint, { color: C.sub }]}>
           Photos help the community navigate stops. High-quality photos of entrances, signage, and
-          waiting areas are most useful. You'll earn +5 Safiri Points when approved (+25 if it's
-          the first photo of this stop).
+          waiting areas are most useful. You&apos;ll earn +{CONTRIBUTION_POINTS.stop_photo} Safiri Points when
+          approved (+{CONTRIBUTION_POINTS.stop_photo + FIRST_PHOTO_BONUS} if it&apos;s the first photo of this stop).
         </Text>
 
         <Pressable

@@ -10,6 +10,38 @@ export type ContributionType =
 
 export type ContributionStatus = "pending" | "auto_approved" | "approved" | "rejected";
 
+/**
+ * Points as the API awards them (ContributionService::POINTS_MAP). The one
+ * place the app reads them from; keep in step with the API.
+ */
+export const CONTRIBUTION_POINTS: Record<ContributionType, number> = {
+  delay_report: 3,
+  stop_review: 10,
+  stop_photo: 5,
+  stop_edit: 15,
+  route_correction: 15,
+  new_stop: 50,
+};
+
+/** Extra for the first approved photo of a stop (ContributionService::approve). */
+export const FIRST_PHOTO_BONUS = 20;
+
+/** Points for a road report by type (ReportService::REPORT_POINTS). */
+export const REPORT_POINTS: Record<string, number> = {
+  accident: 5,
+  flooded_route: 5,
+  security: 4,
+  road_blocked: 4,
+  police_check: 3,
+  breakdown: 3,
+  traffic_jam: 2,
+  stage_queue: 2,
+  fare_hike: 2,
+};
+
+/** Approved at once (points straight away); the rest wait for a moderator. */
+export const AUTO_APPROVED: ContributionType[] = ["delay_report", "stop_review"];
+
 export interface Contribution {
   id: number;
   user_id: number;
@@ -90,6 +122,34 @@ export interface CreateContributionResult {
   streak_days: number;
 }
 
+export interface LeaderboardEntry {
+  id: number;
+  name: string;
+  avatar: string | null;
+  /** Points on this board: this week's, or all of them. */
+  points: number;
+  /** Newer APIs: the person's total and level, on both boards. */
+  total_points?: number;
+  level?: number;
+}
+
+/** Where the signed-in person stands on a board. */
+export interface Standing {
+  rank: number | null;
+  points: number;
+  /** The person just above: the next one to pass. */
+  ahead: { name: string; points: number } | null;
+}
+
+export interface Leaderboard {
+  data: LeaderboardEntry[];
+  period: "all" | "weekly";
+  /** Newer APIs: when the weekly board starts over (Monday 00:00, Nairobi). */
+  resets_at?: string | null;
+  /** Newer APIs, signed in: where you stand. */
+  me?: Standing | null;
+}
+
 export interface CreateContributionPayload {
   type: ContributionType;
   stop_id?: string | null;
@@ -140,9 +200,9 @@ export const ContributionService = {
     });
   },
 
-  async getLeaderboard(period: "all" | "weekly" = "all"): Promise<{ id: number; name: string; avatar: string | null; points: number }[]> {
-    const res = await api.get<{ data: any[]; period: string }>("/community/leaderboard", { params: { period } });
-    return res.data.data;
+  async getLeaderboard(period: "all" | "weekly" = "all"): Promise<Leaderboard> {
+    const res = await api.get<Leaderboard>("/community/leaderboard", { params: { period } });
+    return { ...res.data, data: res.data.data ?? [], period };
   },
 
   async getStopReviews(stopId: string): Promise<StopReview[]> {

@@ -1,17 +1,17 @@
 // components/app/stop/FormSheet.tsx
 //
 // Bottom-sheet form shell for contributions (review, suggest an edit,
-// report): slides up over the map, keyboard-aware, sticky submit button,
-// drag the handle down (or tap outside) to dismiss. Forms stay in a native
-// Modal so text inputs and the keyboard behave on both platforms.
-import React, { useEffect, useRef } from "react";
+// report, a new stop): a plain draggable sheet (hooks/useDraggableSheet:
+// slides up, no spring), keyboard-aware, sticky submit button, drag the
+// handle down (or tap outside) to dismiss. Forms stay in a native Modal so
+// text inputs and the keyboard behave on both platforms.
+import React from "react";
 import {
   ActivityIndicator,
   Animated,
   Dimensions,
   KeyboardAvoidingView,
   Modal,
-  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -24,6 +24,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Icon } from "@/components/icons/Icon";
+import { useDraggableSheet } from "@/hooks/useDraggableSheet";
 
 const SH = Dimensions.get("window").height;
 const ORANGE = "#FF6F00";
@@ -63,51 +64,28 @@ export function FormSheet({
   submitting?: boolean;
   submitDisabled?: boolean;
   onSubmit: () => void;
-  /** Small line above the button ("+10 Navigo Points"). */
+  /** Small line above the button ("+10 Safiri Points"). */
   footerHint?: string;
   children: React.ReactNode;
 }) {
   const dark = useColorScheme() === "dark";
   const C = formColors(dark);
   const insets = useSafeAreaInsets();
-  const y = useRef(new Animated.Value(SH)).current;
-
-  useEffect(() => {
-    if (visible) {
-      y.setValue(SH);
-      Animated.spring(y, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 220 }).start();
-    }
-  }, [visible, y]);
-
-  const close = () =>
-    Animated.timing(y, { toValue: SH, duration: 200, useNativeDriver: true }).start(onClose);
-
-  const pan = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, g) => g.dy > 6 && Math.abs(g.dy) > Math.abs(g.dx),
-      onPanResponderMove: (_, g) => y.setValue(Math.max(0, g.dy)),
-      onPanResponderRelease: (_, g) => {
-        if (g.dy > 120 || g.vy > 1) close();
-        else Animated.spring(y, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 240 }).start();
-      },
-    })
-  ).current;
-
-  const backdrop = y.interpolate({ inputRange: [0, SH], outputRange: [0.45, 0], extrapolate: "clamp" });
+  const { translateY, backdrop, panHandlers, close } = useDraggableSheet(visible, onClose);
 
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={close} statusBarTranslucent>
-      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: "#000", opacity: backdrop }]} />
-      <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel="Close" />
+    <Modal visible={visible} transparent animationType="none" onRequestClose={() => close()} statusBarTranslucent>
+      <Animated.View style={[StyleSheet.absoluteFill, styles.backdrop, { opacity: backdrop }]} />
+      <Pressable style={StyleSheet.absoluteFill} onPress={() => close()} accessibilityLabel="Close" />
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.wrap}
         pointerEvents="box-none"
       >
         <Animated.View
-          style={[styles.sheet, { backgroundColor: C.bg, transform: [{ translateY: y }], maxHeight: SH * 0.9 }]}
+          style={[styles.sheet, { backgroundColor: C.bg, transform: [{ translateY }], maxHeight: SH * 0.9 }]}
         >
-          <View {...pan.panHandlers}>
+          <View {...panHandlers}>
             <View style={styles.handleWrap}>
               <View style={[styles.handle, { backgroundColor: C.line }]} />
             </View>
@@ -126,7 +104,7 @@ export function FormSheet({
                 )}
               </View>
               <PressableScale
-                onPress={close}
+                onPress={() => close()}
                 hitSlop={10}
                 style={[styles.closeBtn, { backgroundColor: C.card }]}
                 accessibilityRole="button"
@@ -177,6 +155,7 @@ export function FormLabel({ children, color }: { children: React.ReactNode; colo
 }
 
 const styles = StyleSheet.create({
+  backdrop: { backgroundColor: "rgba(0,0,0,0.45)" },
   wrap: { flex: 1, justifyContent: "flex-end" },
   sheet: {
     borderTopLeftRadius: 24,

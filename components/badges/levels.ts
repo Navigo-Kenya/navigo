@@ -20,6 +20,13 @@ export const LEVELS: Level[] = [
   { n: 7, name: "Community Elder", from: 4500, color: "#A16207" },
 ];
 
+/** A level colour's deep end, for the hero gradients (badges, Contribute, leaderboard). */
+export function deepen(hex: string): string {
+  const n = parseInt(hex.slice(1), 16);
+  const f = (c: number) => Math.round(c * 0.62);
+  return `#${((1 << 24) | (f((n >> 16) & 255) << 16) | (f((n >> 8) & 255) << 8) | f(n & 255)).toString(16).slice(1)}`;
+}
+
 export function levelFor(points: number): Level {
   return [...LEVELS].reverse().find((l) => points >= l.from) ?? LEVELS[0];
 }

@@ -46,7 +46,7 @@ import { useHeadingTracker }   from "@/hooks/useHeadingTracker";
 import { useHeadingStore }     from "@/store/headingStore";
 import { RouteService }        from "@/services/route";
 import { ReportService }       from "@/services/report";
-import type { ReportVoteResult, TransitReport } from "@/services/report";
+import type { ReportCategory, ReportVoteResult, TransitReport } from "@/services/report";
 import { StopService }         from "@/services/stop";
 import { CacheService, CACHE_KEYS, CACHE_TTL } from "@/services/cache";
 import { UnifiedLocation, useJourneyStore } from "@/store/journeyStore";
@@ -328,6 +328,8 @@ export default function MapScreen() {
 
   const [showSaveWall,    setShowSaveWall]    = useState(false);
   const [reportSheetOpen, setReportSheetOpen] = useState(false);
+  /** A type picked before the sheet opened (the Contribute tab). */
+  const [reportInitialType, setReportInitialType] = useState<ReportCategory | null>(null);
   const [arOpen,          setArOpen]          = useState(false);
   const [layersOpen,      setLayersOpen]      = useState(false);
   const [followMe,   setFollowMe]   = useState(true);
@@ -1240,15 +1242,19 @@ export default function MapScreen() {
     [camera]
   );
 
-  // A stop or a line asked for from outside the map (the Transit tab):
-  // shown as if tapped here.
+  // A stop, a line or the report sheet asked for from outside the map (the
+  // Transit, Saved and Contribute tabs): shown as if tapped here.
   const mapIntent = useMapIntentStore((s) => s.intent);
   useEffect(() => {
     if (!mapIntent) return;
     const i = useMapIntentStore.getState().consume();
     if (!i) return;
     if (i.kind === "stop") handleSelectStop(i.stop);
-    else handleSelectCorridorRoute(i.routeId);
+    else if (i.kind === "line") handleSelectCorridorRoute(i.routeId);
+    else {
+      setReportInitialType(i.type ?? null);
+      setReportSheetOpen(true);
+    }
   }, [mapIntent, handleSelectStop, handleSelectCorridorRoute]);
 
   useEffect(() => {
@@ -1823,9 +1829,10 @@ export default function MapScreen() {
 
       {reportSheetOpen && (
         <ReportSheet
-          onClose={() => setReportSheetOpen(false)}
+          onClose={() => { setReportSheetOpen(false); setReportInitialType(null); }}
           userLat={meLat}
           userLng={meLng}
+          initialType={reportInitialType}
         />
       )}
 

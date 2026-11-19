@@ -34,6 +34,8 @@ interface SavedStore {
   reset:             () => void;
   addPlace:          (data: Omit<SavedPlace, "id" | "created_at">) => Promise<SavedPlace>;
   removePlace:       (id: number) => Promise<void>;
+  /** A place's note ("Gate B, by the bank"); blank clears it. */
+  setNote:           (id: number, note: string) => Promise<void>;
   addJourney:        (data: Omit<SavedJourney, "id" | "created_at">) => Promise<SavedJourney>;
   removeJourney:     (id: number) => Promise<void>;
   addCustomList:     (name: string) => Promise<void>;
@@ -105,6 +107,18 @@ export const useSavedStore = create<SavedStore>()(
           }).catch(() => {});
         }
         return place;
+      },
+
+      async setNote(id, note) {
+        const clean = note.trim().slice(0, 500);
+        const before = get().places.find((p) => p.id === id)?.note ?? null;
+        set((s) => ({ places: s.places.map((p) => (p.id === id ? { ...p, note: clean || null } : p)) }));
+        try {
+          await UserService.setPlaceNote(id, clean);
+        } catch (e) {
+          set((s) => ({ places: s.places.map((p) => (p.id === id ? { ...p, note: before } : p)) }));
+          throw e;
+        }
       },
 
       async removePlace(id) {

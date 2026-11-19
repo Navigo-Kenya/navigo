@@ -9,7 +9,8 @@ import { Alert, Pressable, StyleSheet, Text, TextInput, View, useColorScheme } f
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useContributionStore } from "@/store/contributionStore";
-import type { StopReview } from "@/services/contribution";
+import { CONTRIBUTION_POINTS, type StopReview } from "@/services/contribution";
+import { showReward } from "@/store/rewardStore";
 import { FormLabel, FormSheet, formColors } from "./FormSheet";
 import { Icon } from "@/components/icons/Icon";
 
@@ -89,10 +90,14 @@ export function StopReviewForm({
         title: `Review: ${stop.name}`,
         data: { overall, ...aspects, tags, text: text.trim() || undefined } as any,
       });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onSubmitted();
       onClose();
-      if (res.points_awarded > 0) Alert.alert("Thank you!", `+${res.points_awarded} Navigo Points earned.`);
+      showReward({
+        points: res.points_awarded,
+        badges: res.new_badges,
+        streak: res.streak_days,
+        title: existing ? "Review updated" : "Review posted",
+      });
     } catch {
       Alert.alert("Couldn't send your review", "Please try again.");
     } finally {
@@ -112,7 +117,11 @@ export function StopReviewForm({
       submitting={loading}
       submitDisabled={!ready}
       onSubmit={handleSubmit}
-      footerHint={existing ? "Your review is updated for everyone." : "+10 Navigo Points · visible to other riders"}
+      footerHint={
+        existing
+          ? "Your review is updated for everyone."
+          : `+${CONTRIBUTION_POINTS.stop_review} Safiri Points · visible to other riders`
+      }
     >
       {/* Overall */}
       <View style={[styles.overallCard, { backgroundColor: C.card }]}>
