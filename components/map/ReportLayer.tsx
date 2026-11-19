@@ -9,6 +9,14 @@
 // snapshotted into bitmaps, which is unreliable on the new architecture
 // (pins rendered blank when the icon font wasn't loaded yet) and only fire
 // onSelected once until deselected, so tapping a pin a second time did nothing.
+//
+// Always mounted, with the zoom limit on the layers themselves. Before, the
+// source was removed below zoom 11.5 and whenever the list was empty, then
+// added back: pinching around 11.5, or a fetch answering with nothing for a
+// moment, made every pin blink out and come back (and re-added layers could
+// land above the route). The zoom also came from map state that isn't
+// updated during the camera's own moves, so pins could stay hidden when
+// zoomed in. Mapbox now decides from the real zoom, natively.
 import type { TransitReport } from "@/services/report";
 import { REPORT_TYPES } from "@/components/icons/reportIcons";
 import { Images, ShapeSource, SymbolLayer, CircleLayer } from "@rnmapbox/maps";
@@ -22,7 +30,7 @@ import React, {
   useRef,
 } from "react";
 
-const MIN_ZOOM_VISIBILITY = 11.5;
+export const REPORTS_MIN_ZOOM = 11.5;
 const CLUSTER_COLOR = "#FF6F00";
 
 /** One pin image per type; regenerate the PNGs when reportIcons.ts changes. */
@@ -46,6 +54,9 @@ export interface ReportLayerHandle {
 interface ReportLayerProps {
   reports:   TransitReport[];
   mapRef:    React.RefObject<MapView | null>;
+  /** Hidden without unmounting (the "Live reports" layer switched off). */
+  visible?:  boolean;
+  /** No longer used: the layers apply their zoom limit natively. */
   viewZoom?: number;
   onPress:   (report: TransitReport, count: number) => void;
 }
@@ -56,17 +67,23 @@ const NativeCircleLayer = CircleLayer as unknown as React.ComponentType<any>;
 const NativeImages = Images as unknown as React.ComponentType<any>;
 
 const isCluster = ["has", "point_count"];
+const notCluster = ["!", isCluster];
 
 export const ReportLayer = memo(forwardRef<ReportLayerHandle, ReportLayerProps>(
-  function ReportLayer({ reports, viewZoom = 13, onPress }, ref) {
+  function ReportLayer({ reports, visible = true, onPress }, ref) {
     useImperativeHandle(ref, () => ({ project: () => {} }), []);
     const sourceRef = useRef<any>(null);
 
-    const byId = useMemo(() => {
+    // Taps read the latest list through a ref, so a list update never
+    // re-renders the source just for a new onPress.
+    const byIdRef = useRef(new Map<string, TransitReport>());
+    byIdRef.current = useMemo(() => {
       const m = new Map<string, TransitReport>();
       for (const r of reports) m.set(r.id, r);
       return m;
     }, [reports]);
+    const onPressRef = useRef(onPress);
+    onPressRef.current = onPress;
 
     const shape = useMemo<GeoJSON.FeatureCollection>(() => ({
       type: "FeatureCollection",
@@ -94,8 +111,8 @@ export const ReportLayer = memo(forwardRef<ReportLayerHandle, ReportLayerProps>(
 
       const count = feature.properties?.point_count;
       if (!count) {
-        const report = byId.get(feature.properties?.id);
-        if (report) onPress(report, 1);
+        const report = byIdRef.current.get(feature.properties?.id);
+        if (report) onPressRef.current(report, 1);
         return;
       }
 
@@ -105,14 +122,14 @@ export const ReportLayer = memo(forwardRef<ReportLayerHandle, ReportLayerProps>(
         const newest = [...(leaves?.features ?? [])].sort(
           (a: any, b: any) => (b.properties?.ts ?? 0) - (a.properties?.ts ?? 0)
         )[0];
-        const report = newest && byId.get(newest.properties?.id);
-        if (report) onPress(report, count);
+        const report = newest && byIdRef.current.get(newest.properties?.id);
+        if (report) onPressRef.current(report, count);
       } catch {
         // Leaves unavailable (e.g. the source just updated): ignore the tap.
       }
-    }, [byId, onPress]);
+    }, []);
 
-    if (viewZoom < MIN_ZOOM_VISIBILITY || shape.features.length === 0) return null;
+    const visibility = visible ? "visible" : "none";
 
     return (
       <>
@@ -131,7 +148,9 @@ export const ReportLayer = memo(forwardRef<ReportLayerHandle, ReportLayerProps>(
           <NativeCircleLayer
             id="reports-cluster"
             filter={isCluster}
+            minZoomLevel={REPORTS_MIN_ZOOM}
             style={{
+              visibility,
               circleColor: CLUSTER_COLOR,
               circleRadius: ["step", ["get", "point_count"], 15, 5, 18, 15, 22],
               circleStrokeWidth: 3,
@@ -142,7 +161,9 @@ export const ReportLayer = memo(forwardRef<ReportLayerHandle, ReportLayerProps>(
           <NativeSymbolLayer
             id="reports-cluster-count"
             filter={isCluster}
+            minZoomLevel={REPORTS_MIN_ZOOM}
             style={{
+              visibility,
               textField: ["get", "point_count_abbreviated"],
               textSize: 13,
               textColor: "#FFFFFF",
@@ -152,8 +173,10 @@ export const ReportLayer = memo(forwardRef<ReportLayerHandle, ReportLayerProps>(
           />
           <NativeSymbolLayer
             id="reports-pin"
-            filter={["!", isCluster]}
+            filter={notCluster}
+            minZoomLevel={REPORTS_MIN_ZOOM}
             style={{
+              visibility,
               iconImage: ["get", "icon"],
               iconAnchor: "bottom",
               // The image ends with a ground shadow below the tail; shift it

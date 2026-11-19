@@ -8,7 +8,7 @@ export interface TravelPrefs {
   navHints:      "off" | "concise" | "detailed";
   units:         "km" | "mi";
   navView:       "flat" | "tilted";
-  maxWalkMeters: 500 | 1000 | 1500 | 2000;
+  maxWalkMeters: 500 | 1000 | 1500 | 2000 | 2500 | 3000;
   showFares:     boolean;
   /** Default sort criterion for itinerary alternatives. */
   routeRanking:  "fastest" | "cheapest" | "least_walking" | "fewest_transfers";
@@ -32,10 +32,13 @@ export interface TravelPrefs {
   carRole:       "driver" | "passenger";
   bodaRole:      "driver" | "passenger";
   /**
-   * The map's light while navigating: like the phone (light or dark mode),
-   * the time of day (dawn, day, dusk, night from the sun), or always day.
+   * The map's light, on the map and in navigation: "auto" follows the time
+   * of day where the camera looks (dawn, day, dusk, night, from the sun
+   * there); "day" stays in daylight. The phone's dark mode keeps its dark map.
    */
-  navLight:      "phone" | "time" | "day";
+  mapLight:      "auto" | "day";
+  /** Rain and snow on the map where they're falling (hooks/useMapAmbience). */
+  mapWeather:    boolean;
 }
 
 const DEFAULTS: TravelPrefs = {
@@ -52,7 +55,8 @@ const DEFAULTS: TravelPrefs = {
   nativeFollow:  true,
   carRole:       "driver",
   bodaRole:      "passenger",
-  navLight:      "phone",
+  mapLight:      "auto",
+  mapWeather:    true,
 };
 
 interface PrefsStore {

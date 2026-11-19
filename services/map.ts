@@ -1,4 +1,6 @@
 // services/map.ts
+import { labelForGoogleTypes } from "./placeCategory";
+
 const GOOGLE_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY as string;
 const MAPBOX_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_TOKEN ?? "";
 
@@ -113,9 +115,9 @@ export const MapService = {
             ? Math.round(haversineM(proximityLat, proximityLng, lat, lng))
             : undefined;
 
-        const rawType = (r.types?.[0] ?? "place")
-          .replace(/_/g, " ")
-          .replace(/\b\w/g, (c: string) => c.toUpperCase());
+        // The most specific of Google's types ("Shopping mall"), which also
+        // picks the place's badge on the map (services/placeCategory).
+        const rawType = labelForGoogleTypes(r.types) || "Place";
 
         const photos: string[] = (r.photos ?? [])
           .slice(0, 3)
@@ -157,6 +159,10 @@ export const MapService = {
     reviewCount?: number;
     openNow?: boolean;
     photos?: string[];
+    /** Google's place types, most specific first. */
+    types: string[];
+    /** The label for them ("Restaurant", "Address"): picks the place's badge. */
+    category: string;
   } | null> {
     try {
       const res = await fetch(
@@ -186,6 +192,8 @@ export const MapService = {
           : undefined,
         openNow: r.opening_hours?.open_now,
         photos,
+        types: Array.isArray(r.types) ? r.types : [],
+        category: labelForGoogleTypes(r.types),
       };
     } catch {
       return null;

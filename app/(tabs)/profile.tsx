@@ -73,10 +73,9 @@ function makeC(dark: boolean) {
   };
 }
 
-const NAV_LIGHT_LABEL: Record<string, string> = {
-  phone: "Like my phone",
-  time:  "Time of day",
-  day:   "Always light",
+const MAP_LIGHT_LABEL: Record<string, string> = {
+  auto: "Time of day",
+  day:  "Always day",
 };
 
 const NAV_HINT_LABEL: Record<string, string> = {
@@ -210,13 +209,18 @@ export default function Profile() {
         />
         <View style={[s.sep, { backgroundColor: C.hairline }]} />
         <Row
-          C={C} icon="sunny-outline" label="Map light when navigating"
-          value={NAV_LIGHT_LABEL[prefs.navLight ?? "phone"]}
-          onPress={() => pickPref("navLight", "Map light when navigating", [
-            { label: "Like my phone",   value: "phone" },
-            { label: "Time of day",     value: "time"  },
-            { label: "Always light",    value: "day"   },
+          C={C} icon="sunny-outline" label="Map light"
+          value={MAP_LIGHT_LABEL[prefs.mapLight ?? "auto"]}
+          onPress={() => pickPref("mapLight", "Map light", [
+            { label: "Time of day where you look", value: "auto" },
+            { label: "Always day",                 value: "day"  },
           ])}
+        />
+        <View style={[s.sep, { backgroundColor: C.hairline }]} />
+        <Row
+          C={C} icon="rainy-outline" label="Weather on the map"
+          value={prefs.mapWeather === false ? "Off" : "On"}
+          onPress={() => setPref("mapWeather", prefs.mapWeather === false)}
         />
         <View style={[s.sep, { backgroundColor: C.hairline }]} />
         <Row
