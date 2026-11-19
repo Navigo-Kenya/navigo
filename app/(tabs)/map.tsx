@@ -36,6 +36,10 @@ import BusDetailsSheet           from "@/components/app/BusDetailsSheet";
 import RouteStepsList            from "@/components/app/RouteStepsList";
 import StopDetailsSheet          from "@/components/app/StopDetailsSheet";
 import StopsLayer                from "@/components/app/StopsLayer";
+import { IndoorLayer }           from "@/components/map/IndoorLayer";
+import { IndoorLevelPicker }     from "@/components/map/IndoorLevelPicker";
+import { IndoorFeatureSheet }    from "@/components/map/IndoorFeatureSheet";
+import { useIndoorVenue }        from "@/hooks/useIndoorVenue";
 import ARWalkView                from "@/components/ar/ARWalkView";
 
 import { useNavigation }       from "@/hooks/useNavigation";
@@ -374,6 +378,16 @@ export default function MapScreen() {
   useEffect(() => { navViewRef.current = prefs.navView; }, [prefs.navView]);
 
   const isNavigationMode = navStarted;
+
+  // Indoor maps: the venue on screen once zoomed in (a station's platforms,
+  // halls and doors), its floor picker, and the space tapped.
+  const indoor = useIndoorVenue(viewCenter, viewZoom, !isNavigationMode);
+  const [indoorFeatureId, setIndoorFeatureId] = useState<string | null>(null);
+  const setIndoorLevel = indoor.setLevelId;
+  const pickIndoorLevel = useCallback((levelId: string) => {
+    setIndoorFeatureId(null);
+    setIndoorLevel(levelId);
+  }, [setIndoorLevel]);
 
   // ── NATIVE FOLLOW (#18) ──
   // Puck + camera follow run on the native/UI thread: the engine feeds 1 Hz
@@ -1627,6 +1641,15 @@ export default function MapScreen() {
                </NativeShapeSource>
             )}
 
+            {/* The inside of the venue on screen, under everything else we draw. */}
+            <IndoorLayer
+              venue={indoor.venue}
+              levelId={indoor.levelId}
+              selectedId={indoorFeatureId}
+              dark={mapIsDark}
+              onPress={setIndoorFeatureId}
+            />
+
             {/* Our POIs (Overture + console), below routes, stops and reports. */}
             <PoiLayer
               visible
@@ -1775,6 +1798,16 @@ export default function MapScreen() {
         )
       )}
 
+      {indoor.venue && !isNavigationMode && (
+        <IndoorLevelPicker
+          key={indoor.venue.venue.uuid}
+          venue={indoor.venue}
+          levelId={indoor.levelId}
+          dark={dark}
+          onPick={pickIndoorLevel}
+        />
+      )}
+
       <MapFloatingUI
         onRecenter={handleRecenter}
         onOpenSearch={() => {
@@ -1845,6 +1878,15 @@ export default function MapScreen() {
           clusterCount={selectedReport.count}
           onClose={() => setSelectedReport(null)}
           onVoted={handleReportVoted}
+        />
+      )}
+
+      {indoor.venue && indoorFeatureId && (
+        <IndoorFeatureSheet
+          key={indoorFeatureId}
+          venue={indoor.venue}
+          featureId={indoorFeatureId}
+          onClose={() => setIndoorFeatureId(null)}
         />
       )}
 
