@@ -33,6 +33,13 @@ const ORANGE = "#FF6F00";
 const BLACK = "#111827";
 const WHITE = "#FFFFFF";
 const TAB_BAR_HEIGHT = 62;
+/** The dock's side padding (styles.floatingCapsule). */
+const CAPSULE_PAD = 8;
+/** An inactive tab's slot: never narrower than its icon pill, never wider than needed. */
+const SLOT_MIN = 40;
+const SLOT_MAX = 56;
+/** What the active pill wants for the longest label ("Contribute"): icon, gap, label, padding. */
+const ACTIVE_NEEDS = 124;
 const { height: SCREEN_H } = Dimensions.get("window");
 
 type TabId = "explore" | "transit" | "you" | "contribute" | "profile";
@@ -223,6 +230,14 @@ function CustomFloatingTabBar({
     }).start();
   }, [sheetOpen, slide]);
 
+  // The dock's inner width, measured: the tab widths are worked out from it.
+  const [innerW, setInnerW] = useState(0);
+  const others = TABS.length - 1;
+  const slotW = innerW
+    ? Math.max(SLOT_MIN, Math.min(SLOT_MAX, Math.floor((innerW - ACTIVE_NEEDS) / others)))
+    : 0;
+  const activeW = innerW ? innerW - slotW * others : 0;
+
   // Hide the floating dock when a journey sheet or turn-by-turn nav is active
   if (activeJourney) return null;
 
@@ -250,6 +265,7 @@ function CustomFloatingTabBar({
       ]}
     >
       <View
+        onLayout={(e) => setInnerW(e.nativeEvent.layout.width - CAPSULE_PAD * 2 - 2)}
         style={[
           styles.floatingCapsule,
           { backgroundColor: capsuleBg, borderColor: borderCol },
@@ -257,14 +273,17 @@ function CustomFloatingTabBar({
       >
         {TABS.map((tab) => {
           const isActive = tab.id === activeTab;
-          // The active tab takes the width its label needs and the others
-          // share the rest: with five equal slots, "Contribute" didn't fit
-          // its pill and was cut off.
+          // Widths come from the dock's own width, so the five always fit:
+          // the active tab gets what's left after four icon slots. With the
+          // active tab sized by its label instead, "Contribute" plus four
+          // slots overflowed narrow phones (and large fonts) and pushed
+          // Profile out of the dock.
+          const width = isActive ? activeW : slotW;
           return (
             <Reanimated.View
               key={tab.id}
-              layout={LinearTransition.springify().damping(18).stiffness(220)}
-              style={isActive ? styles.tabItemActive : styles.tabItem}
+              layout={LinearTransition.duration(220)}
+              style={width ? { width, height: "100%" } : isActive ? styles.tabItemActive : styles.tabItem}
             >
             <Pressable
               onPress={() => {
@@ -277,8 +296,8 @@ function CustomFloatingTabBar({
               accessibilityState={{ selected: isActive }}
             >
               <Reanimated.View
-                layout={LinearTransition.springify().damping(18).stiffness(220)}
-                style={[styles.tabPill, isActive && styles.tabPillActive]}
+                layout={LinearTransition.duration(220)}
+                style={[styles.tabPill, isActive ? styles.tabPillActive : styles.tabPillIdle]}
               >
                 <View>
                   <Icon
@@ -305,8 +324,9 @@ function CustomFloatingTabBar({
                   <Text
                     style={styles.tabLabel}
                     numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.85}
+                    // Large system fonts truncate the label instead of
+                    // widening the pill past its slot.
+                    maxFontSizeMultiplier={1.15}
                   >
                     {tab.label}
                   </Text>
@@ -511,15 +531,21 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     overflow: "hidden",
     gap: 5,
+    // Never wider than its slot: a long label truncates instead.
+    maxWidth: "100%",
   },
   tabPillActive: {
     backgroundColor: ORANGE,
+  },
+  tabPillIdle: {
+    paddingHorizontal: 8,
   },
   tabLabel: {
     color: WHITE,
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: -0.1,
+    flexShrink: 1,
   },
   notifDot: {
     position: "absolute",
