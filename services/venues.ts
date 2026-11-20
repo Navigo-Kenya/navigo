@@ -26,6 +26,17 @@ export interface IndoorLevel {
   short_name: string;
   outdoor: boolean;
   height_m: number;
+  /** The floor's outline: its corridor, drawn under the spaces. */
+  outline?: GeoJSON.Polygon | GeoJSON.MultiPolygon | null;
+}
+
+/** How the plan writes a name: | breaks a line; rotate is degrees clockwise on the map. */
+export interface IndoorLabel {
+  text?: string;
+  size?: "s" | "m" | "med" | "l" | "big" | "xl" | "out";
+  rotate?: number;
+  /** Where it sits, [lng, lat]; else the shape's middle. */
+  at?: [number, number];
 }
 
 export interface IndoorFeatureProps {
@@ -37,6 +48,18 @@ export interface IndoorFeatureProps {
   level: string;
   ordinal: number;
   accessible?: boolean;
+  label?: IndoorLabel;
+  /** A big tenant: its name written larger. */
+  anchor?: boolean;
+  /** A point's angle (an escalator's way up), degrees clockwise. */
+  rotate?: number;
+}
+
+/** Who drew the map the venue was traced from: shown with it. */
+export interface IndoorSource {
+  name: string;
+  url?: string | null;
+  captured?: string | null;
 }
 
 export type IndoorFeature = GeoJSON.Feature<GeoJSON.Geometry, IndoorFeatureProps>;
@@ -65,6 +88,7 @@ export interface IndoorVenue {
     display_point: GeoJSON.Point;
     outline: GeoJSON.Polygon | GeoJSON.MultiPolygon | null;
     default_level: string | null;
+    source?: IndoorSource | null;
   };
   levels: IndoorLevel[];
   features: { type: "FeatureCollection"; features: IndoorFeature[] };

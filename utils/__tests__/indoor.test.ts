@@ -1,6 +1,6 @@
 import type { IndoorVenue, VenueInView } from "@/services/venues";
 import {
-  bboxAround, defaultLevel, featureLabel, levelShape, levelsTopDown, metersBetween, occupantsOf, pickVenue, shade,
+  bboxAround, defaultLevel, featureLabel, iconOf, levelShape, levelsTopDown, metersBetween, middleOf, occupantsOf, pickVenue, searchVenue, shade,
 } from "../indoor";
 
 const NBO = { lat: -1.2917, lng: 36.8286 };
@@ -96,11 +96,38 @@ describe("levelShape", () => {
     expect(byId.u1?.color).toBe("#FDECB5");
     expect(byId.o1?.color).toBe("#EA580C");
   });
-  it("writes names on spaces, never a category over every corridor, and says what points are", () => {
+  it("writes names on spaces, never a category over every corridor; points speak with their symbol", () => {
     const byId = Object.fromEntries(levelShape(venue(), "g", false).features.map((f) => [f.properties?.id, f.properties]));
     expect(byId.u1?.label).toBe("Platform 1");
     expect(byId.u2?.label).toBe("");
-    expect(byId.a1?.label).toBe("Tickets");
+    expect(byId.a1?.label).toBe("");
+    expect(byId.a1?.icon).toBe("indoor-ticketing");
+  });
+  it("draws the level's outline first, as its corridor", () => {
+    const v = venue();
+    v.levels[1] = { ...v.levels[1], outline: { type: "Polygon", coordinates: [[[36.827, -1.293], [36.83, -1.293], [36.83, -1.29], [36.827, -1.293]]] } };
+    const fc = levelShape(v, "g", false);
+    expect(fc.features[0].properties).toMatchObject({ kind: "floor", rank: -2 });
+    expect(fc.features[1].properties?.kind).toBe("outline");
+  });
+  it("writes a name the way the plan does: lines, size, angle, and its own place", () => {
+    const v = venue();
+    v.features.features[0].properties = { ...v.features.features[0].properties, anchor: true, label: { text: "PLATFORM|ONE", rotate: -45 } };
+    v.features.features[1].properties = { ...v.features.features[1].properties, name: "Concourse", label: { at: [36.8287, -1.2918], size: "big" } };
+    const fc = levelShape(v, "g", false);
+    const byId = Object.fromEntries(fc.features.map((f) => [f.properties?.id, f.properties]));
+    expect(byId.u1).toMatchObject({ label: "PLATFORM\nONE", labelRotate: -45, px: 12.5 });
+    // Placed labels leave the shape unlabelled and stand at their own point.
+    expect(byId.u2?.label).toBe("");
+    expect(byId["label-u2"]).toMatchObject({ kind: "label", label: "Concourse", px: 15.5, of: "u2" });
+    expect(fc.features.find((f) => f.properties?.id === "label-u2")?.geometry).toEqual({ type: "Point", coordinates: [36.8287, -1.2918] });
+  });
+  it("turns a point by its angle, and gives unknown kinds the plain symbol", () => {
+    const v = venue();
+    v.features.features[3].properties = { ...v.features.features[3].properties, category: "escalator", rotate: -45 };
+    const a1 = levelShape(v, "g", false).features.find((f) => f.properties?.id === "a1")?.properties;
+    expect(a1).toMatchObject({ icon: "indoor-escalator", rotate: -45 });
+    expect(iconOf("teleporter")).toBe("indoor-default");
   });
   it("darkens floors for the night map", () => {
     const night = levelShape(venue(), "g", true).features.find((f) => f.properties?.id === "u1");
@@ -125,5 +152,28 @@ describe("labels and directory", () => {
   });
   it("leaves day colours alone", () => {
     expect(shade("#FDECB5", false)).toBe("#FDECB5");
+  });
+});
+
+describe("finding a shop", () => {
+  it("finds shops in the directory and named spaces, on every floor, best match first", () => {
+    const v = venue();
+    v.occupants.push({ id: "oc3", name: "Rail Café", category: "ticketoffice", unit: "u3" });
+    const hits = searchVenue(v, "rail");
+    expect(hits.map((h) => h.title)).toEqual(["Rail Café", "Kenya Railways tickets"]);
+    expect(hits[0]).toMatchObject({ featureId: "u3", levelId: "l1", sub: "Ticket office · Footbridge" });
+    expect(hits[1]).toMatchObject({ featureId: "u1", levelId: "g" });
+  });
+  it("finds spaces by name and points by what they are", () => {
+    expect(searchVenue(venue(), "platform 1").map((h) => h.featureId)).toEqual(["u1"]);
+    expect(searchVenue(venue(), "tick").map((h) => h.title)).toContain("Tickets");
+  });
+  it("finds nothing for nothing", () => {
+    expect(searchVenue(venue(), "  ")).toEqual([]);
+    expect(searchVenue(venue(), "zzz")).toEqual([]);
+  });
+  it("knows the middle of a shape to fly to", () => {
+    expect(middleOf({ type: "Polygon", coordinates: [[[0, 0], [2, 0], [2, 4], [0, 4], [0, 0]]] })).toEqual([1, 2]);
+    expect(middleOf({ type: "Point", coordinates: [5, 6] })).toEqual([5, 6]);
   });
 });

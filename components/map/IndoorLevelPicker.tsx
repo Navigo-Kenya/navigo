@@ -1,8 +1,8 @@
 // components/map/IndoorLevelPicker.tsx
 //
 // The floor picker of the venue on screen, top floor on top, under the top
-// bar on the left (the right side holds the map's buttons). Shown when the
-// venue has more than one level.
+// bar on the left (the right side holds the map's buttons), with "Find a
+// shop" at its head. A venue on one floor shows just the search.
 import type { IndoorVenue } from "@/services/venues";
 import { levelsTopDown } from "@/utils/indoor";
 import { useTopUiBottom } from "@/components/app/mapSheetInsets";
@@ -18,9 +18,10 @@ interface Props {
   levelId: string | null;
   dark: boolean;
   onPick: (levelId: string) => void;
+  onSearch: () => void;
 }
 
-export function IndoorLevelPicker({ venue, levelId, dark, onPick }: Props) {
+export function IndoorLevelPicker({ venue, levelId, dark, onPick, onSearch }: Props) {
   const top = useTopUiBottom();
   const appear = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -28,7 +29,7 @@ export function IndoorLevelPicker({ venue, levelId, dark, onPick }: Props) {
   }, [appear]);
 
   const levels = levelsTopDown(venue);
-  if (levels.length < 2) return null;
+  const many = levels.length > 1;
 
   const C = {
     bg: dark ? "rgba(24,24,27,0.96)" : "rgba(255,255,255,0.97)",
@@ -50,10 +51,16 @@ export function IndoorLevelPicker({ venue, levelId, dark, onPick }: Props) {
       ]}
     >
       <View style={[s.pill, { backgroundColor: C.bg, borderColor: C.line }]} accessibilityRole="radiogroup" accessibilityLabel={`${venue.venue.name} floors`}>
-        <View style={[s.head, { borderBottomColor: C.line }]}>
-          <Icon name="layers-outline" size={15} color={C.sub} />
-        </View>
-        {levels.map((l) => {
+        <Pressable
+          onPress={() => { Haptics.selectionAsync().catch(() => {}); onSearch(); }}
+          style={[s.head, many && { borderBottomColor: C.line, borderBottomWidth: StyleSheet.hairlineWidth }]}
+          hitSlop={{ left: 8, right: 8, top: 6 }}
+          accessibilityRole="button"
+          accessibilityLabel={`Find a shop in ${venue.venue.name}`}
+        >
+          <Icon name="search" size={17} color={C.text} />
+        </Pressable>
+        {(many ? levels : []).map((l) => {
           const on = l.id === levelId;
           return (
             <Pressable
@@ -93,7 +100,7 @@ const s = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
   },
-  head: { height: 30, alignItems: "center", justifyContent: "center", borderBottomWidth: StyleSheet.hairlineWidth },
+  head: { height: 40, alignItems: "center", justifyContent: "center" },
   level: { height: 42, alignItems: "center", justifyContent: "center", marginHorizontal: 4, marginVertical: 2, borderRadius: 12 },
   levelTxt: { fontSize: 15, fontWeight: "800", letterSpacing: -0.2 },
 });
