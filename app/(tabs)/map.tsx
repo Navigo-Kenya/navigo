@@ -39,6 +39,8 @@ import StopsLayer                from "@/components/app/StopsLayer";
 import { IndoorLayer }           from "@/components/map/IndoorLayer";
 import { IndoorLevelPicker }     from "@/components/map/IndoorLevelPicker";
 import { IndoorFeatureSheet }    from "@/components/map/IndoorFeatureSheet";
+import { IndoorSearchSheet }     from "@/components/map/IndoorSearchSheet";
+import { middleOf, type IndoorHit } from "@/utils/indoor";
 import { useIndoorVenue }        from "@/hooks/useIndoorVenue";
 import ARWalkView                from "@/components/ar/ARWalkView";
 
@@ -383,6 +385,7 @@ export default function MapScreen() {
   // halls and doors), its floor picker, and the space tapped.
   const indoor = useIndoorVenue(viewCenter, viewZoom, !isNavigationMode);
   const [indoorFeatureId, setIndoorFeatureId] = useState<string | null>(null);
+  const [indoorSearchOpen, setIndoorSearchOpen] = useState(false);
   const setIndoorLevel = indoor.setLevelId;
   const pickIndoorLevel = useCallback((levelId: string) => {
     setIndoorFeatureId(null);
@@ -1805,6 +1808,7 @@ export default function MapScreen() {
           levelId={indoor.levelId}
           dark={dark}
           onPick={pickIndoorLevel}
+          onSearch={() => { setIndoorFeatureId(null); setIndoorSearchOpen(true); }}
         />
       )}
 
@@ -1881,7 +1885,22 @@ export default function MapScreen() {
         />
       )}
 
-      {indoor.venue && indoorFeatureId && (
+      {indoor.venue && indoorSearchOpen && (
+        <IndoorSearchSheet
+          venue={indoor.venue}
+          onClose={() => setIndoorSearchOpen(false)}
+          onPick={(hit: IndoorHit) => {
+            // Its floor, selected, in view.
+            setIndoorLevel(hit.levelId);
+            setIndoorFeatureId(hit.featureId);
+            const f = indoor.venue?.features.features.find((x) => x.properties.id === hit.featureId);
+            const at = f ? middleOf(f.geometry) : null;
+            if (at) camera.animateTo({ center: { longitude: at[0], latitude: at[1] }, zoom: Math.max(viewZoom, 19.2), duration: 700 });
+          }}
+        />
+      )}
+
+      {indoor.venue && indoorFeatureId && !indoorSearchOpen && (
         <IndoorFeatureSheet
           key={indoorFeatureId}
           venue={indoor.venue}

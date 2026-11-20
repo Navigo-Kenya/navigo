@@ -112,6 +112,11 @@ export function IndoorFeatureSheet({ venue, featureId, onClose }: Props) {
         {p.kind === "unit" && !occupants.length && !p.accessible ? (
           <Text style={[s.empty, { color: C.sub }]}>Nothing listed here yet.</Text>
         ) : null}
+        {venue.venue.source?.name ? (
+          <Text style={[s.credit, { color: C.sub }]}>
+            Map: {venue.venue.source.name}{venue.venue.source.captured ? ` · checked ${venue.venue.source.captured}` : ""}
+          </Text>
+        ) : null}
       </View>
     </MapSheet>
   );
@@ -137,4 +142,5 @@ const s = StyleSheet.create({
   action: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, maxWidth: "100%" },
   actionTxt: { fontSize: 13, fontWeight: "600", flexShrink: 1 },
   empty: { fontSize: 14 },
+  credit: { fontSize: 12, marginTop: 6 },
 });
