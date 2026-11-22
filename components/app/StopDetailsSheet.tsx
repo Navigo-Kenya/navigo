@@ -50,6 +50,7 @@ import { REVIEW_TAGS, Stars, StopReviewForm } from "./stop/StopReviewForm";
 import { StopEditForm } from "./stop/StopEditForm";
 import { StopReportForm } from "./stop/StopReportForm";
 import { Icon } from "@/components/icons/Icon";
+import { ViewInsideButton } from "@/components/map/ViewInsideButton";
 
 const ORANGE = "#FF6F00";
 const BLUE = "#2563EB";
@@ -130,6 +131,7 @@ export default function StopDetailsSheet({
   onSelectRouteCorridor,
   onClose,
   onGoToStop,
+  onGoInside,
   initialTab = "arrivals",
 }: {
   stop: Stop;
@@ -138,6 +140,8 @@ export default function StopDetailsSheet({
   onSelectRouteCorridor?: (routeId: string) => void;
   onClose: () => void;
   onGoToStop?: () => Promise<void>;
+  /** Fly the map into the station's indoor map (it opens from zoom 16). */
+  onGoInside?: (lat: number, lng: number) => void;
   initialTab?: Tab;
 }): React.JSX.Element {
   const dark = useColorScheme() === "dark";
@@ -444,6 +448,8 @@ export default function StopDetailsSheet({
         <Action icon={savedLists.length ? "bookmark" : "bookmark-outline"} label={savedLists.length ? "Saved" : "Save"} fg={savedLists.length ? ORANGE : C.text} C={C} onPress={openSave} />
         <Action icon="share-outline" label="Share" C={C} onPress={share} />
         <Action icon="alert-circle-outline" label="Report" fg={RED} C={C} onPress={() => openReport()} />
+        <ViewInsideButton lat={Number(stop.lat)} lng={Number(stop.lng)} name={stop.name} chip={C.chip} text={C.text} sub={C.sub}
+          onGoInside={(lat, lng) => (onGoInside ? onGoInside(lat, lng) : sheet.current?.close())} />
         <Action icon="create-outline" label="Edit" fg={BLUE} C={C} onPress={() => setForm("edit")} />
         <Action icon={myReview ? "star" : "star-outline"} label="Review" fg={AMBER} C={C} onPress={() => setForm("review")} />
       </View>

@@ -37,6 +37,7 @@ import { PressableScale } from "@/components/ui/PressableScale";
 import { resolveStopCategory } from "./StopsLayer";
 import { MapSheet, type MapSheetHandle } from "./MapSheet";
 import { Icon } from "@/components/icons/Icon";
+import { ViewInsideButton } from "@/components/map/ViewInsideButton";
 
 const ORANGE = "#FF6F00";
 const BLUE = "#2563EB";
@@ -478,6 +479,8 @@ function PlaceSheet({ place: base, onFocusCoords, userLat, userLng }: Props & { 
             }).catch(() => {})
           }
         />
+        <ViewInsideButton lat={place.lat} lng={place.lng} name={place.name} chip={C.chip} text={C.text} sub={C.text} size={44}
+          onGoInside={(lat, lng) => { onFocusCoords(lat, lng); sheet.current?.snapTo(0); }} />
         <RoundAction
           icon="locate-outline"
           label="Show on map"
