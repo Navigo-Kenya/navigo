@@ -100,6 +100,12 @@ It covers the complete commute loop: search → plan → navigate → contribute
 
 ---
 
+## Design docs
+
+Product and design docs (navigation for every mode, community, venues, Kwame, AR) live in [**navigo-docs**](https://github.com/Navigo-Kenya/navigo-docs), with the roadmap. This README covers the code.
+
+---
+
 ## Design System
 
 ### Icons (`components/icons/`)
