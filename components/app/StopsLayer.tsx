@@ -2,7 +2,7 @@
 import React, { useCallback, useMemo } from "react";
 import { useColorScheme } from "react-native";
 import { ShapeSource, CircleLayer, SymbolLayer, Images } from "@rnmapbox/maps";
-import type { StopCategory } from "@/components/icons/NavigoIcons";
+import { STOP_COLORS, type StopCategory } from "@/components/icons/NavigoIcons";
 
 type Stop = {
   id: string;
@@ -28,7 +28,6 @@ const MAJOR_LABEL_ZOOM = 14.5;
 /** Zoom at which regular stop names appear (they're dense, so later). */
 const BUS_LABEL_ZOOM = 16;
 
-/** Colour per stop type. Shared by the dots and the badges. */
 /** Lighter shades for stop names on the dark map style. */
 const STOP_LABEL_COLORS_DARK: Record<StopCategory, string> = {
   rail: "#4ADE80",
@@ -42,17 +41,8 @@ const STOP_LABEL_COLORS_DARK: Record<StopCategory, string> = {
   bus: "#60A5FA",
 };
 
-export const STOP_COLORS: Record<StopCategory, string> = {
-  rail: "#16A34A",
-  metro: "#7C3AED",
-  brt: "#DC2626",
-  ferry: "#0284C7",
-  tram: "#DB2777",
-  airport: "#334155",
-  cable: "#65A30D",
-  terminal: "#EA580C",
-  bus: "#2563EB",
-};
+/** Colour per stop type, from navigo-icons (the badges are drawn in the same colours). */
+export { STOP_COLORS };
 
 /**
  * Marker badge per stop type: a 30pt circle in the type's colour with a white

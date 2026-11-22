@@ -104,19 +104,20 @@ It covers the complete commute loop: search → plan → navigate → contribute
 
 ### Icons (`components/icons/`)
 
-Navigo uses its **own icon set**, never stock icon fonts in new code.
+Navigo uses its **own icon set**, never stock icon fonts in new code. Every icon comes from [**navigo-icons**](https://github.com/Navigo-Kenya/navigo-icons): the drawings live there, and `npm run app` in that repo writes the files below. **Don't edit them here**; change navigo-icons and run it again.
 
-| File | What |
-|------|------|
-| `glyphs.ts` | The 81 UI icons as plain path data (24-unit grid, rounded 1.9 strokes), shared by the app and the gallery |
-| `Icon.tsx` | `<Icon name="star-outline" size={16} color={...} />`, a drop-in for `<Ionicons>` (same props and names) |
-| `NavigoIcons.tsx` | Map and category glyphs: map layers, report, place categories, stop types (`StopTypeGlyph`), POI categories (`PoiCategoryGlyph`) |
-| `poiCategories.ts` | POI category labels and colours (mirrors the API's `config/pois.php`) |
-| `reportIcons.ts` | Community report icons (pre-rendered PNGs) |
+| File | What | Generated |
+|------|------|-----------|
+| `glyphs.ts` | The 84 interface icons as plain path data (24-unit grid, rounded 1.9 strokes), shared by the app and the gallery | ✓ |
+| `Icon.tsx` | `<Icon name="star-outline" size={16} color={...} />`, a drop-in for `<Ionicons>` (same props and names) | |
+| `NavigoIcons.tsx` | Map and category glyphs: map layers, report, place categories, stop types (`StopTypeGlyph`, `STOP_COLORS`), POI categories (`PoiCategoryGlyph`) | ✓ |
+| `NavigoIcon.tsx` | Wayfinding and venue icons (`<NavigoIcon name="escalator" />`, `iconColor`), English and Swahili names | ✓ |
+| `poiCategories.ts` | POI category labels and colours (mirrors the API's `config/pois.php`) | ✓ |
+| `reportIcons.ts` | Community report types and their "soft clay" icons | ✓ |
 
-Variants: a name ending in `-outline` draws the line style; the plain name draws the filled style, duotone (18% tint) or solid for stars, pins, bookmarks and status circles, with details knocked out in white. A name without a Navigo glyph falls back to Ionicons and warns in development, so add the glyph to `glyphs.ts`.
+Variants: a name ending in `-outline` draws the line style; the plain name draws the filled style, duotone (18% tint) or solid for stars, pins, bookmarks and status circles, with details knocked out in white. A name without a Navigo glyph falls back to Ionicons and warns in development, so add the glyph in navigo-icons (`src/app/ui.mjs`).
 
-Map badges (stop types, POI categories, reports) are pre-rendered PNGs in `assets/images/{stops,pois,reports}/` (@1x/@2x/@3x).
+Map badges are PNGs rendered by navigo-icons too (@1x/@2x/@3x): stop types and POI categories in `assets/images/{stops,pois}/`, report pins in `assets/images/reports/`, venue points in `assets/icons/navigo/badges/`.
 
 **Gallery:** every icon and badge on one page for design review:
 
