@@ -101,7 +101,7 @@ describe("levelShape", () => {
     expect(byId.u1?.label).toBe("Platform 1");
     expect(byId.u2?.label).toBe("");
     expect(byId.a1?.label).toBe("");
-    expect(byId.a1?.icon).toBe("indoor-ticketing");
+    expect(byId.a1?.icon).toBe("navigo-ticketing");
   });
   it("draws the level's outline first, as its corridor", () => {
     const v = venue();
@@ -126,8 +126,9 @@ describe("levelShape", () => {
     const v = venue();
     v.features.features[3].properties = { ...v.features.features[3].properties, category: "escalator", rotate: -45 };
     const a1 = levelShape(v, "g", false).features.find((f) => f.properties?.id === "a1")?.properties;
-    expect(a1).toMatchObject({ icon: "indoor-escalator", rotate: -45 });
-    expect(iconOf("teleporter")).toBe("indoor-default");
+    expect(a1).toMatchObject({ icon: "navigo-escalator", rotate: -45 });
+    expect(iconOf("teleporter")).toBe("navigo-point");
+    expect(iconOf("wheelchairassist")).toBe("navigo-accessible");
   });
   it("darkens floors for the night map", () => {
     const night = levelShape(venue(), "g", true).features.find((f) => f.properties?.id === "u1");
