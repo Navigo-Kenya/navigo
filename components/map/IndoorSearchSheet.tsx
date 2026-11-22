@@ -5,7 +5,8 @@
 // and points (toilets, ATMs). Picking one switches to its floor, selects
 // it and flies there. With nothing typed: the directory, A to Z.
 import type { IndoorVenue } from "@/services/venues";
-import { searchVenue, type IndoorHit } from "@/utils/indoor";
+import { glyphOf, searchVenue, type IndoorHit } from "@/utils/indoor";
+import { NavigoIcon, iconColor } from "@/components/icons/NavigoIcon";
 import { MapSheet, type MapSheetHandle } from "@/components/app/MapSheet";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Icon } from "@/components/icons/Icon";
@@ -91,7 +92,7 @@ export function IndoorSearchSheet({ venue, onPick, onClose }: Props) {
           <Pressable key={`${h.featureId}:${h.title}`} onPress={() => { onPick(h); sheet.current?.close(); }}
             style={({ pressed }) => [s.row, { borderBottomColor: C.line }, pressed && { opacity: 0.6 }]}
             accessibilityRole="button" accessibilityLabel={`${h.title}, ${h.sub}`}>
-            <View style={[s.dot, { backgroundColor: ORANGE }]} />
+            <HitGlyph name={glyphOf(venue, h.featureId)} />
             <View style={{ flex: 1 }}>
               <Text style={[s.rowTitle, { color: C.text }]} numberOfLines={1}>{h.title}</Text>
               {!!h.sub && <Text style={[s.rowSub, { color: C.sub }]} numberOfLines={1}>{h.sub}</Text>}
@@ -114,6 +115,16 @@ export function IndoorSearchSheet({ venue, onPick, onClose }: Props) {
   );
 }
 
+/** What a result is, as its Navigo tile (the map badge's colour), else a plain dot. */
+function HitGlyph({ name }: { name: ReturnType<typeof glyphOf> }) {
+  if (!name) return <View style={[s.dot, { backgroundColor: ORANGE, marginHorizontal: 10 }]} />;
+  return (
+    <View style={[s.tile, { backgroundColor: iconColor(name) }]}>
+      <NavigoIcon name={name} size={17} color="#FFFFFF" />
+    </View>
+  );
+}
+
 const s = StyleSheet.create({
   headerWrap: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 10, gap: 12 },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 12 },
@@ -125,6 +136,7 @@ const s = StyleSheet.create({
   body: { paddingHorizontal: 20, paddingBottom: 32 },
   row: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   dot: { width: 8, height: 8, borderRadius: 4 },
+  tile: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center" },
   rowTitle: { fontSize: 16, fontWeight: "600" },
   rowSub: { fontSize: 13, fontWeight: "500", marginTop: 1 },
   empty: { fontSize: 14, paddingVertical: 16 },

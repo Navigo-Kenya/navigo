@@ -4,12 +4,13 @@
 // over the street map from zoom 16: the floor (the level's outline, its
 // corridor), spaces filled by what they are (platform, hall, shop), their
 // edges, the venue's outline, doors as coloured strokes and points as their
-// symbols (escalator, lift, stairs, WC, ATM...: the console's), with names
+// badges (escalator, lift, stairs, WC, ATM...: navigo-icons), with names
 // from zoom 17 written the way the plan writes them (lines, size, angle).
 //
 // Always mounted, empty when there's nothing to show: a source added later
 // would land above the route, stops and reports.
 import type { IndoorVenue } from "@/services/venues";
+import { NAVIGO_BADGES } from "@/assets/icons/navigo/badges";
 import { INDOOR_KEEP_ZOOM, INDOOR_MIN_ZOOM, levelShape } from "@/utils/indoor";
 import { FillLayer, Images, LineLayer, ShapeSource, SymbolLayer } from "@rnmapbox/maps";
 import React, { memo, useMemo, useRef } from "react";
@@ -19,30 +20,6 @@ const NativeFillLayer = FillLayer as unknown as React.ComponentType<any>;
 const NativeLineLayer = LineLayer as unknown as React.ComponentType<any>;
 const NativeSymbolLayer = SymbolLayer as unknown as React.ComponentType<any>;
 const NativeImages = Images as unknown as React.ComponentType<any>;
-
-/** The points' symbols, drawn by the console (mapIcons.ts) at 3x: the same everywhere. */
-const ICONS = {
-  "indoor-escalator": require("@/assets/images/indoor/indoor-escalator.png"),
-  "indoor-elevator": require("@/assets/images/indoor/indoor-elevator.png"),
-  "indoor-stairs": require("@/assets/images/indoor/indoor-stairs.png"),
-  "indoor-restroom": require("@/assets/images/indoor/indoor-restroom.png"),
-  "indoor-atm": require("@/assets/images/indoor/indoor-atm.png"),
-  "indoor-parking": require("@/assets/images/indoor/indoor-parking.png"),
-  "indoor-rideshare": require("@/assets/images/indoor/indoor-rideshare.png"),
-  "indoor-taxi": require("@/assets/images/indoor/indoor-taxi.png"),
-  "indoor-bus": require("@/assets/images/indoor/indoor-bus.png"),
-  "indoor-information": require("@/assets/images/indoor/indoor-information.png"),
-  "indoor-ticketing": require("@/assets/images/indoor/indoor-ticketing.png"),
-  "indoor-firstaid": require("@/assets/images/indoor/indoor-firstaid.png"),
-  "indoor-security": require("@/assets/images/indoor/indoor-security.png"),
-  "indoor-bench": require("@/assets/images/indoor/indoor-bench.png"),
-  "indoor-drinkingfountain": require("@/assets/images/indoor/indoor-drinkingfountain.png"),
-  "indoor-babychanging": require("@/assets/images/indoor/indoor-babychanging.png"),
-  "indoor-wheelchairassist": require("@/assets/images/indoor/indoor-wheelchairassist.png"),
-  "indoor-wifi": require("@/assets/images/indoor/indoor-wifi.png"),
-  "indoor-exhibit": require("@/assets/images/indoor/indoor-exhibit.png"),
-  "indoor-default": require("@/assets/images/indoor/indoor-default.png"),
-} as const;
 
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
 const RANK: Record<string, number> = { amenity: 3, opening: 2, unit: 1 };
@@ -88,7 +65,7 @@ export const IndoorLayer = memo(function IndoorLayer({ venue, levelId, selectedI
 
   return (
     <>
-      <NativeImages images={ICONS} />
+      <NativeImages images={NAVIGO_BADGES} />
       <NativeShapeSource id="indoor-src" shape={shape} onPress={handlePress} hitbox={{ width: 14, height: 14 }}>
         <NativeFillLayer
           id="indoor-floor"

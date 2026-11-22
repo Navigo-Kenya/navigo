@@ -3,6 +3,8 @@
 // The indoor map's pure parts: which venue the map is looking at, which
 // levels it has (top floor first, as the picker shows them), and the shapes
 // of one level, coloured and labelled for Mapbox.
+import { badgeOf } from "@/assets/icons/navigo/badges";
+import { resolveIcon, type NavigoIconName } from "@/components/icons/NavigoIcon";
 import type { IndoorFeature, IndoorLevel, IndoorVenue, VenueInView } from "@/services/venues";
 
 /** Indoor maps show from here (a street, a station's platforms). */
@@ -101,12 +103,24 @@ export function featureLabel(venue: IndoorVenue, f: Pick<IndoorFeature["properti
 /** A level's corridor, the colour the floor reads in: the outline everything else sits on. */
 const FLOOR = "#F4F1E8";
 
-/** The symbols drawn for points (assets/images/indoor), the same as the console's. */
-export const POINT_ICONS = [
-  "escalator", "elevator", "stairs", "restroom", "atm", "parking", "rideshare", "taxi", "bus", "information", "ticketing",
-  "firstaid", "security", "bench", "drinkingfountain", "babychanging", "wheelchairassist", "wifi", "exhibit",
-] as const;
-export const iconOf = (category: string) => `indoor-${(POINT_ICONS as readonly string[]).includes(category) ? category : "default"}`;
+/** A point's map badge (navigo-icons): its own icon, an alias's, else the generic point. */
+export const iconOf = (category: string): string => badgeOf(category);
+
+/**
+ * The Navigo glyph for a feature, for lists and sheets: a point's or a
+ * space's own icon (toilets, platform, food), a door's way in or out, a
+ * shop for a space with tenants, else null (the caller keeps its own).
+ */
+export function glyphOf(venue: IndoorVenue, featureId: string): NavigoIconName | null {
+  const f = venue.features.features.find((x) => x.properties.id === featureId);
+  if (!f) return null;
+  const p = f.properties;
+  if (p.kind === "opening") return p.category === "emergencyexit" ? "exit" : "entrance";
+  const own = resolveIcon(p.category);
+  if (own !== "point") return own;
+  if (p.kind === "unit") return venue.occupants.some((o) => o.unit === p.id) ? "shop" : null;
+  return "point";
+}
 
 /** Label sizes (the plan's names) in pixels at zoom 19; they grow and shrink with the zoom. */
 export const LABEL_PX: Record<string, number> = { s: 10, m: 11.5, med: 12.5, l: 13.5, big: 15.5, xl: 17.5, out: 11 };

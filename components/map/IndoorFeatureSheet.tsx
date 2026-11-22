@@ -5,7 +5,8 @@
 // (hours, phone, website). Draggable (MapSheet), no backdrop, so the map
 // stays usable.
 import type { IndoorOccupant, IndoorVenue } from "@/services/venues";
-import { AMENITY_COLOR, featureLabel, OPENING_COLORS, occupantsOf, shade } from "@/utils/indoor";
+import { featureLabel, glyphOf, OPENING_COLORS, occupantsOf, shade } from "@/utils/indoor";
+import { NavigoIcon, iconColor } from "@/components/icons/NavigoIcon";
 import { MapSheet, type MapSheetHandle } from "@/components/app/MapSheet";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Icon } from "@/components/icons/Icon";
@@ -75,15 +76,20 @@ export function IndoorFeatureSheet({ venue, featureId, onClose }: Props) {
   const color =
     p.kind === "unit" ? shade(venue.colors[p.category] ?? "#F4F4F5", dark)
       : p.kind === "opening" ? OPENING_COLORS[p.category] ?? OPENING_COLORS.pedestrian
-        : AMENITY_COLOR;
+        : iconColor(p.category);
   const what = featureLabel(venue, { ...p, name: undefined });
+  // Points wear their family's colour, as on the map; a space keeps its own fill.
+  const glyph = glyphOf(venue, p.id);
   const title = featureLabel(venue, p);
 
   const header = (
     <View style={s.headerRow}>
       <View style={[s.swatch, { backgroundColor: color, borderColor: dark ? "#3F3F46" : "#D1D5DB" }]}>
-        <Icon name={p.kind === "opening" ? "enter-outline" : p.kind === "amenity" ? "location-outline" : "business-outline"} size={20}
-          color={p.kind === "unit" ? (dark ? "#E5E7EB" : "#374151") : "#FFFFFF"} />
+        {glyph ? (
+          <NavigoIcon name={glyph} size={21} color={p.kind === "unit" ? (dark ? "#E5E7EB" : "#374151") : "#FFFFFF"} />
+        ) : (
+          <Icon name="business-outline" size={20} color={dark ? "#E5E7EB" : "#374151"} />
+        )}
       </View>
       <View style={s.headerText}>
         <Text style={[s.title, { color: C.text }]} numberOfLines={2}>{title}</Text>
@@ -104,7 +110,7 @@ export function IndoorFeatureSheet({ venue, featureId, onClose }: Props) {
       <View style={s.body}>
         {p.accessible ? (
           <View style={[s.badge, { backgroundColor: dark ? "rgba(22,163,74,0.18)" : "#DCFCE7" }]}>
-            <Icon name="accessibility-outline" size={15} color="#16A34A" />
+            <NavigoIcon name="accessible" size={15} color="#16A34A" accessibilityLabel="Step-free" />
             <Text style={[s.badgeTxt, { color: dark ? "#86EFAC" : "#166534" }]}>Step-free</Text>
           </View>
         ) : null}
