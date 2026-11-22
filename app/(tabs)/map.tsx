@@ -1979,6 +1979,10 @@ export default function MapScreen() {
             setSelected(null);
           }}
           onGoToStop={handleGoToStop}
+          onGoInside={(lat, lng) => {
+            setSelected(null);
+            glideToPlace(lat, lng);
+          }}
         />
       )}
 
