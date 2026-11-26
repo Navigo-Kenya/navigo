@@ -28,7 +28,8 @@
     "production": {
       "distribution": "store",
       "env": {
-        "APP_ENV": "production"
+        "APP_ENV": "production",
+        "SENTRY_ALLOW_FAILURE": "true"
       },
       "autoIncrement": true
     }
